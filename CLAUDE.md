@@ -78,8 +78,8 @@ Some skills have `workflows/` containing modular step-by-step scripts sourced or
 | `magicdoor-backend-specs/` | Download OpenAPI specs, query API schemas, regenerate TypeScript types |
 | `magicdoor-backend-use/` | Direct backend API behavior verification via HTTP calls |
 | `magicdoor-backend-issuer/` | Autonomous backend bug investigation & issue filing |
-| `magicdoor-pr-regression-handoff/` | Create/update PRs with regression test docs for QA handoff |
-| `magicdoor-pr-uat-cases/` | Generate UAT test cases from PR diff |
+| `pr-handoff/` | Create/update PRs with QA handoff (rebase, push, body, UAT comment) |
+| `pr-uat-case-gen/` | Generate UAT test cases from PR diff |
 | `magicdoor-knowledge-docs-structure/` | Standardize `.knowledge/` documentation structure |
 | `resolving-rebase-conflicts/` | Rebase conflict resolution workflows |
 | `rush-monorepo/` | Rush monorepo dependency/build/test workflows |
