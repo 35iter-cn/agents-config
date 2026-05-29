@@ -29,7 +29,6 @@ flowchart TD
 
     ApplyPlan --> Record["Present report to user"]
 
-
     Record --> Verify
     Verify --> Done([Done])
 ```
