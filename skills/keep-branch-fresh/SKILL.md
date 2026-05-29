@@ -41,7 +41,7 @@ flowchart TD
 
 | Step    | Command                                              |
 | ------- | ---------------------------------------------------- |
-| Dry run | `bash $SKILL_ROOT/scripts/dry-run-conflicts.sh $LMB` |
+| Dry run | `bash $SKILL_ROOT/scripts/dry-run-conflicts.sh [LMB] [HEAD]` |
 | Verify  | `bash $SKILL_ROOT/scripts/verify-no-conflicts.sh`    |
 
 ### Conflict Resolution Strategies
