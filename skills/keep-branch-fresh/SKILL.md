@@ -1,6 +1,6 @@
 ---
 name: keep-branch-fresh
-description: Use when rebase, syncing branch, or updating to latest main. Rebase a feature branch onto the latest main branch with safety guarantees.
+description: Use when rebasing, syncing branch, or updating to latest main. Rebase a feature branch onto the latest main branch with safety guarantees.
 ---
 
 # Keep Branch Fresh
@@ -26,7 +26,7 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 - `LMB` — remote main branch ref (default: `origin/master` → `origin/main`)
 - `FEATURE_BRANCH` — branch to rebase (default: current `HEAD`)
 
-### Categorize Conflicts Strategies
+### Conflict Categorization Strategies
 
 | Category                                                           | Strategy                                                                            |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
@@ -36,7 +36,6 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 ## Core Pattern
 
 ```mermaid
-flowchart TD
 flowchart TD
     A([Start]) --> B[Dry-run]
     B --> C{Result?}
