@@ -27,6 +27,36 @@ Auto-detects create vs update from PR state. Prepares PR body, runs pre-push che
 | ------------------ | -------------- |
 | No PR / CLOSED     | Create PR Flow |
 | OPEN               | Update PR Flow |
+
+### Format
+
+PR body from template, in order:
+`.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`
+
+Append: summary + file changes + where-to-test + edge cases.
+
+### Steps
+
+| Action | Detail |
+|---|---|
+| Analyze | Create: `git diff origin/$BASE_BRANCH..HEAD`. Update: full + incremental diff since last push. |
+| Pre-push | Run [checks](#pre-push-checks). Stop on fail. |
+| Push | — |
+| Body | Template → base + summary + file changes + where-to-test + edge cases. Create: new PR. Update: replace entirely. |
+| UAT | Invoke `pr-uat-case-gen`. If case file generated → post/update single `<!-- uat-cases:... -->` comment. See below. |
+| Verify | `gh pr view`. |
+
+### UAT Integration
+
+**REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Frontend repos only.
+
+1. Run `pr-uat-case-gen` → generates `.knowledge/notes/uat-cases.md`.
+2. File exists and non-empty:
+   - Compute `FEATURE_SLUG=$(git branch --show-current | sed 's/.*\///' | sed 's/[A-Z]/\L&/g; s/_/-/g')`.
+   - Search PR for existing `<!-- uat-cases:$FEATURE_SLUG -->` comment.
+   - Found → PATCH. Not found → POST (new comment).
+3. File empty or missing → skip UAT.
+
 ## Pre-push Checks
 
 Probe in order: `rush.json` → `package.json` → `go.mod` → `Cargo.toml` → `pyproject.toml` → `Makefile` → none. Run standard checks per type. `rush.json` → skip all, recommend `rush build`. Failure stops flow.
@@ -51,32 +81,6 @@ flowchart TD
     L --> M[Verify]
     M --> N([Done])
 ```
-
-### Create PR Flow
-
-1. **Analyze**: `git diff origin/$BASE_BRANCH..HEAD`. Generate summary.
-2. **Pre-push**: Run [checks](#pre-push-checks). Stop on fail.
-3. **Push**.
-4. **Body**: Template order → base + summary + file changes + where-to-test + edge cases.
-5. **UAT**: See [UAT Integration](#uat-integration).
-6. **Verify**: `gh pr view`.
-
-### Update PR Flow
-
-1. **Analyze**: Full diff + incremental diff since last push.
-2. **Pre-push**: Run [checks](#pre-push-checks). Stop on fail.
-3. **Push**.
-4. **Body**: Same template + current state. Replace entirely.
-5. **UAT**: See [UAT Integration](#uat-integration). Query existing comment by `<!-- uat-cases:$FEATURE_SLUG -->` marker → PATCH or create. Empty file + old comment → delete.
-6. **Verify**: `gh pr view`.
-
-## UAT Integration
-
-**REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Frontend repos only.
-
-- File `.knowledge/notes/uat-cases.md` non-empty → post PR comment with `FEATURE_SLUG=$(git branch --show-current | sed 's/.*\///' | sed 's/[A-Z]/\L&/g; s/_/-/g')` and `<!-- uat-cases:$FEATURE_SLUG -->` marker.
-- Empty → skip. Missing → warn.
-
 ## Common Mistakes
 
 - Creating PR before pushing → empty body, broken links.
