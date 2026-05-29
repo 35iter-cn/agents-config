@@ -62,3 +62,4 @@ flowchart TD
 | Stale LMB reference     | Rebasing onto outdated main is pointless           | Dry-run script fetches automatically        |
 | Using local main branch | Local main may be behind remote                    | Always use `origin/main` or `origin/master` |
 | Skipping verification   | Silent merge conflicts or build breaks             | Always run verify script                    |
+| `git rebase --continue` hangs | Opens default editor (e.g. vim) in non-interactive terminal, causing hang | Use `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit` |
