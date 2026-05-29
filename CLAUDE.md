@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a personal AI agent configuration repository (`agents-for-myself`). It manages canonical agent instructions and Claude Code skills across multiple AI coding tools.
 
+Skills are organized in two categories:
+- **General skills** (`skills/`): frontend-design, karpathy-guidelines, mermaid-diagrams, productivity
+- **MagicDoor skills** (`skills/magicdoor-skills/`): backend API integration, PR workflows, Rush monorepo, rebase, work summary, etc.
+
 ## Repository Structure
 
 ```
@@ -16,74 +20,132 @@ agents-for-myself/
 │   ├── maintain-instructions-symlinks  # Maintain symlinks from manifest to instructions/<stem>.md
 │   └── instructions-symlinks.paths     # Manifest of managed symlink paths
 ├── skills/                       # Canonical skill tree (single source of truth for Claude Code skills)
-│   ├── README.md
-│   ├── magicdoor-skills/         # MagicDoor-specific skills (submodule or copied tree)
+│   ├── magicdoor-skills/         # MagicDoor-specific skills
 │   ├── mermaid-diagrams/
 │   ├── karpathy-guidelines/
-│   └── frontend-design/
+│   ├── frontend-design/
+│   └── productivity/
+│       ├── grill-me/
+│       └── handoff/
 └── .knowledge/                   # Project knowledge (plans, specs)
     ├── plans/
     └── notes/specs/
 ```
 
+## Skill Structure
+
+Every skill directory follows this layout:
+
+```
+skill-name/
+├── SKILL.md              # Required: frontmatter + markdown body
+├── references/           # Optional: supplementary docs
+├── workflows/            # Optional: step scripts referenced by SKILL.md
+├── cases/                # Optional: test cases
+└── shared/               # Optional: shared references
+```
+
+### SKILL.md Frontmatter
+
+```yaml
+---
+name: kebab-case-name
+description: |
+  When to use this skill. Include specific triggers.
+category: framework|tool|workflow|development
+date_added: "2026-03-21"
+---
+```
+
+Some skills have `workflows/` containing modular step-by-step scripts sourced or referenced from `SKILL.md`.
+
+## Available Skills
+
+### General Skills
+
+| Directory | Purpose |
+|---|---|
+| `frontend-design/` | Build distinctive, production-grade frontend interfaces with high design quality |
+| `karpathy-guidelines/` | Behavioral guidelines to reduce common LLM coding mistakes |
+| `mermaid-diagrams/` | Comprehensive guide for creating software diagrams using Mermaid syntax |
+| `productivity/grill-me/` | Interview the user relentlessly about plans until shared understanding |
+| `productivity/handoff/` | Compact conversation into a handoff document for another agent |
+
+### MagicDoor Skills
+
+| Directory | Purpose |
+|---|---|
+| `magicdoor-backend-specs/` | Download OpenAPI specs, query API schemas, regenerate TypeScript types |
+| `magicdoor-backend-use/` | Direct backend API behavior verification via HTTP calls |
+| `magicdoor-backend-issuer/` | Autonomous backend bug investigation & issue filing |
+| `magicdoor-pr-regression-handoff/` | Create/update PRs with regression test docs for QA handoff |
+| `magicdoor-pr-uat-cases/` | Generate UAT test cases from PR diff |
+| `magicdoor-knowledge-docs-structure/` | Standardize `.knowledge/` documentation structure |
+| `resolving-rebase-conflicts/` | Rebase conflict resolution workflows |
+| `rush-monorepo/` | Rush monorepo dependency/build/test workflows |
+| `working-with-solid-use-case/` | SolidJS use-case architecture (gateway, presenter, AppState) |
+| `work-summary/` | Generate personal work summaries from git commits |
+| `ai-taught-me/` | Read/write AI-taught-me knowledge repository |
+
 ## Key Commands
 
 ### Sync skills to Claude Code
 
-`bin/sync-skills -h`：
-
+```bash
+bin/sync-skills -h
 ```
-Usage: sync-skills [link|unlink] [options]
 
-Commands:
-  link    Create/update symlinks and prune stale managed links (default)
-  unlink  Remove symlinks under target dirs that point into the canonical tree
+Syncs leaf skill directories containing `SKILL.md` into target dirs as flat symlinks.
 
-Options:
-  -s, --source PATH     Canonical skills root (default: ~/agents-for-myself/skills)
-  --no-prune            With link: do not remove stale managed symlinks
-  --dry-run             Print actions only
-  -h, --help            Show this help
+**Environment variables (override defaults):**
 
-Env: SKILLS_CANONICAL_ROOT, SKILLS_SYMLINKS_TARGETS
-```
+| Variable | Meaning |
+|---|---|
+| `SKILLS_CANONICAL_ROOT` | Canonical scan root (same as `-s`) |
+| `SKILLS_SYMLINKS_TARGETS` | Override targets file path |
+
+**Linking rules:** Only leaf directories containing `SKILL.md` are linked; category folders (no `SKILL.md` at that level) expose only their direct children. Duplicate link names exit with code 3. Existing non-symlink entries at a managed name exit with code 4. By default, `link` also removes stale managed symlinks whose names are no longer in the scan (use `--no-prune` to skip). Unrelated names under target directories are never removed.
+
+**Sandbox test (before first production run):**
 
 ```bash
-bin/sync-skills
-bin/sync-skills link
-bin/sync-skills --dry-run
-bin/sync-skills -s /path/to/skills
-bin/sync-skills link --no-prune
-bin/sync-skills unlink
+rm -rf /tmp/skills-sync-test-src /tmp/skills-sync-test-claude
+mkdir -p /tmp/skills-sync-test-src/alpha
+echo '# test' > /tmp/skills-sync-test-src/alpha/SKILL.md
+mkdir -p /tmp/skills-sync-test-src/cat-beta/gamma /tmp/skills-sync-test-src/cat-beta/delta
+echo '# g' > /tmp/skills-sync-test-src/cat-beta/gamma/SKILL.md
+echo '# d' > /tmp/skills-sync-test-src/cat-beta/delta/SKILL.md
+"bin/sync-skills" -s /tmp/skills-sync-test-src --dry-run
+"bin/sync-skills" -s /tmp/skills-sync-test-src
+```
 
-**Behavior:** Only leaf directories containing `SKILL.md` are linked. Category folders (no `SKILL.md`) expose only their direct children. Duplicate link names exit with code 3. Existing non-symlink entries exit with code 4. By default, `link` also removes direct entries under the target that are symlinks into the canonical tree whose names are no longer present in the scan (use `--no-prune` to skip). `unlink` removes symlinks under the target that resolve into the canonical tree; it skips non-symlinks, broken symlinks, and targets outside the canonical tree (with warnings where applicable).
+**Backup `~/.agents/skills` (recommended before first real sync):**
+
+```bash
+mkdir -p backups
+ts="$(date +%Y%m%d-%H%M%S)"
+tar -czf "backups/agents-skills-${ts}.tar.gz" -C "$HOME" .agents/skills
+```
+
+Restore: `tar -xzf backups/agents-skills-*.tar.gz -C "$HOME"`.
 
 ### Maintain instruction symlinks
 
-`bin/maintain-instructions-symlinks -h`：
-
-```
-Usage: maintain-instructions-symlinks [link|unlink] [options]
-Commands:
-  link    Create/update symlinks (default)
-  unlink  Remove symlinks that resolve into this repo
-Options:
-  -r, --repo PATH       Repo root (default: parent of bin/ containing this script)
-  -c, --canonical STEM  Instruction stem without .md (default: default)
-  --dry-run             Print actions only
-  -h, --help            Show this help
-Env:
-  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/bin/instructions-symlinks.paths)
-```
-
 ```bash
-bin/maintain-instructions-symlinks link
-bin/maintain-instructions-symlinks link -c <stem>
-bin/maintain-instructions-symlinks unlink
-bin/maintain-instructions-symlinks --dry-run link
+bin/maintain-instructions-symlinks -h
 ```
+
+Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed in `bin/instructions-symlinks.paths`.
 
 **Safety:** `unlink` only removes symlinks whose target resolves within this repo. Non-symlink files are warned and skipped. Broken symlinks are not removed.
+
+## Key Conventions
+
+- **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
+- **English only:** All SKILL.md content must be written entirely in English
+- **Knowledge docs:** Design specs go in `.knowledge/docs/specs/`
+- **No build system:** This repo is pure Markdown with occasional shell scripts — no package.json, no tests, no CI
+- **Bash scripts:** Use `set -euo pipefail` and follow consistent CLI conventions (short options, `--dry-run`, `--help`)
 
 ## Architecture Decisions
 
@@ -102,7 +164,7 @@ bin/maintain-instructions-symlinks --dry-run link
 
 ### Knowledge Documents
 
-- Plans and specs live under `.knowledge/`, following the user's preferred paths for Superpowers skills:
+- Plans and specs live under `.knowledge/`, following the user's preferred paths:
   - `brainstorming` specs: `.knowledge/docs/specs/`
   - `writing-plans` plans: `.knowledge/notes/plans/`
 
@@ -110,10 +172,3 @@ bin/maintain-instructions-symlinks --dry-run link
 
 - **All responses must be in Chinese.**
 - **Git worktree directory:** `~/.config/worktrees`
-
-## Important Notes
-
-- `skills/magicdoor-skills/` is a **standalone git repository**. Any file changes inside it must be committed and pushed from within that directory, not from the `agents-for-myself` root.
-- This repository has **no build system, tests, or package manager** — it is a configuration and documentation repository.
-- Bash scripts use `set -euo pipefail` and follow consistent CLI conventions (short options, `--dry-run`, `--help`).
-- When modifying `bin/` scripts, maintain consistency with existing scripts' error handling and argument parsing style.
