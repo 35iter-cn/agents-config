@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# Sync leaf skill dirs from canonical tree into configured targets as flat symlinks.
+# Spec: .knowledge/docs/specs/2026-05-14-skills-unlink-design.md
+set -euo pipefail
+
+SKILLS_CANONICAL_ROOT="${SKILLS_CANONICAL_ROOT:-$HOME/agents-for-myself/skills}"
+SKILLS_SYMLINKS_TARGETS="${SKILLS_SYMLINKS_TARGETS:-}"
+DRY_RUN=0
+MODE="link"
+PRUNE=1
+
+warn() {
+  echo "warning: $*" >&2
+}
+
+usage() {
+  cat <<'EOF'
+Usage: sync-skills [link|unlink] [options]
+
+Commands:
+  link    Create/update symlinks and prune stale managed links (default)
+  unlink  Remove symlinks under target dirs that point into the canonical tree
+
+Options:
+  -s, --source PATH     Canonical skills root (default: ~/agents-for-myself/skills)
+  --no-prune            With link: do not remove stale managed symlinks
+  --dry-run             Print actions only
+  -h, --help            Show this help
+
+Env: SKILLS_CANONICAL_ROOT, SKILLS_SYMLINKS_TARGETS
+EOF
+}
+
+if [[ $# -ge 1 && ($1 == link || $1 == unlink) ]]; then
+  MODE="$1"
+  shift
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s|--source)
+      SKILLS_CANONICAL_ROOT="${2:?}"
+      shift 2
+      ;;
+    --no-prune)
+      PRUNE=0
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+abs_root="$(realpath "$SKILLS_CANONICAL_ROOT")"
+
+# Resolve repo root for targets file
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+TARGETS_FILE="${SKILLS_SYMLINKS_TARGETS:-$REPO/bin/skills-symlinks.targets}"
+
+target_under_src() {
+  local T="$1"
+  [[ -n "$T" ]] || return 1
+  [[ "$T" == "$abs_root" || "$T" == "$abs_root"/* ]]
+}
+
+expand_tilde() {
+  local p="$1"
+  if [[ "$p" == "~" ]]; then
+    echo "$HOME"
+  elif [[ "$p" == "~/"* ]]; then
+    echo "${HOME}/${p:2}"
+  else
+    echo "$p"
+  fi
+}
+
+trim_space() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+read_targets() {
+  local line raw
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    line="$(trim_space "$raw")"
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    printf '%s\n' "$(expand_tilde "$line")"
+  done <"$TARGETS_FILE"
+}
+
+do_link() {
+  if [[ ! -d "$abs_root" ]]; then
+    echo "error: canonical root does not exist: $abs_root" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$TARGETS_FILE" ]]; then
+    echo "error: targets file not found: $TARGETS_FILE" >&2
+    exit 5
+  fi
+
+  # Scan canonical root once
+  declare -A name_to_path
+  declare -a ordered_names=()
+
+  register_link() {
+    local name="$1"
+    local target="$2"
+    if [[ -n "${name_to_path[$name]+x}" ]]; then
+      echo "error: duplicate skill link name '$name'" >&2
+      echo "  - ${name_to_path[$name]}" >&2
+      echo "  - $target" >&2
+      exit 3
+    fi
+    name_to_path["$name"]="$target"
+    ordered_names+=("$name")
+  }
+
+  for top in "$abs_root"/*; do
+    [[ -e "$top" ]] || continue
+    base="$(basename "$top")"
+    if [[ -f "$top/SKILL.md" ]]; then
+      register_link "$base" "$top"
+      continue
+    fi
+    if [[ -d "$top" ]]; then
+      for child in "$top"/*; do
+        [[ -e "$child" ]] || continue
+        [[ -d "$child" ]] || continue
+        if [[ -f "$child/SKILL.md" ]]; then
+          register_link "$(basename "$child")" "$child"
+        fi
+      done
+    fi
+  done
+
+  # Install into each target
+  local abs_dst
+  while IFS= read -r abs_dst; do
+    [[ -z "$abs_dst" ]] && continue
+
+    mkdir -p "$abs_dst"
+
+    for name in "${ordered_names[@]}"; do
+      target="${name_to_path[$name]}"
+      link_path="$abs_dst/$name"
+      if [[ -e "$link_path" || -L "$link_path" ]]; then
+        if [[ ! -L "$link_path" ]]; then
+          echo "error: '$link_path' exists and is not a symlink (refusing to replace)" >&2
+          exit 4
+        fi
+      fi
+      if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "dry-run: ln -sfn $(printf '%q' "$target") $(printf '%q' "$link_path")"
+      else
+        ln -sfn "$target" "$link_path"
+      fi
+    done
+
+    if [[ "$PRUNE" -eq 1 ]]; then
+      declare -A current_skill_names
+      for name in "${ordered_names[@]}"; do
+        current_skill_names["$name"]=1
+      done
+
+      for L in "$abs_dst"/*; do
+        [[ -e "$L" || -L "$L" ]] || continue
+        [[ -L "$L" ]] || continue
+        base="$(basename "$L")"
+        T="$(readlink -f "$L" 2>/dev/null || true)"
+        if [[ -z "$T" ]]; then
+          warn "broken symlink, not pruning: $L"
+          continue
+        fi
+        if target_under_src "$T"; then
+          if [[ -z "${current_skill_names[$base]+x}" ]]; then
+            if [[ "$DRY_RUN" -eq 1 ]]; then
+              echo "dry-run: rm -f $(printf '%q' "$L")"
+            else
+              rm -f "$L"
+            fi
+          fi
+        fi
+      done
+    fi
+  done < <(read_targets)
+}
+
+do_unlink() {
+  if [[ ! -f "$TARGETS_FILE" ]]; then
+    echo "error: targets file not found: $TARGETS_FILE" >&2
+    exit 5
+  fi
+
+  local abs_dst
+  while IFS= read -r abs_dst; do
+    [[ -z "$abs_dst" ]] && continue
+    [[ -d "$abs_dst" ]] || continue
+
+    local L T
+    for L in "$abs_dst"/*; do
+      [[ -e "$L" || -L "$L" ]] || continue
+      if [[ -e "$L" && ! -L "$L" ]]; then
+        warn "not a symlink, skipping: $L"
+        continue
+      fi
+      if [[ ! -L "$L" ]]; then
+        continue
+      fi
+      T="$(readlink -f "$L" 2>/dev/null || true)"
+      if [[ -z "$T" ]]; then
+        warn "broken symlink, not removing: $L"
+        continue
+      fi
+      if target_under_src "$T"; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+          echo "dry-run: rm -f $(printf '%q' "$L")"
+        else
+          rm -f "$L"
+        fi
+      fi
+    done
+  done < <(read_targets)
+}
+
+case "$MODE" in
+  link) do_link ;;
+  unlink) do_unlink ;;
+  *)
+    echo "error: internal: bad mode $MODE" >&2
+    exit 2
+    ;;
+esac
+
+exit 0

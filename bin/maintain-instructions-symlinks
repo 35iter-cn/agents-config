@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# Maintain symlinks from manifest to $REPO/instructions/<stem>.md (link / unlink).
+set -euo pipefail
+
+MODE="link"
+REPO_OVERRIDE=""
+STEM="default"
+DRY_RUN=0
+MANIFEST="${INSTRUCTIONS_SYMLINKS_MANIFEST:-}"
+
+usage() {
+  cat <<'EOF'
+Usage: maintain-instructions-symlinks [link|unlink] [options]
+Commands:
+  link    Create/update symlinks (default)
+  unlink  Remove symlinks that resolve into this repo
+Options:
+  -r, --repo PATH       Repo root (default: parent of bin/ containing this script)
+  -c, --canonical STEM  Instruction stem without .md (default: default)
+  --dry-run             Print actions only
+  -h, --help            Show this help
+Env:
+  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/bin/instructions-symlinks.paths)
+EOF
+}
+
+error() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "warning: $*" >&2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    link)
+      MODE="link"
+      shift
+      ;;
+    unlink)
+      MODE="unlink"
+      shift
+      ;;
+    -r|--repo)
+      REPO_OVERRIDE="${2:?}"
+      shift 2
+      ;;
+    -c|--canonical)
+      STEM="${2:?}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      error "unknown option or argument: $1"
+      ;;
+  esac
+done
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+if [[ -n "$REPO_OVERRIDE" ]]; then
+  REPO="$(cd "$REPO_OVERRIDE" && pwd)"
+else
+  REPO="$(cd "$SCRIPT_DIR/.." && pwd)" || error "failed to resolve repo root from script location"
+fi
+
+[[ -n "$REPO" ]] || error "empty REPO"
+
+if [[ -z "$MANIFEST" ]]; then
+  MANIFEST="$REPO/bin/instructions-symlinks.paths"
+fi
+
+[[ -f "$MANIFEST" ]] || error "manifest not found: $MANIFEST"
+
+validate_stem() {
+  local s="$1"
+  [[ -n "$s" ]] || error "canonical stem must be non-empty"
+  [[ "$s" != */* ]] || error "invalid canonical stem (must not contain '/'): $s"
+  [[ "$s" != .* ]] || error "invalid canonical stem (must not start with '.'): $s"
+}
+
+validate_stem "$STEM"
+
+REPO_ABS="$(cd "$REPO" && pwd)"
+CANON="$REPO_ABS/instructions/${STEM}.md"
+
+expand_tilde() {
+  local p="$1"
+  if [[ "$p" == "~" ]]; then
+    echo "$HOME"
+  elif [[ "$p" == "~/"* ]]; then
+    echo "${HOME}/${p:2}"
+  else
+    echo "$p"
+  fi
+}
+
+trim_space() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+read_manifest_paths() {
+  local line raw
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    line="$(trim_space "$raw")"
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    printf '%s\n' "$(expand_tilde "$line")"
+  done <"$MANIFEST"
+}
+
+do_link() {
+  [[ -f "$CANON" ]] || error "canonical instruction file missing: $CANON"
+
+  local L parent
+  while IFS= read -r L; do
+    [[ -z "$L" ]] && continue
+    parent="$(dirname "$L")"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "dry-run: mkdir -p $(printf '%q' "$parent")"
+      echo "dry-run: ln -sf $(printf '%q' "$CANON") $(printf '%q' "$L")"
+    else
+      mkdir -p "$parent"
+      ln -sf "$CANON" "$L"
+    fi
+  done < <(read_manifest_paths)
+}
+
+do_unlink() {
+  local L T
+  while IFS= read -r L; do
+    [[ -z "$L" ]] && continue
+
+    if [[ ! -e "$L" && ! -L "$L" ]]; then
+      continue
+    fi
+
+    if [[ -e "$L" && ! -L "$L" ]]; then
+      warn "not a symlink, skipping: $L"
+      continue
+    fi
+
+    if [[ -L "$L" ]]; then
+      T="$(readlink -f "$L" 2>/dev/null || true)"
+      if [[ -z "$T" ]]; then
+        warn "broken symlink, not removing: $L"
+        continue
+      fi
+      if [[ "$T" == "$REPO_ABS" || "$T" == "$REPO_ABS"/* ]]; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+          echo "dry-run: rm -f $(printf '%q' "$L")"
+        else
+          rm -f "$L"
+        fi
+      fi
+    fi
+  done < <(read_manifest_paths)
+}
+
+case "$MODE" in
+  link) do_link ;;
+  unlink) do_unlink ;;
+  *) error "internal: bad mode $MODE" ;;
+esac
+
+exit 0
