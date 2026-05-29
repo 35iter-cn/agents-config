@@ -31,7 +31,7 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 | Category                                                           | Strategy                                                                            |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                             |
-| **Source code & docs**                                             | Analyze diff chronology and semantics. Prefer LMB features; apply refactors on top. |
+| **Source code & docs**                                             | Preserve each feature commit's intent by transplanting it onto LMB's refactored structure; read the commit message to determine intent, and only defer to the user when preservation is infeasible. |
 
 ## Core Pattern
 
@@ -42,8 +42,9 @@ flowchart TD
     C -->|Clean| D[Rebase onto LMB]
     C -->|Conflicts| E[Categorize conflicts]
     E --> F[Present resolution plan]
-    F --> G[Rebase + resolve conflicts with approved plan]
-    G --> D
+    F --> F1[Ask user to confirm]
+    F1 -->|Confirmed| D
+    F1 -->|Rejected| K
     D --> H[Verify]
     H --> I[git push --force-with-lease]
     I --> J[Report result]
