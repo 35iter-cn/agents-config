@@ -37,14 +37,14 @@ Append: summary + file changes + where-to-test + edge cases.
 
 ### Steps
 
-| Action | Detail |
-|---|---|
-| Analyze | Create: `git diff origin/$BASE_BRANCH..HEAD`. Update: full + incremental diff since last push. |
-| Pre-push | Run [checks](#pre-push-checks). Stop on fail. |
-| Push | — |
-| Body | Template → base + summary + file changes + where-to-test + edge cases. Create: new PR. Update: replace entirely. |
-| UAT | Invoke `pr-uat-case-gen`. If case file generated → post/update single `<!-- uat-cases:... -->` comment. See below. |
-| Verify | `gh pr view`. |
+| Action   | Detail                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------ |
+| Analyze  | Create: `git diff origin/$BASE_BRANCH..HEAD`. Update: full + incremental diff since last push.                     |
+| Pre-push | Run [checks](#pre-push-checks). Stop on fail.                                                                      |
+| Push     | `git push`.                                                                                                        |
+| Body     | Template → base + summary + file changes + where-to-test + edge cases. Create: new PR. Update: replace entirely.   |
+| UAT      | Invoke `pr-uat-case-gen`. If case file generated → post/update single `<!-- uat-cases:... -->` comment. See [UAT](#uat-integration). |
+| Verify   | `gh pr view`.                                                                                                      |
 
 ### UAT Integration
 
@@ -57,7 +57,7 @@ Append: summary + file changes + where-to-test + edge cases.
    - Found → PATCH. Not found → POST (new comment).
 3. File empty or missing → skip UAT.
 
-## Pre-push Checks
+### Pre-push Checks
 
 Probe in order: `rush.json` → `package.json` → `go.mod` → `Cargo.toml` → `pyproject.toml` → `Makefile` → none. Run standard checks per type. `rush.json` → skip all, recommend `rush build`. Failure stops flow.
 
@@ -81,6 +81,7 @@ flowchart TD
     L --> M[Verify]
     M --> N([Done])
 ```
+
 ## Common Mistakes
 
 - Creating PR before pushing → empty body, broken links.
