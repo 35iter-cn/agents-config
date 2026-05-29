@@ -3,8 +3,6 @@ name: keep-branch-fresh
 description: Use when rebasing, syncing branch, or updating to latest main. Rebase a feature branch onto the latest main branch with safety guarantees.
 ---
 
-# Keep Branch Fresh
-
 ## Overview
 
 Safely rebase a feature branch onto the latest main branch (LMB).
@@ -28,9 +26,9 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 
 ### Conflict Categorization Strategies
 
-| Category                                                           | Strategy                                                                            |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                             |
+| Category                                                           | Strategy                                                                                                                                                                                            |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                                                                                                                                             |
 | **Source code & docs**                                             | Preserve each feature commit's intent by transplanting it onto LMB's refactored structure; read the commit message to determine intent, and only defer to the user when preservation is infeasible. |
 
 ## Core Pattern
@@ -53,13 +51,13 @@ flowchart TD
 
 ## Common Mistakes
 
-| Mistake                 | Why It Fails                                       | Fix                                         |
-| ----------------------- | -------------------------------------------------- | ------------------------------------------- |
-| Rebase before dry-run   | Unexpected conflicts waste time and risk data loss | Always dry-run first                        |
-| "Conflicts are small"   | Small conflicts hide semantic issues               | Dry-run catches surprises                   |
-| "I know the conflicts"  | Overconfidence leads to missed edge cases          | Trust the process, not memory               |
-| Hand-editing lockfiles  | Introduces inconsistent dependency states          | Always delete and regenerate                |
-| Stale LMB reference     | Rebasing onto outdated main is pointless           | Dry-run script fetches automatically        |
-| Using local main branch | Local main may be behind remote                    | Always use `origin/main` or `origin/master` |
-| Skipping verification   | Silent merge conflicts or build breaks             | Always run verify script                    |
+| Mistake                       | Why It Fails                                                              | Fix                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Rebase before dry-run         | Unexpected conflicts waste time and risk data loss                        | Always dry-run first                                                             |
+| "Conflicts are small"         | Small conflicts hide semantic issues                                      | Dry-run catches surprises                                                        |
+| "I know the conflicts"        | Overconfidence leads to missed edge cases                                 | Trust the process, not memory                                                    |
+| Hand-editing lockfiles        | Introduces inconsistent dependency states                                 | Always delete and regenerate                                                     |
+| Stale LMB reference           | Rebasing onto outdated main is pointless                                  | Dry-run script fetches automatically                                             |
+| Using local main branch       | Local main may be behind remote                                           | Always use `origin/main` or `origin/master`                                      |
+| Skipping verification         | Silent merge conflicts or build breaks                                    | Always run verify script                                                         |
 | `git rebase --continue` hangs | Opens default editor (e.g. vim) in non-interactive terminal, causing hang | Use `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit` |
