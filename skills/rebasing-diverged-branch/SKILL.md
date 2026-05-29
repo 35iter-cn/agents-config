@@ -1,49 +1,77 @@
 ---
 name: rebasing-diverged-branch
-description: Use when rebasing a diverged feature branch onto main, encountering or anticipating merge conflicts from overlapping changes, lockfiles, or workflow modifications.
+description: Use when rebasing onto LMB (e.g. origin/master), syncing origin.
 ---
 
 # Rebase Diverged Branch
 
-Dry-run → plan → rebase → verify. Never rebase without dry-run.
+- **Core principle:** Simulate in an isolated worktree first. LMB = Latest Main Branch (e.g. `origin/master`). Never rebase without dry-run.
+- **When to use:** branch diverged from LMB, conflicts expected, overlapping files.
 
-## When to Use
+## Rebase flow
 
-- Branch diverged from main, rebase needed before merge
-- `git rebase` expected to produce conflicts
-**Not for:** No conflicts expected, or user wants merge.
+```mermaid
+flowchart TD
+    Start([Start]) --> Fetch[fetch $LMB]
+    Fetch --> DryRun[./scripts/dry-run-conflicts.sh $LMB]
+    DryRun --> Check{dry-run result?}
 
-## Quick Reference
+    Check -->|clean| Rebase[rebase $LMB]
+    Check -->|conflicts| Categorize["Flow Conflict resolution section"]
+    Categorize --> Present[Present plan<br/>Await approval]
+    Present --> Rebase
 
-1. **Fetch + dry-run**: `git fetch origin` → `./scripts/dry-run-conflicts.sh [LMB]`
-2. **Analyze**: categorize each conflicted file
-3. **Confirm**: present plan, **wait for user approval**
-4. **Rebase**: `git rebase origin/$LMB`, resolve per plan
-5. **Verify**: `./scripts/verify-no-conflicts.sh`, cleanup
+    Rebase --> Resolve{Conflicts?}
+    Resolve -->|No| Verify[./scripts/verify-no-conflicts.sh]
+    Resolve -->|Yes| Known{Known from<br/>dry-run?}
+    Known -->|Yes| ApplyPlan["Apply discussed resolution"]
+    Known -->|No| Categorize
 
-## Conflict Categories
-| Category | Strategy |
-|---|---|
-| **Lockfile** | Delete, regenerate. Never hand-merge. |
-| **Dependency manifest** | Merge tooling; prefer higher versions. |
-| **CI/Workflow** | Retain both sides. |
-| **Source code** | Prefer LMB's features; apply branch's refactors on top. |
-| **Docs/Config** | Keep both unless contradictory. |
+    ApplyPlan --> Record["Present report to user"]
 
-## Execute
-**Hard gate:** Dry-run in isolated worktree first. `clean` → skip rebase.
-**If conflicts:** `git rebase origin/$LMB`. Apply plan per-file: `git add`, `git rebase --continue`.
-New conflicts not in dry-run: same logic silently. Ask user for ambiguous business logic (mutually exclusive features in same function).
 
-## Verify
-```bash
-./scripts/verify-no-conflicts.sh
+    Record --> Verify
+    Verify --> Done([Done])
 ```
-Report LMB, top commits, non-trivial merges, remind tests.
 
-## Pitfalls & Scripts
+## Conflict resolution
 
-- Rebase before dry-run (gate violation)
-- Hand-edit lockfiles → regenerate
-- Stale LMB (fetch first)
-- `scripts/dry-run-conflicts.sh` + `verify-no-conflicts.sh`
+| Category                                                           | Strategy                                                                            |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                             |
+| **Source & docs**                                                  | Analyze diff chronology and semantics. Prefer LMB features; apply refactors on top. |
+
+## Report template
+
+```markdown
+## Rebase Report
+
+| Item           | Value                         |
+| -------------- | ----------------------------- |
+| LMB            | `origin/main` (`<short-sha>`) |
+| Feature branch | `<branch>` (`<short-sha>`)    |
+| Conflicts      | N files                       |
+
+### Resolutions
+
+| File                | Category          | Strategy                                                 |
+| ------------------- | ----------------- | -------------------------------------------------------- |
+| `package-lock.json` | Machine-generated | Deleted and regenerated                                  |
+| `src/App.tsx`       | Source            | Retained LMB hook logic, applied error-handling refactor |
+
+### Commits (top 3)
+
+- `abc1234` — commit message
+- `def5678` — commit message
+- `ghi9012` — commit message
+```
+
+## Red flags
+
+- Rebase before dry-run → abort and restart
+- "Conflicts are small" → dry-run catches surprises
+- "I know them" → you don't
+- Hand-editing lockfiles → always regenerate
+- Stale LMB → run `fetch --prune` first
+- Using local main → always use remote
+- Skipping verification → always run verify script

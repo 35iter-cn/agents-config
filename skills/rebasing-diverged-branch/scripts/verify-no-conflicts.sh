@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # verify-no-conflicts.sh
-# Verify that no conflict markers remain in the working tree.
-# Exit 0 if clean, exit 1 with file list if conflict markers found.
+# Verify that no conflict markers remain and the rebase is in a good state.
+# Exit 0 if clean, exit 1 with details if conflict markers found.
 
 echo "=== Checking for remaining conflict markers ==="
 
@@ -13,6 +13,16 @@ FILES=$(git grep -l "<<<<<<<" -- . ':!*.lock' ':!pnpm-lock.yaml' ':!package-lock
 if [[ -z "$FILES" ]]; then
   echo "RESULT: clean"
   echo "No conflict markers found."
+
+  # Check if we're in the middle of a rebase
+  if [[ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ]] || \
+     [[ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]]; then
+    echo ""
+    echo "WARNING: Rebase still in progress. Run: git rebase --continue"
+    echo "To abort: git rebase --abort"
+    exit 1
+  fi
+
   exit 0
 fi
 

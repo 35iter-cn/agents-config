@@ -2,17 +2,19 @@
 set -euo pipefail
 
 # dry-run-conflicts.sh
-# Perform an isolated merge dry-run to discover the full conflict surface
-# between a feature branch and the latest main branch.
+# Simulate a rebase of FEATURE_BRANCH onto LMB in an isolated worktree.
+# This faithfully reproduces the actual git rebase mechanism (sequential
+# cherry-pick of diverged commits) to detect the full conflict surface.
 #
 # Usage: ./dry-run-conflicts.sh [LMB] [FEATURE_BRANCH]
 #   LMB:            Latest main branch ref (default: origin/master, fallback origin/main)
-#   FEATURE_BRANCH: Feature branch ref to merge (default: current HEAD)
+#   FEATURE_BRANCH: Feature branch ref to rebase (default: current HEAD)
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-git fetch origin
+echo "=== Fetching remote ==="
+git fetch origin --prune
 
 # Resolve LMB
 LMB="${1:-}"
@@ -30,11 +32,12 @@ fi
 FEATURE_BRANCH="${2:-HEAD}"
 HEAD_SHA="$(git rev-parse "$FEATURE_BRANCH")"
 BRANCH_NAME="$(git rev-parse --abbrev-ref "$FEATURE_BRANCH")"
-WORKTREE="/tmp/dry-run-$(date +%s)-${BRANCH_NAME//\//-}"
+WORKTREE=$(mktemp -d "/tmp/dry-run-XXXXXX-${BRANCH_NAME//\//-}")
 
 # Resolve LMB to a commit SHA to avoid "branch already checked out" errors
 # when the local branch corresponding to LMB is active in another worktree.
 LMB_SHA="$(git rev-parse "$LMB")"
+MERGE_BASE="$(git merge-base "$LMB_SHA" "$HEAD_SHA")"
 
 cleanup() {
   if [[ -d "$WORKTREE" ]]; then
@@ -44,24 +47,35 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== Dry-run Config ==="
-echo "LMB:            $LMB ($LMB_SHA)"
-echo "Feature branch: $BRANCH_NAME ($HEAD_SHA)"
-echo "Worktree:       $WORKTREE"
+echo "LMB (latest main):  $LMB -> $LMB_SHA"
+echo "Feature branch:     $BRANCH_NAME -> $HEAD_SHA"
+echo "Merge base:         $(git rev-parse --short "$MERGE_BASE")"
+echo "Diverged commits:   $(git log --oneline "$MERGE_BASE..$HEAD_SHA" | wc -l)"
+echo "Worktree:           $WORKTREE"
 echo ""
 
 # Create worktree at LMB commit (detached HEAD) to avoid branch-lock collisions
-git worktree add "$WORKTREE" "$LMB_SHA"
+echo "=== Creating isolated worktree ==="
+git worktree add --detach "$WORKTREE" "$LMB_SHA" 2>&1 | tail -1
+echo ""
 
-# Perform dry-run merge
+# Simulate rebase: apply diverged commits onto LMB, one by one
 cd "$WORKTREE"
-if git merge --no-commit --no-ff "$HEAD_SHA" &>/dev/null; then
+if git rebase --onto HEAD "$MERGE_BASE" "$HEAD_SHA" &>/dev/null; then
   echo "RESULT: clean"
   echo "No conflicts detected. Safe to rebase directly."
+  # Clean up the rebase before exiting
+  cd "$REPO_ROOT"
+  git -C "$WORKTREE" rebase --abort 2>/dev/null || true
   exit 0
 fi
 
 # Conflicts exist — collect details
-CONFLICT_FILES=$(git diff --name-only --diff-filter=U | sort)
+CONFLICT_FILES=$(git diff --name-only --diff-filter=U | sort || true)
+if [[ -z "$CONFLICT_FILES" ]]; then
+  # Some rebase conflicts are in the index but not in working tree (e.g. modify/delete)
+  CONFLICT_FILES=$(git status --porcelain | grep -E '^(DD|AU|UD|UA|DU|AA|UU)' | awk '{print $2}' | sort || true)
+fi
 CONFLICT_COUNT=$(echo "$CONFLICT_FILES" | grep -c . || true)
 
 echo "RESULT: conflicts"
@@ -70,7 +84,10 @@ echo ""
 
 for f in $CONFLICT_FILES; do
   echo "--- $f ---"
-  # Extract conflict markers with surrounding context (5 lines before/after)
-  grep -n -B2 -A2 "<<<<<<<" "$f" || true
+  grep -n -B2 -A2 "<<<<<<<" "$f" 2>/dev/null || echo "  (binary/staged-only conflict - see: git diff on this file)"
   echo ""
 done
+
+# Abort the simulated rebase so we don't leave the worktree dirty
+cd "$REPO_ROOT"
+git -C "$WORKTREE" rebase --abort 2>/dev/null || true
