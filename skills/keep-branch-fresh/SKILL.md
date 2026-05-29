@@ -1,7 +1,7 @@
 ---
-name: rebase-onto-lmb
+name: keep-branch-fresh
 ---
-description: Use when rebase onto LMB, e.g. origin/master.
+description: Use when user want to rebase latest main branch.
 ---
 
 # Rebase onto LMB
@@ -14,7 +14,7 @@ description: Use when rebase onto LMB, e.g. origin/master.
 ```mermaid
 flowchart TD
     Start([Start]) --> Fetch[fetch $LMB]
-    Fetch --> DryRun[./scripts/dry-run-conflicts.sh $LMB]
+    Fetch --> DryRun["@/scripts/dry-run-conflicts.sh $LMB"]
     DryRun --> Check{dry-run result?}
 
     Check -->|clean| Rebase[rebase $LMB]
@@ -23,7 +23,7 @@ flowchart TD
     Present --> Rebase
 
     Rebase --> Resolve{Conflicts?}
-    Resolve -->|No| Verify[./scripts/verify-no-conflicts.sh]
+    Resolve -->|No| Verify["@/scripts/verify-no-conflicts.sh"]
     Resolve -->|Yes| Known{Known from<br/>dry-run?}
     Known -->|Yes| ApplyPlan["Apply discussed resolution"]
     Known -->|No| Categorize
