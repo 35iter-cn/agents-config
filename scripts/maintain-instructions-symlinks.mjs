@@ -7,7 +7,7 @@ import { expandTilde, readLines, warn, error } from './lib/helpers.mjs';
 
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_ROOT, '..');
-const DEFAULT_MANIFEST = resolve(REPO_ROOT, 'bin/instructions-symlinks.paths');
+const DEFAULT_MANIFEST = resolve(REPO_ROOT, 'scripts/instructions-symlinks.paths');
 
 let MODE = 'link';
 let REPO = REPO_ROOT;
@@ -21,12 +21,12 @@ Commands:
   link    Create/update symlinks (default)
   unlink  Remove symlinks that resolve into this repo
 Options:
-  -r, --repo PATH       Repo root (default: parent of bin/ containing this script)
+  -r, --repo PATH       Repo root (default: parent of scripts/ containing this script)
   -c, --canonical STEM  Instruction stem without .md (default: default)
   --dry-run             Print actions only
   -h, --help            Show this help
 Env:
-  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/bin/instructions-symlinks.paths)`);
+  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/scripts/instructions-symlinks.paths)`);
 }
 
 const args = process.argv.slice(2);

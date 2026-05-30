@@ -9,7 +9,7 @@ import { expandTilde, readLines, targetUnderSrc, warn, error } from './lib/helpe
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_ROOT, '..');
 const DEFAULT_ROOT = resolve(homedir(), 'agents-for-myself/skills');
-const DEFAULT_TARGETS = resolve(REPO_ROOT, 'bin/skills-symlinks.targets');
+const DEFAULT_TARGETS = resolve(REPO_ROOT, 'scripts/skills-symlinks.targets');
 
 let SKILLS_ROOT = resolve(process.env.SKILLS_CANONICAL_ROOT || DEFAULT_ROOT);
 let TARGETS_FILE = process.env.SKILLS_SYMLINKS_TARGETS || DEFAULT_TARGETS;
@@ -87,9 +87,12 @@ function scanSkills(root) {
     try { st = lstatSync(top); } catch { continue; }
     if (!st) continue;
 
-    if (st.isFile() && base === 'SKILL.md') {
-      registerLink(dirname(base), top);
-      continue;
+    // Flat skill: directory containing SKILL.md at top level
+    if (st.isDirectory()) {
+      if (existsSync(resolve(top, 'SKILL.md'))) {
+        registerLink(base, top);
+        continue;
+      }
     }
 
     if (st.isDirectory()) {
@@ -98,7 +101,6 @@ function scanSkills(root) {
       if (existsSync(prefixFile)) {
         prefix = readFileSync(prefixFile, 'utf8').trim() + '_';
       }
-
       let children;
       try { children = readdirSync(top); } catch { continue; }
       for (const child of children) {

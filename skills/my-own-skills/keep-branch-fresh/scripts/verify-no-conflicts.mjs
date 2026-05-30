@@ -19,7 +19,7 @@ const excludePatterns = [
   '*.woff', '*.woff2', '*.ttf', '*.eot',
 ];
 
-const excludeArgs = excludePatterns.flatMap(p => [':!', p]);
+const excludeArgs = excludePatterns.flatMap(p => [`:!${p}`]);
 const files = gitTry(['grep', '-l', '<<<<<<<', '--', '.', ...excludeArgs]);
 
 if (!files) {

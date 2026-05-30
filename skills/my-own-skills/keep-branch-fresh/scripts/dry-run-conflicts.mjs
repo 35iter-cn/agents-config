@@ -14,12 +14,12 @@ function git(args, opts = {}) {
   return result ? result.trim() : '';
 }
 
-function gitCapture(args) {
-  return execFileSync('git', args, { encoding: 'utf8', stdio: 'pipe' }).trim();
+function gitCapture(args, opts = {}) {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: 'pipe', ...opts }).trim();
 }
 
-function gitLines(args) {
-  const out = execFileSync('git', args, { encoding: 'utf8', stdio: 'pipe' }).trim();
+function gitLines(args, opts = {}) {
+  const out = execFileSync('git', args, { encoding: 'utf8', stdio: 'pipe', ...opts }).trim();
   return out ? out.split('\n') : [];
 }
 
@@ -33,22 +33,26 @@ const LMB_ARG = process.argv[2] || '';
 const FEATURE_BRANCH = process.argv[3] || 'HEAD';
 
 // --- Fetch ---
+// Fetch if remote exists — not fatal if none
 console.log('=== Fetching remote ===');
-git(['fetch', 'origin', '--prune']);
-
+try { git(['fetch', 'origin', '--prune']); } catch {
+  console.log('(no remote origin, skipping fetch)');
+}
 // --- Resolve LMB ---
+// --- Resolve LMB (remote first, then local) ---
 let LMB = LMB_ARG;
 if (!LMB) {
-  try {
-    gitCapture(['rev-parse', '--verify', 'origin/master']);
-    LMB = 'origin/master';
-  } catch {
+  const remoteCandidates = ['origin/master', 'origin/main'];
+  const localCandidates = ['main', 'master'];
+  for (const ref of [...remoteCandidates, ...localCandidates]) {
     try {
-      gitCapture(['rev-parse', '--verify', 'origin/main']);
-      LMB = 'origin/main';
-    } catch {
-      error('Could not infer main branch. Neither origin/master nor origin/main exists.');
-    }
+      gitCapture(['rev-parse', '--verify', ref]);
+      LMB = ref;
+      break;
+    } catch { /* try next */ }
+  }
+  if (!LMB) {
+    error('Could not infer main branch. Tried remote (origin/master, origin/main) and local (main, master).');
   }
 }
 
