@@ -99,10 +99,11 @@ test('main dispatches run subcommand and exits zero on success', async () => {
 test('isDirectExecution accepts both relative and absolute argv[1] forms for the current module', () => {
   const modulePath = new URL('../scripts/companion.mjs', import.meta.url).pathname;
   const moduleUrl = `file://${modulePath}`;
+  const skillDir = new URL('../', import.meta.url).pathname;
 
   assert.equal(isDirectExecution(moduleUrl, modulePath), true);
-  assert.equal(isDirectExecution(moduleUrl, 'scripts/companion.mjs'), true);
-  assert.equal(isDirectExecution(moduleUrl, 'tests/opencode-companion.test.mjs'), false);
+  assert.equal(isDirectExecution(moduleUrl, 'scripts/companion.mjs', skillDir), true);
+  assert.equal(isDirectExecution(moduleUrl, 'tests/opencode-companion.test.mjs', skillDir), false);
   assert.equal(isDirectExecution(moduleUrl, undefined), false);
 });
 
