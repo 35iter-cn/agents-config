@@ -103,22 +103,34 @@ RESUME mode:
 - `$finalPrompt` composed from template
 - All information extracted (Step 2)
 
-**Platform-Specific Execution**
+**Claude Code**
 
-| Platform | Wait Mechanism | Script Path |
-|---|---|---|
-| Claude Code | `Monitor` tool (`persistent: true`) | `$SKILL_ROOT/scripts/companion.mjs` |
-| OMP | `bash({ command: "...", timeout: 3600, async: true })` then `job({ poll: ["bg_<id>"] })` | `skill://runx/scripts/companion.mjs` |
+Use `Monitor` tool to run the companion in background and stream output:
 
-**Command**
-
-```bash
-node <script_path> run --agent "$agent" --model "$modelTier" <<'__EOF__'
-$finalPrompt
-__EOF__
+```javascript
+Monitor({
+  command: `node "$SKILL_ROOT/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
+${finalPrompt}
+__EOF__`
+})
 ```
 
-For RESUME mode, add `--session "$sessionID"` before the heredoc.
+**OMP**
+
+Use `bash` with `async: true` to start background job, then `job` to await completion:
+
+```javascript
+bash({
+  command: `node "skill://runx/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
+${finalPrompt}
+__EOF__`,
+  async: true,
+  timeout: 3600
+})
+// Then: job({ poll: ["bg_<id>"] })
+```
+
+For RESUME mode, add `--session "${sessionID}"` before the heredoc in both platforms.
 
 ### Handle Response
 
@@ -157,6 +169,7 @@ flowchart TD
 - Using file contents instead of file paths in `$files`.
 - Using a platform-specific tool from the wrong section (e.g. calling `Monitor` on OMP, or calling `job` on Claude Code).
 - Not extracting `$sessionID` before resuming — creates a new session instead of continuing.
+- Using `read` or `find` to resolve the script path (`skill://runx/scripts/companion.mjs`). `read skill://runx/scripts` returns "File not found" because `skill://<name>/<path>` resolves as a **file** read, not a directory listing. **Correct**: pass `"skill://runx/scripts/companion.mjs"` directly to `bash` — internal URIs auto-resolve to filesystem paths, no manual path lookup needed.
 
 ## Red Flags
 
