@@ -2,10 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import {
-  isDirectExecution,
   main,
   parseRunArguments,
-} from '../scripts/companion.mjs';
+} from '../scripts/lib/companion.mjs';
 
 test('parseRunArguments keeps prompt and parses agent flag', () => {
   const result = parseRunArguments([
@@ -96,16 +95,6 @@ test('main dispatches run subcommand and exits zero on success', async () => {
   assert.equal(code, 0);
 });
 
-test('isDirectExecution accepts both relative and absolute argv[1] forms for the current module', () => {
-  const modulePath = new URL('../scripts/companion.mjs', import.meta.url).pathname;
-  const moduleUrl = `file://${modulePath}`;
-  const skillDir = new URL('../', import.meta.url).pathname;
-
-  assert.equal(isDirectExecution(moduleUrl, modulePath), true);
-  assert.equal(isDirectExecution(moduleUrl, 'scripts/companion.mjs', skillDir), true);
-  assert.equal(isDirectExecution(moduleUrl, 'tests/opencode-companion.test.mjs', skillDir), false);
-  assert.equal(isDirectExecution(moduleUrl, undefined), false);
-});
 
 test('main exits non-zero when runOpencode fails', async () => {
   const exits = [];
