@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/root/code/opencode-plugin-cc","session_id":"3c24a358-2383-4565-b5cd-a0aefdb38966","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"nihao sss"}]},"session_id":"3c24a358-2383-4565-b5cd-a0aefdb38966"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"你好。需要我帮你做什么？可以是这个 `companion-hub` / `runx` 插件仓库里的开发、调试或代码审查。"}]},"session_id":"3c24a358-2383-4565-b5cd-a0aefdb38966"}
+{"type":"result","subtype":"success","duration_ms":4232,"duration_api_ms":4232,"is_error":false,"result":"你好。需要我帮你做什么？可以是这个 `companion-hub` / `runx` 插件仓库里的开发、调试或代码审查。","session_id":"3c24a358-2383-4565-b5cd-a0aefdb38966","request_id":"b2c91495-8c18-40ea-a60a-4b25de5ec7a5","usage":{"inputTokens":11464,"outputTokens":114,"cacheReadTokens":4352,"cacheWriteTokens":0}}

@@ -1,0 +1,1 @@
+Cannot use this model: nonexistent-model. Available models: auto, claude-4.6-sonnet-medium, claude-opus-4-7-low, claude-opus-4-7-high

@@ -1,0 +1,3 @@
+{"type":"tool_use","sessionID":"ses_midtask","part":{"type":"tool","tool":"write","callID":"call-w1","state":{"status":"completed","input":{"filePath":"/tmp/half-done.txt"}}}}
+{"type":"tool_use","sessionID":"ses_midtask","part":{"type":"tool","tool":"bash","callID":"call-b1","state":{"status":"completed","input":{"command":"echo hello"},"output":"hello"}}}
+{"type":"error","error":{"name":"APIError","data":{"message":"Connection reset by peer.","statusCode":502}}}
