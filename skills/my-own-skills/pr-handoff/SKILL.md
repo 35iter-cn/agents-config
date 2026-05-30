@@ -7,7 +7,7 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Auto-detects create vs update from PR state. Prepares PR body, runs pre-push checks, invokes `pr-uat-case-gen` for frontend repos.
+Keep branch fresh, run pre-push checks, analyze diff, then create or update PR with complete body and UAT cases.
 
 ## When to Use
 
@@ -23,74 +23,56 @@ Auto-detects create vs update from PR state. Prepares PR body, runs pre-push che
 
 ## Quick Reference
 
-| `gh pr view` state | Flow           |
-| ------------------ | -------------- |
-| No PR / CLOSED     | Create PR Flow |
-| OPEN               | Update PR Flow |
+**LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
 
-### Format
+### keep-branch-fresh
 
-PR body from template, in order:
-`.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`
+**REQUIRED SUB-SKILL:** `keep-branch-fresh`. Always runs first to ensure branch is rebased onto latest main. Stops flow if conflicts unresolvable.
 
-Append: summary + file changes + where-to-test + edge cases.
+### Pre-push
 
-### Steps
+Probe build system in order: `package.json` → `go.mod` → `Cargo.toml` → `pyproject.toml` → `Makefile` → none. Run standard checks per type.
 
-| Action   | Detail                                                                                                             |
-| -------- | ------------------------------------------------------------------------------------------------------------------ |
-| Analyze  | Create: `git diff origin/$BASE_BRANCH..HEAD`. Update: full + incremental diff since last push.                     |
-| Pre-push | Run [checks](#pre-push-checks). Stop on fail.                                                                      |
-| Push     | `git push`.                                                                                                        |
-| Body     | Template → base + summary + file changes + where-to-test + edge cases. Create: new PR. Update: replace entirely.   |
-| UAT      | Invoke `pr-uat-case-gen`. If case file generated → post/update single `<!-- uat-cases:... -->` comment. See [UAT](#uat-integration). |
-| Verify   | `gh pr view`.                                                                                                      |
+Failure stops the entire flow.
 
-### UAT Integration
+### Create or update
 
-**REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Frontend repos only.
+One step that handles everything from PR state check to comment attachment:
 
-1. Run `pr-uat-case-gen` → generates `.knowledge/notes/uat-cases.md`.
-2. File exists and non-empty:
-   - Compute `FEATURE_SLUG=$(git branch --show-current | sed 's/.*\///' | sed 's/[A-Z]/\L&/g; s/_/-/g')`.
-   - Search PR for existing `<!-- uat-cases:$FEATURE_SLUG -->` comment.
-   - Found → PATCH. Not found → POST (new comment).
-3. File empty or missing → skip UAT.
+1. **Check PR** — `gh pr view`. No PR / CLOSED → create; OPEN → update.
+2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
+3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
+4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely).
+5. **UAT** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. File exists and non-empty → compute `FEATURE_SLUG`, search PR for `<!-- uat-cases:$FEATURE_SLUG -->`, POST (new) or PATCH (replace). Empty/missing → skip.
 
-### Pre-push Checks
+None of these sub-steps should fail in normal conditions.
 
-Probe in order: `rush.json` → `package.json` → `go.mod` → `Cargo.toml` → `pyproject.toml` → `Makefile` → none. Run standard checks per type. `rush.json` → skip all, recommend `rush build`. Failure stops flow.
+### Verify
+
+`gh pr view` to confirm PR is created/updated and visible.
 
 ## Core Flow
 
 ```mermaid
 flowchart TD
-    A([Start]) --> B[Fetch + compute BASE_BRANCH]
-    B --> C[gh pr view]
-    C --> D{PR exists?}
-    D -->|No / CLOSED| E[Create: analyze diff against base]
-    D -->|OPEN| F[Update: analyze full + incremental diff]
-    E --> G[Pre-push checks]
-    F --> G
-    G --> H[Push]
-    H --> I{PR action}
-    I -->|Create| J[Generate body from template]
-    I -->|Update| K[Replace body]
-    J --> L[UAT: invoke pr-uat-case-gen]
-    K --> L
-    L --> M[Verify]
-    M --> N([Done])
+    A([Start]) --> B[keep-branch-fresh]
+    B --> C[Pre-push]
+    C --> D[Create or update]
+    D --> E[Verify]
+    E --> F([Done])
 ```
 
 ## Common Mistakes
 
-- Creating PR before pushing → empty body, broken links.
+- Skipping keep-branch-fresh when branch is stale → body references outdated code, merge conflicts in review.
+- Creating PR before pushing → empty body, broken links (keep-branch-fresh already handles push).
 - Skipping pre-push checks under time pressure.
-- Not fetching remote before computing BASE_BRANCH (stale local).
-- Using wrong BASE_BRANCH when origin HEAD differs from local main.
+- Not fetching remote before computing LMB (stale local).
+- Using wrong LMB when origin HEAD differs from local main.
 
 ## Red Flags
 
+- Skipping keep-branch-fresh to "save time".
 - `git push` before pre-push checks.
 - Force-push without checking PR state.
 - Rebasing without fetching origin HEAD first.

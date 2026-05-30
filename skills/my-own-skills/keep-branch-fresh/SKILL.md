@@ -1,6 +1,8 @@
 ---
 name: keep-branch-fresh
 description: Use when rebasing, syncing branch, or updating to latest main. Rebase a feature branch onto the latest main branch with safety guarantees.
+category: workflow
+date_added: "2026-05-27"
 ---
 
 ## Overview
@@ -9,55 +11,86 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 
 ## When to Use
 
-- Feature branch is behind `origin/main` or `origin/master` and needs a fast-forward/rebase
+- Feature branch is behind LMB and needs a fast-forward/rebase
 - User asks to rebase, sync, or update a branch to the latest main
+
+## When NOT to Use
+
+- Working directory has uncommitted changes
+- Branch has no upstream remote set
+- Force push is prohibited on the target branch
 
 ## Quick Reference
 
-### Scripts
+**LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
 
-| Step    | Command                                                                  | Purpose                                                                                                                                                                                              |
-| ------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dry-run | `bash $SKILL_ROOT/scripts/dry-run-conflicts.sh [LMB?] [FEATURE_BRANCH?]` | The dry-run script handles fetching and conflict detection in one step. The actual rebase happens in the working repo only after the dry-run confirms safety or the user approves a resolution plan. |
-| Verify  | `bash $SKILL_ROOT/scripts/verify-no-conflicts.sh`                        | Verify that no conflict markers remain and the rebase is in a good state. Exits 0 if clean, exits 1 with details if conflict markers found or rebase is still in progress.                           |
+**FEATURE_BRANCH** — branch to rebase (default: current `HEAD`)
 
-- `LMB` — remote main branch ref (default: `origin/master` → `origin/main`)
-- `FEATURE_BRANCH` — branch to rebase (default: current `HEAD`)
+### Dry-run
 
-### Conflict Categorization Strategies
+`bash $SKILL_ROOT/scripts/dry-run-conflicts.sh [LMB] [FEATURE_BRANCH]`
 
-| Category                                                           | Strategy                                                                                                                                                                                            |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                                                                                                                                             |
-| **Source code & docs**                                             | Preserve each feature commit's intent by transplanting it onto LMB's refactored structure; read the commit message to determine intent, and only defer to the user when preservation is infeasible. |
+Fetches latest LMB and detects conflicts in one step. The actual rebase only proceeds after dry-run confirms safety or the user approves a resolution plan.
 
-## Core Pattern
+- Clean → proceed to rebase.
+- Conflicts found → categorize and present resolution plan (see [Resolve conflicts](#resolve-conflicts)).
+
+### Resolve conflicts
+
+Only needed when dry-run detects conflicts.
+
+| Category | Strategy |
+|---|---|
+| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit. |
+| **Source code & docs** | Preserve each feature commit's intent by transplanting onto LMB's refactored structure. Read the commit message to determine intent. Defer to user only when preservation is infeasible. |
+
+Present plan to user, get confirmation, then proceed to rebase.
+
+### Rebase
+
+Execute the rebase onto LMB. Each commit's intent is preserved.
+
+If `git rebase --continue` opens an editor and hangs in non-interactive terminal: `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit`.
+
+### Verify & push
+
+`bash $SKILL_ROOT/scripts/verify-no-conflicts.sh`
+
+Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
+
+Then `git push --force-with-lease`.
+
+## Core Flow
 
 ```mermaid
 flowchart TD
     A([Start]) --> B[Dry-run]
     B --> C{Result?}
-    C -->|Clean| D[Rebase onto LMB]
-    C -->|Conflicts| E[Categorize conflicts]
+    C -->|Clean| D[Rebase]
+    C -->|Conflicts| E[Resolve conflicts]
     E --> F[Present resolution plan]
     F --> F1[Ask user to confirm]
     F1 -->|Confirmed| D
     F1 -->|Rejected| K
-    D --> H[Verify]
-    H --> I[git push --force-with-lease]
-    I --> J[Report result]
-    J --> K([Done])
+    D --> H[Verify & push]
+    H --> J([Done])
+    K --> J
 ```
 
 ## Common Mistakes
 
-| Mistake                       | Why It Fails                                                              | Fix                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Rebase before dry-run         | Unexpected conflicts waste time and risk data loss                        | Always dry-run first                                                             |
-| "Conflicts are small"         | Small conflicts hide semantic issues                                      | Dry-run catches surprises                                                        |
-| "I know the conflicts"        | Overconfidence leads to missed edge cases                                 | Trust the process, not memory                                                    |
-| Hand-editing lockfiles        | Introduces inconsistent dependency states                                 | Always delete and regenerate                                                     |
-| Stale LMB reference           | Rebasing onto outdated main is pointless                                  | Dry-run script fetches automatically                                             |
-| Using local main branch       | Local main may be behind remote                                           | Always use `origin/main` or `origin/master`                                      |
-| Skipping verification         | Silent merge conflicts or build breaks                                    | Always run verify script                                                         |
-| `git rebase --continue` hangs | Opens default editor (e.g. vim) in non-interactive terminal, causing hang | Use `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit` |
+- Rebasing before dry-run — unexpected conflicts waste time and risk data loss.
+- Assuming "conflicts are small" — small conflicts hide semantic issues.
+- Overconfidence about known conflicts — trust the process, not memory.
+- Hand-editing lockfiles — introduces inconsistent dependency states. Always delete and regenerate.
+- Using stale LMB reference — rebasing onto outdated main is pointless. Dry-run script fetches automatically.
+- Using local branch name instead of LMB — local branch may be behind remote. Use `git remote show origin | grep "HEAD branch"` to detect LMB.
+- Skipping verification — silent merge conflicts or build breaks.
+- `git rebase --continue` hangs in non-interactive terminal — use `GIT_EDITOR=true git rebase --continue`.
+
+## Red Flags
+
+- Rebasing before dry-run.
+- Force-pushing without verifying.
+- Hand-editing lockfiles.
+- Skipping verification after rebase.
