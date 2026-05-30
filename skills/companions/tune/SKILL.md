@@ -11,7 +11,7 @@ allowed-tools:
 
 ## Overview
 
-Infer user intent from natural-language prompt and execute companion model configuration actions via `$SKILL_ROOT/../scripts/companion.mjs`.
+/scripts
 
 ## When to Use
 
@@ -40,28 +40,28 @@ Parse the natural-language prompt and classify into one of these intents:
 
 ### Execute action
 
-All actions use `node "$SKILL_ROOT/../scripts/companion.mjs" models <subcommand>`.
+/scripts
 
 **show:**
-- Run `node "$SKILL_ROOT/../scripts/companion.mjs" models --get`.
+- /scripts
 - Format output as a tier-column table (left-align with fixed spacing, `—` for unconfigured tiers).
 - If only one adaptor is configured, show that. Both empty → report "No configuration found" and offer to recommend.
 
 **set:**
 - Parse which adaptor (`opencode`/`cursor`/`omp`/`codex`) and tier (`low`/`medium`/`high`/`maximum`). Default adaptor: `opencode`.
 - If tier missing, show current config and ask.
-- Run `node "$SKILL_ROOT/../scripts/companion.mjs" models --list`. Match model name against `available.<adaptor>`: exact → proceed; fuzzy with single match → proceed; multiple → ask; no match → warn but allow.
-- Construct JSON config, show user what will be written, ask confirmation, then `echo '${JSON}' | node "$SKILL_ROOT/../scripts/companion.mjs" models --set`.
+- /scripts
+- /scripts
 - Report success or error.
 
 **reset:**
 - Determine which adaptor to reset. If unspecified, ask.
 - Show current config for that adaptor, ask confirmation.
-- `node "$SKILL_ROOT/../scripts/companion.mjs" models --reset <adaptor>`.
+- /scripts
 - Report success or error.
 
 **recommend:**
-- Run `node "$SKILL_ROOT/../scripts/companion.mjs" models --list`.
+- /scripts
 - Classify available models by capability tier (`low`/`medium`/`high`/`maximum`) based on model ID heuristics.
 - Present recommendations alongside current config.
 - Ask if user wants to apply. If yes, present proposed config, confirm, execute as in `set`.

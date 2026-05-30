@@ -141,11 +141,15 @@ do_link() {
       continue
     fi
     if [[ -d "$top" ]]; then
+      prefix=""
+      if [[ -f "$top/.symlink-prefix" ]]; then
+        prefix="$(cat "$top/.symlink-prefix")_"
+      fi
       for child in "$top"/*; do
         [[ -e "$child" ]] || continue
         [[ -d "$child" ]] || continue
         if [[ -f "$child/SKILL.md" ]]; then
-          register_link "$(basename "$child")" "$child"
+          register_link "${prefix}$(basename "$child")" "$child"
         fi
       done
     fi

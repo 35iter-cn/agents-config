@@ -82,14 +82,14 @@ Use `Monitor` tool (`persistent: true`), await completion without polling.
 
 **NEW mode command:**
 ```bash
-node "$SKILL_ROOT/../scripts/companion.mjs" run --agent "$agent" --model "$modelTier" <<'__EOF__'
+node "$SKILL_ROOT/scripts/companion.mjs" run --agent "$agent" --model "$modelTier" <<'__EOF__'
 $finalPrompt
 __EOF__
 ```
 
 **RESUME mode command:**
 ```bash
-node "$SKILL_ROOT/../scripts/companion.mjs" run --agent "$agent" --session "$sessionID" --model "$resumeModelTier" <<'__EOF__'
+node "$SKILL_ROOT/scripts/companion.mjs" run --agent "$agent" --session "$sessionID" --model "$resumeModelTier" <<'__EOF__'
 $finalPrompt
 __EOF__
 ```
