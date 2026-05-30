@@ -170,6 +170,7 @@ flowchart TD
 - Using a platform-specific tool from the wrong section (e.g. calling `Monitor` on OMP, or calling `job` on Claude Code).
 - Not extracting `$sessionID` before resuming — creates a new session instead of continuing.
 - Using `read` or `find` to resolve the script path (`skill://runx/scripts/companion.mjs`). `read skill://runx/scripts` returns "File not found" because `skill://<name>/<path>` resolves as a **file** read, not a directory listing. **Correct**: pass `"skill://runx/scripts/companion.mjs"` directly to `bash` — internal URIs auto-resolve to filesystem paths, no manual path lookup needed.
+- After companion completes, digging into raw companion log files (`.jsonl`) for the full output. The companion's `finalMessage` in `{"type":"done",...}` already contains the complete result; if truncated in display, look for the `[raw output: artifact://<id>]` footer in the bash result instead.
 
 ## Red Flags
 
