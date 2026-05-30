@@ -28,7 +28,7 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 
 ### Dry-run
 
-`bash $SKILL_ROOT/scripts/dry-run-conflicts.sh [LMB] [FEATURE_BRANCH]`
+`$SKILL_ROOT/scripts/dry-run-conflicts.mjs [LMB] [FEATURE_BRANCH]`
 
 Fetches latest LMB and detects conflicts in one step. The actual rebase only proceeds after dry-run confirms safety or the user approves a resolution plan.
 
@@ -54,7 +54,7 @@ If `git rebase --continue` opens an editor and hangs in non-interactive terminal
 
 ### Verify & push
 
-`bash $SKILL_ROOT/scripts/verify-no-conflicts.sh`
+`$SKILL_ROOT/scripts/verify-no-conflicts.mjs`
 
 Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
 

@@ -1,16 +1,22 @@
-#!/usr/bin/env bash
-# Maintain symlinks from manifest to $REPO/instructions/<stem>.md (link / unlink).
-set -euo pipefail
+#!/usr/bin/env node
+// Maintain symlinks from manifest to $REPO/instructions/<stem>.md (link / unlink).
+import { symlinkSync, mkdirSync, existsSync, realpathSync, unlinkSync, lstatSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expandTilde, readLines, warn, error } from './lib/helpers.mjs';
 
-MODE="link"
-REPO_OVERRIDE=""
-STEM="default"
-DRY_RUN=0
-MANIFEST="${INSTRUCTIONS_SYMLINKS_MANIFEST:-}"
+const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(SCRIPT_ROOT, '..');
+const DEFAULT_MANIFEST = resolve(REPO_ROOT, 'bin/instructions-symlinks.paths');
 
-usage() {
-  cat <<'EOF'
-Usage: maintain-instructions-symlinks [link|unlink] [options]
+let MODE = 'link';
+let REPO = REPO_ROOT;
+let STEM = 'default';
+let DRY_RUN = false;
+let MANIFEST = process.env.INSTRUCTIONS_SYMLINKS_MANIFEST || DEFAULT_MANIFEST;
+
+function usage() {
+  console.log(`Usage: maintain-instructions-symlinks [link|unlink] [options]
 Commands:
   link    Create/update symlinks (default)
   unlink  Remove symlinks that resolve into this repo
@@ -20,159 +26,96 @@ Options:
   --dry-run             Print actions only
   -h, --help            Show this help
 Env:
-  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/bin/instructions-symlinks.paths)
-EOF
+  INSTRUCTIONS_SYMLINKS_MANIFEST  Path to manifest (default: <repo>/bin/instructions-symlinks.paths)`);
 }
 
-error() {
-  echo "error: $*" >&2
-  exit 1
+const args = process.argv.slice(2);
+if (args[0] === 'link' || args[0] === 'unlink') {
+  MODE = args.shift();
 }
 
-warn() {
-  echo "warning: $*" >&2
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  switch (arg) {
+    case '-r':
+    case '--repo':
+      REPO = resolve(args[++i]);
+      break;
+    case '-c':
+    case '--canonical':
+      STEM = args[++i];
+      break;
+    case '--dry-run':
+      DRY_RUN = true;
+      break;
+    case '-h':
+    case '--help':
+      usage();
+      process.exit(0);
+    default:
+      error(`unknown option or argument: ${arg}`);
+  }
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    link)
-      MODE="link"
-      shift
-      ;;
-    unlink)
-      MODE="unlink"
-      shift
-      ;;
-    -r|--repo)
-      REPO_OVERRIDE="${2:?}"
-      shift 2
-      ;;
-    -c|--canonical)
-      STEM="${2:?}"
-      shift 2
-      ;;
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      error "unknown option or argument: $1"
-      ;;
-  esac
-done
+if (!STEM) error('canonical stem must be non-empty');
+if (STEM.includes('/')) error(`invalid canonical stem (must not contain '/'): ${STEM}`);
+if (STEM.startsWith('.')) error(`invalid canonical stem (must not start with '.'): ${STEM}`);
 
-SCRIPT_PATH="${BASH_SOURCE[0]}"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-if [[ -n "$REPO_OVERRIDE" ]]; then
-  REPO="$(cd "$REPO_OVERRIDE" && pwd)"
-else
-  REPO="$(cd "$SCRIPT_DIR/.." && pwd)" || error "failed to resolve repo root from script location"
-fi
+const REPO_ABS = resolve(REPO);
+const CANON = resolve(REPO_ABS, 'instructions', STEM + '.md');
 
-[[ -n "$REPO" ]] || error "empty REPO"
+function doLink() {
+  if (!existsSync(CANON)) error(`canonical instruction file missing: ${CANON}`);
 
-if [[ -z "$MANIFEST" ]]; then
-  MANIFEST="$REPO/bin/instructions-symlinks.paths"
-fi
+  const targets = readLines(MANIFEST);
+  for (const rawL of targets) {
+    if (!rawL) continue;
+    const L = resolve(rawL);
+    const parent = dirname(L);
 
-[[ -f "$MANIFEST" ]] || error "manifest not found: $MANIFEST"
-
-validate_stem() {
-  local s="$1"
-  [[ -n "$s" ]] || error "canonical stem must be non-empty"
-  [[ "$s" != */* ]] || error "invalid canonical stem (must not contain '/'): $s"
-  [[ "$s" != .* ]] || error "invalid canonical stem (must not start with '.'): $s"
+    if (DRY_RUN) {
+      console.log(`dry-run: mkdir -p ${JSON.stringify(parent)}`);
+      console.log(`dry-run: ln -sf ${JSON.stringify(CANON)} ${JSON.stringify(L)}`);
+    } else {
+      mkdirSync(parent, { recursive: true });
+      try { unlinkSync(L); } catch { /* not exist, ok */ }
+      symlinkSync(CANON, L);
+    }
+  }
 }
 
-validate_stem "$STEM"
+function doUnlink() {
+  const targets = readLines(MANIFEST);
+  for (const rawL of targets) {
+    if (!rawL) continue;
+    const L = resolve(rawL);
 
-REPO_ABS="$(cd "$REPO" && pwd)"
-CANON="$REPO_ABS/instructions/${STEM}.md"
+    if (!existsSync(L)) continue;
+    const entryStat = lstatSync(L);
 
-expand_tilde() {
-  local p="$1"
-  if [[ "$p" == "~" ]]; then
-    echo "$HOME"
-  elif [[ "$p" == "~/"* ]]; then
-    echo "${HOME}/${p:2}"
-  else
-    echo "$p"
-  fi
+    if (!entryStat.isSymbolicLink()) {
+      if (entryStat.isFile() || entryStat.isDirectory()) {
+        warn(`not a symlink, skipping: ${L}`);
+      }
+      continue;
+    }
+
+    let linkTarget;
+    try { linkTarget = realpathSync(L); } catch {
+      warn(`broken symlink, not removing: ${L}`);
+      continue;
+    }
+
+    if (linkTarget === REPO_ABS || linkTarget.startsWith(REPO_ABS + '/')) {
+      if (DRY_RUN) {
+        console.log(`dry-run: rm -f ${JSON.stringify(L)}`);
+      } else {
+        unlinkSync(L);
+      }
+    }
+  }
 }
 
-trim_space() {
-  local s="$1"
-  s="${s#"${s%%[![:space:]]*}"}"
-  s="${s%"${s##*[![:space:]]}"}"
-  printf '%s' "$s"
-}
-
-read_manifest_paths() {
-  local line raw
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    line="$(trim_space "$raw")"
-    [[ -z "$line" ]] && continue
-    [[ "$line" == \#* ]] && continue
-    printf '%s\n' "$(expand_tilde "$line")"
-  done <"$MANIFEST"
-}
-
-do_link() {
-  [[ -f "$CANON" ]] || error "canonical instruction file missing: $CANON"
-
-  local L parent
-  while IFS= read -r L; do
-    [[ -z "$L" ]] && continue
-    parent="$(dirname "$L")"
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "dry-run: mkdir -p $(printf '%q' "$parent")"
-      echo "dry-run: ln -sf $(printf '%q' "$CANON") $(printf '%q' "$L")"
-    else
-      mkdir -p "$parent"
-      ln -sf "$CANON" "$L"
-    fi
-  done < <(read_manifest_paths)
-}
-
-do_unlink() {
-  local L T
-  while IFS= read -r L; do
-    [[ -z "$L" ]] && continue
-
-    if [[ ! -e "$L" && ! -L "$L" ]]; then
-      continue
-    fi
-
-    if [[ -e "$L" && ! -L "$L" ]]; then
-      warn "not a symlink, skipping: $L"
-      continue
-    fi
-
-    if [[ -L "$L" ]]; then
-      T="$(readlink -f "$L" 2>/dev/null || true)"
-      if [[ -z "$T" ]]; then
-        warn "broken symlink, not removing: $L"
-        continue
-      fi
-      if [[ "$T" == "$REPO_ABS" || "$T" == "$REPO_ABS"/* ]]; then
-        if [[ "$DRY_RUN" -eq 1 ]]; then
-          echo "dry-run: rm -f $(printf '%q' "$L")"
-        else
-          rm -f "$L"
-        fi
-      fi
-    fi
-  done < <(read_manifest_paths)
-}
-
-case "$MODE" in
-  link) do_link ;;
-  unlink) do_unlink ;;
-  *) error "internal: bad mode $MODE" ;;
-esac
-
-exit 0
+if (MODE === 'link') doLink();
+else if (MODE === 'unlink') doUnlink();
+else error(`internal: bad mode ${MODE}`);
