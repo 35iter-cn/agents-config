@@ -141,6 +141,9 @@ do_link() {
       continue
     fi
     if [[ -d "$top" ]]; then
+      # Category prefix: if category dir has .symlink-prefix, its content
+      # is prepended to each child skill's symlink name (e.g. companions_runx).
+      # Avoids name collisions when different categories export the same skill name.
       prefix=""
       if [[ -f "$top/.symlink-prefix" ]]; then
         prefix="$(cat "$top/.symlink-prefix")_"
