@@ -109,7 +109,7 @@ Use `Monitor` tool to run the companion in background and stream output:
 
 ```javascript
 Monitor({
-  command: `node "$SKILL_ROOT/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
+  command: `node "<SKILL_ROOT>/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
 ${finalPrompt}
 __EOF__`
 })
