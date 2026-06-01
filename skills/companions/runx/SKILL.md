@@ -1,6 +1,6 @@
 ---
 name: runx
-description: Delegate tasks to a companion CLI (cursor, opencode, omp, codex) with session-aware resumption support.
+description: User directs a task to another AI coding CLI tool (cursor, opencode, omp, codex) by name, or references a generic "companion" — indicating they want that tool to handle the work rather than the current agent.
 category: workflow
 date_added: "2026-05-29"
 ---
@@ -14,12 +14,12 @@ Delegate tasks to a companion CLI with session-aware resumption support.
 - User asks to resume or continue a previous companion session
 - User wants to delegate a long-running task that may span multiple interactions
 - User explicitly references an agent by name (`cursor`, `opencode`, `omp`, `codex`) with a specific task
+- User references cursor, opencode, omp, codex, or "companion" with a task description
 - Task requires session-aware context that outlives a single command
 
 ## When NOT to Use
 
 - Simple local commands — one-off file reads, git status, or quick edits
-- Tasks completable in the current session — handle immediately without delegation
 - User says "run this in terminal" or "execute locally" — implies the current environment
 - Exploratory questions — "what is X?" or "how does Y work?" should be answered directly
 
