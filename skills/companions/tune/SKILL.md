@@ -3,15 +3,11 @@ name: tune
 description: Tune companion model tiers via natural language — view, set, reset, or get recommendations.
 category: workflow
 date_added: "2026-05-29"
-allowed-tools:
-  - Bash
-  - Read
-  - AskUserQuestion
 ---
 
 ## Overview
 
-/scripts
+Tune companion model configurations (opencode, cursor, omp, codex) through natural language commands. Detects user intent, interacts with companion CLIs to read or write tier settings, and presents results in a clear table.
 
 ## When to Use
 
@@ -26,43 +22,41 @@ allowed-tools:
 
 ## Quick Reference
 
-### Detect intent
+### 1. Detect intent
 
 Parse the natural-language prompt and classify into one of these intents:
 
 | Intent | Keywords (examples) |
 |---|---|
-| `show` | "show", "view", "get", "what", "current", "看", "查看", "当前" |
-| `set` | "set", "change", "update", "use", "改成", "设为", "用", "设置" |
-| `reset` | "reset", "clear", "unset", "恢复", "重置", "清除" |
-| `recommend` | "recommend", "suggest", "what should", "推荐", "建议" |
+| `show` | "show", "view", "get", "what", "current" |
+| `set` | "set", "change", "update", "use" |
+| `reset` | "reset", "clear", "unset" |
+| `recommend` | "recommend", "suggest", "what should" |
 | `unclear` | No clear match |
 
-### Execute action
-
-/scripts
+### 2. Execute action
 
 **show:**
-- /scripts
+- Run `companion.mjs --get` for the relevant adaptor.
 - Format output as a tier-column table (left-align with fixed spacing, `—` for unconfigured tiers).
 - If only one adaptor is configured, show that. Both empty → report "No configuration found" and offer to recommend.
 
 **set:**
 - Parse which adaptor (`opencode`/`cursor`/`omp`/`codex`) and tier (`low`/`medium`/`high`/`maximum`). Default adaptor: `opencode`.
 - If tier missing, show current config and ask.
-- /scripts
-- /scripts
+- Run `companion.mjs --set --adaptor <name> --tier <tier>`.
+- Before executing, confirm with the user unless the exact model was uniquely resolved and the user already implicitly confirmed.
 - Report success or error.
 
 **reset:**
 - Determine which adaptor to reset. If unspecified, ask.
 - Show current config for that adaptor, ask confirmation.
-- /scripts
+- Run `companion.mjs --reset --adaptor <name>`.
 - Report success or error.
 
 **recommend:**
-- /scripts
-- Classify available models by capability tier (`low`/`medium`/`high`/`maximum`) based on model ID heuristics.
+- Run `companion.mjs --list-models` to see available models.
+- Classify available models by capability tier based on model ID heuristics.
 - Present recommendations alongside current config.
 - Ask if user wants to apply. If yes, present proposed config, confirm, execute as in `set`.
 
@@ -70,7 +64,7 @@ Parse the natural-language prompt and classify into one of these intents:
 - Show current config via `--get`.
 - Ask the user what they'd like to do (show something else, set a tier, reset, recommend).
 
-### Display result
+### 3. Display result
 
 Always show the final state after any write operation by running `--get` again and rendering the table.
 
@@ -92,24 +86,17 @@ flowchart TD
     H --> I
 ```
 
-## Safety Rules
-
-- Before `--set`, always confirm with the user unless the exact model was uniquely resolved from `--list` and the user already implicitly confirmed.
-- Before `--reset`, always confirm which adaptor and that the user intends to clear.
-- If `--list` fails, report the CLI availability issue clearly — do not silently fall back to stale data.
-- If `--get` fails, show a clear warning but attempt to continue with partial data.
-- Never pass `--model` or `--agent` to `companion.mjs` in the `models` subcommand — only use the flags documented for `models`.
-
 ## Common Mistakes
 
-- Calling `--set` without confirming with the user first.
-- Silently falling back to stale data when `--list` fails.
+- Calling `--set` or `--reset` without confirming with the user first.
 - Passing `--model` or `--agent` flags to the `models` subcommand (they are not supported).
-- Confusing adaptor names — `codex` has no `--list-models` command, its model config comes from `model-map.json`.
+- Confusing adaptor names — `codex` has no `--list-models` command; its model config comes from `model-map.json`.
 - Not re-running `--get` after a write to confirm the change took effect.
+- Silently falling back to stale data when `--list` fails.
 
 ## Red Flags
 
 - `--list` fails for all adaptors — companion CLIs may not be installed or configured.
-- User asks to set a model that doesn't appear in `--list` output — warn but allow.
+- User asks to set a model that does not appear in `--list` output — warn but allow.
 - Multiple resets without verification — configuration drift.
+- `--get` fails — show a clear warning but attempt to continue with partial data.

@@ -15,10 +15,12 @@ Skills are organized in two categories:
 ```
 agents-for-myself/
 ├── instructions/default.md       # Canonical agent instructions (symlinked to ~/.claude/CLAUDE.md, ~/.copilot/instructions.md, etc.)
-├── bin/
-│   ├── sync-skills                # Sync leaf skill dirs into ~/.claude/skills and ~/.codex/skills as flat symlinks
-│   ├── maintain-instructions-symlinks  # Maintain symlinks from manifest to instructions/<stem>.md
-│   └── instructions-symlinks.paths     # Manifest of managed symlink paths
+├── scripts/
+│   ├── sync-skills.mjs                  # Sync leaf skill dirs into targets as flat symlinks
+│   ├── sync-skills.test.mjs             # Tests for sync-skills
+│   ├── maintain-instructions-symlinks.mjs  # Maintain symlinks from manifest to instructions/<stem>.md
+│   ├── maintain-instructions-symlinks.test.mjs # Tests for maintain-instructions-symlinks
+│   └── instructions-symlinks.paths      # Manifest of managed symlink paths
 ├── skills/                       # Canonical skill tree (single source of truth for Claude Code skills)
 │   ├── magicdoor-skills/         # MagicDoor-specific skills
 │   ├── mermaid-diagrams/
@@ -92,7 +94,7 @@ Some skills have `workflows/` containing modular step-by-step scripts sourced or
 ### Sync skills to Claude Code
 
 ```bash
-bin/sync-skills -h
+scripts/sync-skills.mjs -h
 ```
 
 Syncs leaf skill directories containing `SKILL.md` into target dirs as flat symlinks.
@@ -115,8 +117,8 @@ echo '# test' > /tmp/skills-sync-test-src/alpha/SKILL.md
 mkdir -p /tmp/skills-sync-test-src/cat-beta/gamma /tmp/skills-sync-test-src/cat-beta/delta
 echo '# g' > /tmp/skills-sync-test-src/cat-beta/gamma/SKILL.md
 echo '# d' > /tmp/skills-sync-test-src/cat-beta/delta/SKILL.md
-"bin/sync-skills" -s /tmp/skills-sync-test-src --dry-run
-"bin/sync-skills" -s /tmp/skills-sync-test-src
+"scripts/sync-skills.mjs" -s /tmp/skills-sync-test-src --dry-run
+"scripts/sync-skills.mjs" -s /tmp/skills-sync-test-src
 ```
 
 **Backup `~/.agents/skills` (recommended before first real sync):**
@@ -132,17 +134,19 @@ Restore: `tar -xzf backups/agents-skills-*.tar.gz -C "$HOME"`.
 ### Maintain instruction symlinks
 
 ```bash
-bin/maintain-instructions-symlinks -h
+scripts/maintain-instructions-symlinks.mjs -h
 ```
 
-Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed in `bin/instructions-symlinks.paths`.
+Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed in `scripts/instructions-symlinks.paths`.
 
 **Safety:** `unlink` only removes symlinks whose target resolves within this repo. Non-symlink files are warned and skipped. Broken symlinks are not removed.
 
 ## Key Conventions
 
 - **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
-- **English only:** All SKILL.md content must be written entirely in English
+- **English only:** All SKILL.md files must be written entirely in English. No other languages are permitted in skill content.
+- **Strict template compliance:** Every skill (new or rewritten) must follow `docs/skill-template.md` exactly — all 7 sections (Overview, When to Use, When NOT to Use, Quick Reference, Core Flow, Common Mistakes, Red Flags), no additions or omissions. Frontmatter must match the template schema (`name`, `description`, `category`, `date_added`).
+- **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs` to keep target directory symlinks in sync.
 - **Knowledge docs:** Design specs go in `.knowledge/docs/specs/`
 - **No build system:** This repo is pure Markdown with occasional shell scripts — no package.json, no tests, no CI
 - **Bash scripts:** Use `set -euo pipefail` and follow consistent CLI conventions (short options, `--dry-run`, `--help`)
@@ -152,7 +156,7 @@ Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed
 ### Instructions Management
 
 - The canonical instruction file lives at `instructions/default.md` (moved from `~/.agents/AGENTS.md`).
-- It is symlinked to multiple AI tool config paths via `bin/maintain-instructions-symlinks` using the manifest at `bin/instructions-symlinks.paths`.
+- It is symlinked to multiple AI tool config paths via `scripts/maintain-instructions-symlinks.mjs` using the manifest at `scripts/instructions-symlinks.paths`.
 - Multiple instruction stems can coexist in `instructions/`; select via `-c <stem>`.
 - No symlink is created at the repo root (Cursor root `AGENTS.md` is out of scope).
 
@@ -160,7 +164,7 @@ Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed
 
 - Skills are organized hierarchically in `skills/` but flattened into each target directory via symlinks.
 - `skills/` is the **single source of truth** for Codex and Claude Code skill sources.
-- Targets are declared in `bin/skills-symlinks.targets` (currently `~/.claude/skills` and `~/.codex/skills`).
+- Targets are declared in `scripts/skills-symlinks.targets` (currently `~/.claude/skills` and `~/.codex/skills`).
 
 ### Knowledge Documents
 

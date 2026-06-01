@@ -1,66 +1,95 @@
 ---
 name: ai-taught-me
-description: Use when the user asks to save documentation to or query the AI-taught-me knowledge repository. Supports writing new knowledge and retrieving existing knowledge via --mode flag or natural language inference.
-argument-hint: "[--mode write | query] <prompt>"
+description: Manage the personal AI-taught-me knowledge repository — write new knowledge and query existing knowledge via --mode flag or semantic inference.
+category: workflow
+date_added: "2026-05-29"
 ---
 
-# AI-taught-me
+## Overview
 
-<objective>
-Manage the personal knowledge repository at `/root/code/AI-taught-me` with two modes:
+Manage the personal knowledge repository at `/root/code/AI-taught-me`. Supports two modes: **Write** (document new case studies, guides, and cheat sheets) and **Query** (search and retrieve existing knowledge). Mode can be set explicitly via `--mode` flag or inferred from natural language.
 
-1. **Write** — Document new knowledge (case studies, guides, cheat sheets) into the repository
-2. **Query** — Search and retrieve existing knowledge from the repository
+## When to Use
 
-</objective>
+- User asks to save or document knowledge, tips, or solutions into the AI-taught-me repository
+- User asks to query or search previously documented knowledge
+- User mentions "AI-taught-me" or wants to interact with the personal knowledge repo
 
-<execution_context>
-@./workflows/common.md
-@./workflows/write.md
-@./workflows/query.md
-</execution_context>
+## When NOT to Use
 
-<process>
-**`$ARGUMENTS` 有两个部分：`[--mode <value>] <prompt>`**
+- User is asking general programming questions unrelated to stored knowledge
+- User wants to read or edit files outside the AI-taught-me repository
+- User wants to modify system configuration or other repos
 
-#### 1. 显式 `--mode` 标志（最高优先级）
+## Quick Reference
 
-- `--mode write` → **Write Mode** (`@./workflows/write.md`)
-- `--mode query` → **Query Mode** (`@./workflows/query.md`)
+### 1. Parse arguments
 
-剩余文本（prompt）作为参数传给对应 workflow。
+`$ARGUMENTS` has two parts: `[--mode <value>] <prompt>`
 
-#### 2. 默认 — 从用户叙述推断 mode
+### 2. Explicit --mode flag (highest priority)
 
-无 `--mode` 时，用完整 prompt 做语义推断。直接执行，**不要询问确认**。
+- `--mode write` → **Write Mode**. Execute `./workflows/write.md`. Commit and push after completion (mandatory).
+- `--mode query` → **Query Mode**. Execute `./workflows/query.md`. Use `find`/`grep` to locate files — do not read `.md` files directly before searching.
 
-推断逻辑：
-- 语义倾向"记录/保存/写" → Write Mode
-- 语义倾向"查询/搜索/找" → Query Mode
+### 3. Semantic inference (fallback)
 
-#### 3. 推断失败 — 列出 mode
+When no `--mode` is provided, infer from the full prompt. Execute directly — do not ask for confirmation.
+
+- Semantic倾向 "save/record/document" → Write Mode
+- Semantic倾向 "search/find/lookup" → Query Mode
+
+### 4. Inference failure
+
+If confidence is low, list modes and let the user choose:
 
 ```
-无法确定你要执行的操作：
-1. write  — 记录新知识到 AI-taught-me 仓库
-2. query  — 从 AI-taught-me 仓库查询已有知识
+Could not determine intent:
+1. write  — Record new knowledge to the AI-taught-me repository
+2. query  — Search existing knowledge in the AI-taught-me repository
 
-请选择（1/2）：
+Select (1/2):
 ```
 
-</process>
+### 5. Category and topic paths
 
-<critical_rules>
-- 不要猜测 category/topic 路径；不确定时向用户确认
-- 禁止创建超过 `category/topic/` 两层深度的目录
-- Write Mode 完成后必须 commit + push（MANDATORY）
-- Query Mode 不要直接 Read .md 文件，先用 find/grep 定位
-- Mode 推断不确定时走"列出 mode"分支，不要强行猜测
-</critical_rules>
+- Do not guess category/topic paths. Ask the user if uncertain.
+- Never create directories deeper than `category/topic/` (2 levels max).
 
-<ask_user_instead_of_guessing>
-- 无法确定是 write 还是 query（推断置信度低）
-- write 时不确定 category 或 topic 名称
-- query 时搜索无结果，或匹配过多（>10）
-- 用户请求的操作超出 write/query 范围
-</ask_user_instead_of_guessing>
+## Core Flow
+
+```mermaid
+flowchart TD
+    A([Start]) --> B[Parse $ARGUMENTS]
+    B --> C{Has --mode?}
+    C -->|Yes: write| D[Execute write workflow]
+    C -->|Yes: query| E[Execute query workflow]
+    C -->|No| F[Infer from semantics]
+    F --> G{Confidence high?}
+    G -->|Yes: write| D
+    G -->|Yes: query| E
+    G -->|No| H[List modes, ask user]
+    H --> I{User selects}
+    I -->|write| D
+    I -->|query| E
+    D --> J[Commit + push]
+    E --> K[Return results]
+    J --> L([Done])
+    K --> L
+```
+
+## Common Mistakes
+
+- Guessing category or topic paths instead of asking the user
+- Creating nested directories deeper than `category/topic/` (exceeds the 2-level limit)
+- Skipping git commit and push after write mode
+- Reading `.md` files directly in query mode before searching with `find`/`grep`
+- Forcing a mode guess when inference confidence is low — always list options instead
+
+## Red Flags
+
+- Cannot determine whether user wants write or query mode (confidence too low)
+- Category or topic is ambiguous or unknown — ask before proceeding
+- Search returns no results, or returns too many matches (>10)
+- User request falls outside write/query capability
+- Write mode encounters an error before commit — do not lose the drafted content
