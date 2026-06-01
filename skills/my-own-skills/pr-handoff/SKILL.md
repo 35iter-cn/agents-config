@@ -35,17 +35,23 @@ Probe build system in order: `package.json` → `go.mod` → `Cargo.toml` → `p
 
 Failure stops the entire flow.
 
-### Create or update
+### Create or update PR
 
-One step that handles everything from PR state check to comment attachment:
+One step that handles PR state check to body creation:
 
 1. **Check PR** — `gh pr view`. No PR / CLOSED → create; OPEN → update.
 2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
 3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
 4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely).
-5. **UAT** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. File exists and non-empty → compute `FEATURE_SLUG`, search PR for `<!-- uat-cases:$FEATURE_SLUG -->`, POST (new) or PATCH (replace). Empty/missing → skip.
 
-None of these sub-steps should fail in normal conditions.
+### Insert UAT comment
+
+**Goal: publish UAT cases to the PR as a comment.**
+
+1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Writes `.knowledge/notes/uat-cases.md`.
+2. **Post/Patch** — Read the generated file. If non-empty, search PR comments for `<!-- uat-cases -->`; POST if new, PATCH if exists. If empty/missing, skip.
+
+**Do not stop at file generation.** `pr-uat-case-gen` alone only writes the file; this step must also publish it.
 
 ### Verify
 
@@ -57,9 +63,10 @@ None of these sub-steps should fail in normal conditions.
 flowchart TD
     A([Start]) --> B[keep-branch-fresh]
     B --> C[Pre-push]
-    C --> D[Create or update]
-    D --> E[Verify]
-    E --> F([Done])
+    C --> D[Create or update PR]
+    D --> E[Insert UAT comment]
+    E --> F[Verify]
+    F --> G([Done])
 ```
 
 ## Common Mistakes
