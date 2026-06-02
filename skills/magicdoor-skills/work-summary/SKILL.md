@@ -1,145 +1,102 @@
 ---
 name: work-summary
-description: Use when generating a personal work summary from git commits and related PRs, especially when the user provides or implies a time range, wants current-user filtering, author-date-based counting, project-grouped output, or grouped PR links.
-argument-hint: "[--mode today|week]"
+description: Generate a personal work summary from git commits and related PRs
+category: workflow
+date_added: "2026-06-02"
 ---
 
-<when_to_use>
+## Overview
 
-- User requests a daily, weekly, or custom-range work summary
-- User wants per-author filtering, author-date counting, project-grouped output, or PR links
+Produce a concise, emoji-prefixed, project-grouped Markdown work summary from git history and GitHub PRs for a given date range.
 
-</when_to_use>
+## When to Use
 
-<context>
+- User asks for a daily, weekly, or custom-range work summary
+- User wants current-user filtering, author-date-based counting, project-grouped output, or grouped PR links
+- User implies a time range ("today", "this week", "last week", "June 1–5", "last 3 days")
 
-- `--mode today` (default): START_DATE = END_DATE = current local date
-- `--mode week`: Saturday–Friday natural week. START_DATE = most recent Saturday, END_DATE = corresponding Friday
-- Non-git parent dirs: scan only **one level** of direct subdirectory repos. Never recurse deeper.
+## When NOT to Use
 
-</context>
+- The project is not tracked by git
+- The user only wants raw `git log` output, not a synthesized summary
+- The user wants a team-wide summary (this skill filters to a single author by default)
 
-<objective>
+## Quick Reference
 
-Turn commit history into a concise, project-grouped personal work summary, merging related commits into at most 3 meaningful items per project. Append a matching PR section. Output as raw Markdown inside a code block.
+### Step 1: Classify Intent and Extract Parameters
 
-</objective>
+| Parameter | Description | Source |
+|---|---|---|
+| `$timeRange` | Time range intent | Natural language: "today" → today, "this week" → week, "last week" → last-week, custom dates → custom |
+| `$startDate` | Start date (YYYY-MM-DD) | Derived from `$timeRange` |
+| `$endDate` | End date (YYYY-MM-DD) | Derived from `$timeRange` |
+| `$author` | Git author email | Default: current user (`git config user.email`); optional override |
+| `$prState` | PR state filter | Default: `all`; optional: `open`, `merged`, `closed` |
 
-<execution_context>
+**Date Range Inference:**
 
-`work-summary.sh` in the same directory provides mode parsing, date range computation, and project discovery (`MODE`, `START_DATE`, `END_DATE`, `IS_GIT`, `PROJECT_COUNT`, `PROJECT_<N>_{NAME,DIR}`).
+| Trigger | Logic |
+|---|---|
+| "today", "今日" | start = end = today |
+| "this week", "本周", "这周" | most recent Saturday → next Friday |
+| "last week", "上周" | previous Saturday → previous Friday |
+| "this month", "本月", "这月" | 1st of this month → today |
+| Exact range (e.g., "June 1 to 5") | Parse directly |
+| "last N days" | N days ago → today |
 
-</execution_context>
+### Step 2: Execute the Script
 
-<critical_rules>
-
-### User Identity & Date Scope
-
-- Default: current user only. Resolve via `git config --get user.email`, match author email exactly. Never guess.
-- Filter by **author date** (`%as`), not committer date. `--since`/`--until` alone are insufficient.
-- Relative dates resolve at runtime. Never hardcode.
-
-### Project Grouping
-
-- Group commits by project, merge related subjects — never dump a raw list.
-- Max 3 items per project. Fewer than 3? Write fewer. Never pad.
-
-### Squash Merge
-
-- A squash-merge commit (`#123` in subject) is NOT new work if the repo has earlier topically-related commits. Exclude it.
-
-### PR Section
-
-- Include by default. Same user, same time range as work summary.
-- Default: all states (open/merged/closed) unless user specifies a filter.
-- Group by project. Supplementary to the summary.
-
-### Non-Git Directories
-
-- Not a git repo? Scan only **one level** of subdirectories. Never recurse.
-- Run full process against each repo independently, then merge results.
-
-### Summary Quality
-
-- Write as "action + outcome/purpose". Emoji prefix required. No raw commit subjects.
-
-</critical_rules>
-
-<process>
-
-### Step 1: Resolve Mode, Date Range, and Projects
+The script is located in the same directory as this SKILL.md (symlinked into `~/.claude/skills/work-summary/` by `sync-skills.mjs`):
 
 ```bash
-meta=$(sh "<skill-dir>/work-summary.sh" --mode "$mode")
-# Returns MODE, START_DATE, END_DATE, IS_GIT, PROJECT_COUNT, PROJECT_<N>_{NAME,DIR}
+script="$(dirname "$0")/work-summary.mjs"
+node "$script" --start-date "$startDate" --end-date "$endDate" [--author "$email"] [--pr-state "$prState"]
 ```
 
-Default `today`; `--mode week` for weekly summaries.
+On platforms that expose `SKILL_DIR` or `skill_dir`, prefer those over `dirname "$0"`.
 
-### Step 2: Identify the Author
+### Step 3: Render the Summary from JSON
 
-```bash
-git config --get user.email
+The script outputs a single JSON object to stdout. Render it as Markdown:
+
+1. For each project in `projects`:
+   - `## {project.name}`
+   - Up to 3 bullet points, merging related commit subjects semantically
+   - Each bullet: `emoji action + outcome/purpose`
+2. If any project has PRs, append `# PRs` section:
+   - Group by project: `## {project.name}`
+   - List each PR as `- [{state}] #{number}: {title} — {url}`
+3. If `warnings` array is non-empty, prepend a `> ⚠️` note with each warning.
+
+**Emoji reference:**
+- 🚀 Feature / major addition
+- 🛠️ Improvement / refactor
+- 🐛 Bug fix
+- ✅ Task / chore / cleanup
+- 📚 Documentation
+- ⚡ Performance
+
+## Core Flow
+
+```mermaid
+flowchart TD
+    A([User query]) --> B[Classify intent<br/>Extract parameters]
+    B --> C[Execute work-summary.mjs<br/>→ JSON output]
+    C --> D[Render Markdown<br/>from JSON]
+    D --> E([Deliver summary])
 ```
 
-### Step 3: Fetch & Filter
+## Common Mistakes
 
-```bash
-email=$(git config --get user.email)
-git log --all --no-merges --format='%as%x09%aE%x09%s' |
-awk -F'\t' -v start="$START_DATE" -v end="$END_DATE" -v email="$email" '
-  $1 >= start && $1 <= end && tolower($2) == tolower(email) { print $3 }'
-```
+- Forgetting to filter by author email, showing team commits
+- Using committer date instead of author date, causing off-by-one-day errors
+- Including squash-merge commits that repackage earlier work in the same range
+- Running the script in a non-git directory without scanning subdirectories
+- Skipping PR query because `gh` CLI is not authenticated, without warning the user
 
-### Step 5: Summarize Into Work Items
+## Red Flags
 
-1. Group by project → merge related subjects → write as "action + outcome/purpose"
-2. Max 3 per project. Format per `<output>` template.
-
-### Step 6: Collect PRs for the Same Range
-
-1. Query current user's PRs. Default: all states (open/merged/closed).
-2. Same time range as work. Group URLs by project. Append `# PRs` section.
-
-</process>
-
-<success_criteria>
-
-- [ ] Current user only, author date, grouped by project, max 3 items, no raw subjects
-- [ ] Squash merges excluded when they re-package earlier work
-- [ ] Output wrapped in ````markdown`, each item starts with emoji
-- [ ] PR section included (unless opted out), same user and range, all states, grouped by project
-- [ ] Non-git directories delegated to one-level subdirectory repos
-
-</success_criteria>
-
-<output>
-
-````markdown
-```markdown
-# <Time Range> Work Summary
-
-## Project Name
-
-- 🚀 Merged key item describing what was done and the outcome
-- 🛠️ Another item with action + result
-- 🐛 Bug fix: what was wrong and how it was resolved
-
-## Another Project
-
-- ✅ A representative work item from this period
-
-# PRs
-
-## Project Name
-
-- https://github.com/org/repo/pull/123
-- https://github.com/org/repo/pull/128
-
-## Another Project
-
-- https://github.com/org/repo/pull/285
-```
-````
-
-</output>
+- `gh` CLI not logged in → PR section missing; always check `warnings` in JSON
+- Empty `projects` array → respond with "No commits found in the specified range"
+- Script exits non-zero → show stderr to the user before attempting to parse JSON
+- Large monorepo scanning too deep → this skill scans only one level of subdirectories
