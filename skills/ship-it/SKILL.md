@@ -9,7 +9,7 @@ date_added: "2026-06-01"
 
 ## Overview
 
-A combo skill that bridges the gap between requirement discussion and working code by chaining four phases: design (brainstorming), review (cursor), refinement (agent re-evaluation), and implementation (opencode).
+A combo skill that bridges the gap between requirement discussion and working code by chaining six phases: design (brainstorming), review (cursor), refinement (agent re-evaluation), implementation (opencode), commit, and PR handoff.
 
 ## When to Use
 
@@ -80,6 +80,24 @@ Where `<spec-path>` is the (possibly revised) spec file from Phase 1/3.
 
 **On failure:** Pause, report error to user, wait for decision.
 
+### Phase 5: Auto Commit
+
+Check working tree status. If clean, skip to Phase 6.
+
+If changes exist:
+1. Generate a semantic commit message based on `git diff` content
+2. Run `git add -A && git commit -m "<message>"`
+
+**On failure:** Pause, report error to user, wait for decision.
+
+### Phase 6: Delegate PR Handoff
+
+**REQUIRED SUB-SKILL:** `pr-handoff`. Invoke the `pr-handoff` skill to push the branch and create/update the PR.
+
+**Execution:** Load and follow the `pr-handoff` skill directly.
+
+**On failure:** Pause, report error to user, wait for decision.
+
 ## Core Flow
 
 ```mermaid
@@ -91,10 +109,16 @@ flowchart TD
     D -->|No| F[Keep Original Spec]
     E --> F
     F --> G[Phase 4: Runx → Opencode Implement]
-    G --> H([Done])
+    G --> H{Working tree clean?}
+    H -->|No| I[Phase 5: Auto Commit]
+    H -->|Yes| J[Phase 6: PR Handoff]
+    I --> J
+    J --> K([Done])
     
-    C -.->|Failure| I[Pause & Report to User]
-    G -.->|Failure| I
+    C -.->|Failure| L[Pause & Report to User]
+    G -.->|Failure| L
+    I -.->|Failure| L
+    J -.->|Failure| L
 ```
 
 ## Common Mistakes
@@ -103,6 +127,8 @@ flowchart TD
 - Skipping the secondary evaluation and blindly applying all cursor suggestions
 - Not including codebase context in the review prompt, leading to generic feedback
 - Looping for multiple review rounds instead of one round as specified
+- Committing without checking working tree status first — must verify changes exist before generating a message
+- Skipping PR handoff because "it's just a small change" — the handoff ensures branch freshness and pre-push checks
 
 ## Red Flags
 
@@ -110,3 +136,5 @@ flowchart TD
 - Spec file cannot be found after brainstorming — check path before proceeding
 - User interrupts mid-flow with new requirements — stop, clarify, and restart if needed
 - Attempting to skip brainstorming because "we already discussed it" — the spec must be materialized as a document
+- Working tree has changes but commit was skipped — the pipeline is incomplete, stop and investigate
+- PR handoff fails silently without reporting to user — always surface the error and wait for decision

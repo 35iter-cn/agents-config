@@ -51,7 +51,7 @@ One step that handles PR state check to body creation:
 1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Writes `.knowledge/notes/uat-cases.md`.
 2. **Post/Patch** — Read the generated file. If non-empty, search PR comments for `<!-- uat-cases -->`; POST if new, PATCH if exists. If empty/missing, skip.
 
-**Do not stop at file generation.** `pr-uat-case-gen` alone only writes the file; this step must also publish it.
+**Must publish.** Do not stop at file generation; `pr-uat-case-gen` alone only writes the file, this step must also publish it.
 
 ### Verify
 
@@ -76,6 +76,8 @@ flowchart TD
 - Skipping pre-push checks under time pressure.
 - Not fetching remote before computing LMB (stale local).
 - Using wrong LMB when origin HEAD differs from local main.
+- Stopping at file generation after `pr-uat-case-gen` without publishing the UAT comment to the PR.
+- Creating duplicate UAT comments on the same PR instead of patching the existing one.
 
 ## Red Flags
 
