@@ -1,145 +1,78 @@
 ---
 name: work-summary
-description: Use when generating a personal work summary from git commits and related PRs, especially when the user provides or implies a time range, wants current-user filtering, author-date-based counting, project-grouped output, or grouped PR links.
-argument-hint: "[--mode today|week]"
+description: Use when generating a personal work summary from git commits and related pull requests for a date range, author filter, project grouping, or PR-state filter.
+category: workflow
+date_added: "2026-05-29"
 ---
 
-<when_to_use>
+## Overview
 
-- User requests a daily, weekly, or custom-range work summary
-- User wants per-author filtering, author-date counting, project-grouped output, or PR links
+Collect commit and pull-request data for a local-date range, then render it into a project-grouped work summary.
 
-</when_to_use>
+## When to Use
 
-<context>
+- User asks for a daily, weekly, or custom-range work summary.
+- User wants the summary limited to one author or grouped by repository.
+- User wants related PR links or PR-state filtering alongside commit activity.
+- User needs author-date based results instead of committer-date based results.
 
-- `--mode today` (default): START_DATE = END_DATE = current local date
-- `--mode week`: Saturday–Friday natural week. START_DATE = most recent Saturday, END_DATE = corresponding Friday
-- Non-git parent dirs: scan only **one level** of direct subdirectory repos. Never recurse deeper.
+## When NOT to Use
 
-</context>
+- User only wants raw `git log` output or a single command explanation.
+- The target directory is not a git repo and has no direct child repos to scan.
+- The user wants a team-wide report that spans multiple authors instead of one author filter.
 
-<objective>
+## Quick Reference
 
-Turn commit history into a concise, project-grouped personal work summary, merging related commits into at most 3 meaningful items per project. Append a matching PR section. Output as raw Markdown inside a code block.
+### Classify Intent and Extract Parameters
 
-</objective>
+| Parameter | Description | Source |
+| --- | --- | --- |
+| `$startDate` | Inclusive local start date | Infer from phrases like `today`, `this week`, `last week`, `this month`, or explicit dates |
+| `$endDate` | Inclusive local end date | Infer from the same phrase or explicit range |
+| `$author` | Optional author email override | User-provided email; omit the flag to default to `git config user.email` |
+| `$prState` | Optional PR-state filter | Default to `all`; use `open`, `closed`, or `merged` only when the user narrows it |
 
-<execution_context>
+### Execute the Script
 
-`work-summary.sh` in the same directory provides mode parsing, date range computation, and project discovery (`MODE`, `START_DATE`, `END_DATE`, `IS_GIT`, `PROJECT_COUNT`, `PROJECT_<N>_{NAME,DIR}`).
+Run `node "$SKILL_DIR/work-summary.mjs" --start-date "$startDate" --end-date "$endDate" [--author "$author"] [--pr-state "$prState"]`.
 
-</execution_context>
+The script returns JSON with:
 
-<critical_rules>
+- `meta.generatedAt` in local time with a numeric offset
+- `meta.timezone` as the local IANA timezone
+- `warnings` for skipped PR collection, such as unauthenticated `gh`
+- `projects[].commits` filtered by author date and de-duplicated for squash merges
+- `projects[].prs` filtered by `mergedAt` in range, or `createdAt` when `mergedAt` is absent
 
-### User Identity & Date Scope
+### Render the Result
 
-- Default: current user only. Resolve via `git config --get user.email`, match author email exactly. Never guess.
-- Filter by **author date** (`%as`), not committer date. `--since`/`--until` alone are insufficient.
-- Relative dates resolve at runtime. Never hardcode.
+Turn `projects` into Markdown with one heading per project, merge related commits into no more than three work items per project, write each item as `emoji + action + outcome/purpose`, and append a `# PRs` section only when PR data exists.
 
-### Project Grouping
+## Core Flow
 
-- Group commits by project, merge related subjects — never dump a raw list.
-- Max 3 items per project. Fewer than 3? Write fewer. Never pad.
-
-### Squash Merge
-
-- A squash-merge commit (`#123` in subject) is NOT new work if the repo has earlier topically-related commits. Exclude it.
-
-### PR Section
-
-- Include by default. Same user, same time range as work summary.
-- Default: all states (open/merged/closed) unless user specifies a filter.
-- Group by project. Supplementary to the summary.
-
-### Non-Git Directories
-
-- Not a git repo? Scan only **one level** of subdirectories. Never recurse.
-- Run full process against each repo independently, then merge results.
-
-### Summary Quality
-
-- Write as "action + outcome/purpose". Emoji prefix required. No raw commit subjects.
-
-</critical_rules>
-
-<process>
-
-### Step 1: Resolve Mode, Date Range, and Projects
-
-```bash
-meta=$(sh "<skill-dir>/work-summary.sh" --mode "$mode")
-# Returns MODE, START_DATE, END_DATE, IS_GIT, PROJECT_COUNT, PROJECT_<N>_{NAME,DIR}
+```mermaid
+flowchart TD
+    A([User asks for a work summary]) --> B[Extract local date range, author, and PR state]
+    B --> C[Run work-summary.mjs to collect JSON]
+    C --> D{Warnings or project errors?}
+    D -->|Yes| E[Explain gaps such as skipped PR data]
+    D -->|No| F[Summarize commits by project]
+    E --> F
+    F --> G[Render Markdown and optional PR section]
+    G --> H([Return the work summary])
 ```
 
-Default `today`; `--mode week` for weekly summaries.
+## Common Mistakes
 
-### Step 2: Identify the Author
+- Passing relative labels like `today` into the script instead of converting them to concrete `YYYY-MM-DD` dates first.
+- Forgetting that the script filters commits by author date in code, not with `git log --after/--before`.
+- Treating every `(#123)` commit as real work even when it is only a squash-merge wrapper around earlier commits in the same range.
+- Assuming PR data is available without checking `warnings` for `gh` authentication failures.
 
-```bash
-git config --get user.email
-```
+## Red Flags
 
-### Step 3: Fetch & Filter
-
-```bash
-email=$(git config --get user.email)
-git log --all --no-merges --format='%as%x09%aE%x09%s' |
-awk -F'\t' -v start="$START_DATE" -v end="$END_DATE" -v email="$email" '
-  $1 >= start && $1 <= end && tolower($2) == tolower(email) { print $3 }'
-```
-
-### Step 5: Summarize Into Work Items
-
-1. Group by project → merge related subjects → write as "action + outcome/purpose"
-2. Max 3 per project. Format per `<output>` template.
-
-### Step 6: Collect PRs for the Same Range
-
-1. Query current user's PRs. Default: all states (open/merged/closed).
-2. Same time range as work. Group URLs by project. Append `# PRs` section.
-
-</process>
-
-<success_criteria>
-
-- [ ] Current user only, author date, grouped by project, max 3 items, no raw subjects
-- [ ] Squash merges excluded when they re-package earlier work
-- [ ] Output wrapped in ````markdown`, each item starts with emoji
-- [ ] PR section included (unless opted out), same user and range, all states, grouped by project
-- [ ] Non-git directories delegated to one-level subdirectory repos
-
-</success_criteria>
-
-<output>
-
-````markdown
-```markdown
-# <Time Range> Work Summary
-
-## Project Name
-
-- 🚀 Merged key item describing what was done and the outcome
-- 🛠️ Another item with action + result
-- 🐛 Bug fix: what was wrong and how it was resolved
-
-## Another Project
-
-- ✅ A representative work item from this period
-
-# PRs
-
-## Project Name
-
-- https://github.com/org/repo/pull/123
-- https://github.com/org/repo/pull/128
-
-## Another Project
-
-- https://github.com/org/repo/pull/285
-```
-````
-
-</output>
+- Running the script without `--start-date` or `--end-date`.
+- Scanning deeper than one directory level when the current directory is not itself a git repo.
+- Rendering raw commit subjects directly to the user instead of rewriting them into outcome-oriented summary items.
+- Ignoring project-level `errors` or top-level `warnings` and claiming the report is complete.
