@@ -2,8 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import {
+  CliError,
+  parseArgs,
+  resolveAuthor,
+  discoverProjects,
+  fetchCommits,
+  filterSquashMerge,
+} from './work-summary.mjs';
 
 const SCRIPT = new URL('./work-summary.mjs', import.meta.url).pathname;
 
@@ -15,88 +23,280 @@ function setupRepo(base) {
   git(['init', '--initial-branch=main'], base);
   git(['config', 'user.email', 'test@test.com'], base);
   git(['config', 'user.name', 'Test'], base);
-  writeFileSync(join(base, 'README.md'), '# test\n');
-  git(['add', '-A'], base);
-  git(['commit', '-m', 'initial'], base);
 }
 
-test('work-summary --mode=today outputs date range and detects git repo', () => {
+// ---------------------------------------------------------------------------
+// parseArgs unit tests
+// ---------------------------------------------------------------------------
+
+test('parseArgs: required args only', () => {
+  const result = parseArgs(['node', 'script', '--start-date', '2026-06-01', '--end-date', '2026-06-02']);
+  assert.equal(result.startDate, '2026-06-01');
+  assert.equal(result.endDate, '2026-06-02');
+  assert.equal(result.author, null);
+  assert.equal(result.prState, 'all');
+});
+
+test('parseArgs: with --author', () => {
+  const result = parseArgs(['node', 'script', '--start-date', '2026-06-01', '--end-date', '2026-06-02', '--author', 'foo@bar.com']);
+  assert.equal(result.author, 'foo@bar.com');
+});
+
+test('parseArgs: with --pr-state', () => {
+  const result = parseArgs(['node', 'script', '--start-date', '2026-06-01', '--end-date', '2026-06-02', '--pr-state', 'merged']);
+  assert.equal(result.prState, 'merged');
+});
+
+test('parseArgs: missing --start-date throws', () => {
+  assert.throws(() => {
+    parseArgs(['node', 'script', '--end-date', '2026-06-02']);
+  }, CliError);
+});
+
+test('parseArgs: invalid --pr-state throws', () => {
+  assert.throws(() => {
+    parseArgs(['node', 'script', '--start-date', '2026-06-01', '--end-date', '2026-06-02', '--pr-state', 'invalid']);
+  }, CliError);
+});
+
+test('parseArgs: invalid date format throws', () => {
+  assert.throws(() => {
+    parseArgs(['node', 'script', '--start-date', '06-01-2026', '--end-date', '2026-06-02']);
+  }, CliError);
+});
+
+test('parseArgs: equals syntax', () => {
+  const result = parseArgs(['node', 'script', '--start-date=2026-06-01', '--end-date=2026-06-02', '--author=foo@bar.com', '--pr-state=closed']);
+  assert.equal(result.startDate, '2026-06-01');
+  assert.equal(result.endDate, '2026-06-02');
+  assert.equal(result.author, 'foo@bar.com');
+  assert.equal(result.prState, 'closed');
+});
+
+// ---------------------------------------------------------------------------
+// resolveAuthor tests
+// ---------------------------------------------------------------------------
+
+test('resolveAuthor: reads git config', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
   try {
     setupRepo(tmp);
-    const out = execFileSync(SCRIPT, ['--mode=today'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
-    const lines = out.split('\n');
-    assert.match(lines[0], /MODE=today/);
-    assert.match(lines[1], /START_DATE=\d{4}-\d{2}-\d{2}/);
-    assert.match(lines[2], /END_DATE=\d{4}-\d{2}-\d{2}/);
-    assert.match(lines[3], /IS_GIT=true/);
-    assert.match(lines[4], /PROJECT_COUNT=1/);
-    assert.match(lines[5], /PROJECT_1_NAME=/);
-    assert.match(lines[6], /PROJECT_1_DIR=/);
+    const result = resolveAuthor(tmp);
+    assert.equal(result.email, 'test@test.com');
+    assert.equal(result.name, 'Test');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('work-summary --mode=today start equals end', () => {
+test('resolveAuthor: falls back to global git config outside repo', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
+  try {
+    const result = resolveAuthor(tmp);
+    // Global git config may or may not exist in the test environment.
+    // We only assert the return type: either null or an object with email.
+    if (result !== null) {
+      assert.ok(typeof result.email === 'string');
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// discoverProjects tests
+// ---------------------------------------------------------------------------
+
+test('discoverProjects: returns current repo', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
   try {
     setupRepo(tmp);
-    const out = execFileSync(SCRIPT, ['--mode=today'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
-    const lines = out.split('\n');
-    const start = lines[1].split('=')[1];
-    const end = lines[2].split('=')[1];
-    assert.equal(start, end);
+    const result = discoverProjects(tmp);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, basename(tmp));
+    assert.equal(result[0].dir, resolve(tmp));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('work-summary --mode=week outputs date range', () => {
+test('discoverProjects: scans one-level subdirectories', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
+  try {
+    const repoA = join(tmp, 'repo-a');
+    const plainB = join(tmp, 'plain-b');
+    mkdirSync(repoA);
+    mkdirSync(plainB);
+    setupRepo(repoA);
+
+    const result = discoverProjects(tmp);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, 'repo-a');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('discoverProjects: empty for non-repo with no sub-repos', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
+  try {
+    const result = discoverProjects(tmp);
+    assert.equal(result.length, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// fetchCommits integration tests
+// ---------------------------------------------------------------------------
+
+function makeCommit(cwd, file, msg, dateStr) {
+  const env = { ...process.env, GIT_AUTHOR_DATE: `${dateStr}T12:00:00`, GIT_COMMITTER_DATE: `${dateStr}T12:00:00` };
+  writeFileSync(join(cwd, file), `${file}\n`, { flag: 'a' });
+  execFileSync('git', ['add', '-A'], { cwd, env });
+  execFileSync('git', ['commit', '-m', msg], { cwd, env, encoding: 'utf8', stdio: 'pipe' });
+}
+
+test('fetchCommits: filters by author date and email', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
   try {
     setupRepo(tmp);
-    const out = execFileSync(SCRIPT, ['--mode=week'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
-    const lines = out.split('\n');
-    assert.match(lines[0], /MODE=week/);
-    assert.match(lines[1], /START_DATE=\d{4}-\d{2}-\d{2}/);
-    assert.match(lines[2], /END_DATE=\d{4}-\d{2}-\d{2}/);
+    // Set up two authors
+    git(['config', 'user.email', 'target@test.com'], tmp);
+    makeCommit(tmp, 'a.txt', 'feat: add A', '2026-06-01');
+    makeCommit(tmp, 'b.txt', 'feat: add B', '2026-06-02');
+    git(['config', 'user.email', 'other@test.com'], tmp);
+    makeCommit(tmp, 'c.txt', 'feat: add C', '2026-06-02');
+
+    const commits = fetchCommits(tmp, 'target@test.com', '2026-06-01', '2026-06-02');
+    assert.equal(commits.length, 2);
+    assert.ok(commits.some(c => c.subject === 'feat: add A'));
+    assert.ok(commits.some(c => c.subject === 'feat: add B'));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('work-summary reports IS_GIT=false in non-repo directory', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
-  try {
-    // No git init — just a plain temp dir
-    const out = execFileSync(SCRIPT, ['--mode=today'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
-    const prefix = out.split('\n').slice(0, 3).join('\n');
-    // Should still output MODE, START_DATE, END_DATE
-    assert.match(prefix, /MODE=today/);
-    assert.match(prefix, /START_DATE=/);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('work-summary rejects invalid mode', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
-  try {
-    assert.throws(() => {
-      execFileSync(SCRIPT, ['--mode=invalid'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' });
-    }, /Unsupported mode/);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('work-summary accepts --mode value as separate arg', () => {
+test('fetchCommits: case-insensitive email matching', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
   try {
     setupRepo(tmp);
-    const out = execFileSync(SCRIPT, ['--mode', 'today'], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
-    assert.match(out, /MODE=today/);
+    git(['config', 'user.email', 'Target@Test.COM'], tmp);
+    makeCommit(tmp, 'a.txt', 'feat: add A', '2026-06-01');
+
+    const commits = fetchCommits(tmp, 'target@test.com', '2026-06-01', '2026-06-01');
+    assert.equal(commits.length, 1);
+    assert.equal(commits[0].subject, 'feat: add A');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('fetchCommits: date range excludes out-of-range commits', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
+  try {
+    setupRepo(tmp);
+    git(['config', 'user.email', 'target@test.com'], tmp);
+    makeCommit(tmp, 'a.txt', 'feat: add A', '2026-06-01');
+    makeCommit(tmp, 'b.txt', 'feat: add B', '2026-06-03');
+
+    const commits = fetchCommits(tmp, 'target@test.com', '2026-06-02', '2026-06-02');
+    assert.equal(commits.length, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// filterSquashMerge unit tests
+// ---------------------------------------------------------------------------
+
+test('filterSquashMerge: removes squash merge when non-squash exists', () => {
+  const commits = [
+    { date: '2026-06-01', subject: 'feat: add X', hash: 'abc1234' },
+    { date: '2026-06-01', subject: 'feat: add X (#42)', hash: 'def5678' },
+    { date: '2026-06-01', subject: 'fix: bug Y', hash: 'ghi9012' },
+  ];
+  const result = filterSquashMerge(commits);
+  assert.equal(result.length, 2);
+  assert.ok(result.some(c => c.subject === 'feat: add X'));
+  assert.ok(result.some(c => c.subject === 'fix: bug Y'));
+  assert.ok(!result.some(c => c.subject === 'feat: add X (#42)'));
+});
+
+test('filterSquashMerge: keeps squash merge when no non-squash exists', () => {
+  const commits = [
+    { date: '2026-06-01', subject: 'feat: add X (#42)', hash: 'def5678' },
+  ];
+  const result = filterSquashMerge(commits);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'feat: add X (#42)');
+});
+
+test('filterSquashMerge: deduplicates by date+subject', () => {
+  const commits = [
+    { date: '2026-06-01', subject: 'feat: add X', hash: 'abc1234' },
+    { date: '2026-06-01', subject: 'feat: add X', hash: 'def5678' },
+  ];
+  const result = filterSquashMerge(commits);
+  assert.equal(result.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end JSON output schema test
+// ---------------------------------------------------------------------------
+
+test('end-to-end: JSON schema is valid', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'summary-test-'));
+  try {
+    setupRepo(tmp);
+    git(['config', 'user.email', 'target@test.com'], tmp);
+    makeCommit(tmp, 'a.txt', 'feat: add A', '2026-06-01');
+
+    const raw = execFileSync(SCRIPT, [
+      '--start-date', '2026-06-01',
+      '--end-date', '2026-06-01',
+      '--author', 'target@test.com',
+    ], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' });
+
+    const output = JSON.parse(raw);
+
+    // Top-level keys
+    assert.ok(output.meta, 'missing meta');
+    assert.ok(output.dateRange, 'missing dateRange');
+    assert.ok(output.author, 'missing author');
+    assert.ok(Array.isArray(output.warnings), 'warnings must be array');
+    assert.ok(Array.isArray(output.projects), 'projects must be array');
+
+    // meta
+    assert.ok(output.meta.generatedAt, 'missing generatedAt');
+    assert.ok(output.meta.timezone, 'missing timezone');
+    assert.ok(output.meta.prState, 'missing prState');
+
+    // dateRange
+    assert.ok(output.dateRange.start, 'missing dateRange.start');
+    assert.ok(output.dateRange.end, 'missing dateRange.end');
+
+    // author
+    assert.ok(output.author.email, 'missing author.email');
+
+    // project schema
+    if (output.projects.length > 0) {
+      const proj = output.projects[0];
+      assert.ok(proj.name, 'missing project.name');
+      assert.ok(proj.dir, 'missing project.dir');
+      assert.ok(Array.isArray(proj.errors), 'project.errors must be array');
+      assert.ok(Array.isArray(proj.commits), 'project.commits must be array');
+      assert.ok(Array.isArray(proj.prs), 'project.prs must be array');
+
+      if (proj.commits.length > 0) {
+        const commit = proj.commits[0];
+        assert.ok(commit.date, 'missing commit.date');
+        assert.ok(commit.subject, 'missing commit.subject');
+        assert.ok(commit.hash, 'missing commit.hash');
+      }
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

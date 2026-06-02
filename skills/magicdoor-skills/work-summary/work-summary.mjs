@@ -8,7 +8,9 @@ import { resolve, basename } from 'node:path';
 // ---------------------------------------------------------------------------
 // 1. Argument parsing
 // ---------------------------------------------------------------------------
-function parseArgs(argv) {
+export class CliError extends Error {}
+
+export function parseArgs(argv) {
   const args = argv.slice(2);
   const result = {
     startDate: null,
@@ -36,46 +38,36 @@ function parseArgs(argv) {
     } else if (arg.startsWith('--pr-state=')) {
       result.prState = arg.slice(11);
     } else if (arg === '--help' || arg === '-h') {
-      printUsage();
-      process.exit(0);
+      throw new CliError('HELP');
     } else {
-      process.stderr.write(`Unknown argument: ${arg}\n`);
-      printUsage();
-      process.exit(1);
+      throw new CliError(`Unknown argument: ${arg}\n${getUsage()}`);
     }
   }
 
   if (!result.startDate || !result.endDate) {
-    process.stderr.write('Error: --start-date and --end-date are required\n');
-    printUsage();
-    process.exit(1);
+    throw new CliError('Error: --start-date and --end-date are required\n' + getUsage());
   }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(result.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(result.endDate)) {
-    process.stderr.write('Error: dates must be in YYYY-MM-DD format\n');
-    printUsage();
-    process.exit(1);
+    throw new CliError('Error: dates must be in YYYY-MM-DD format\n' + getUsage());
   }
 
   const validStates = ['all', 'open', 'merged', 'closed'];
   if (!validStates.includes(result.prState)) {
-    process.stderr.write(`Error: --pr-state must be one of: ${validStates.join(', ')}\n`);
-    printUsage();
-    process.exit(1);
+    throw new CliError(`Error: --pr-state must be one of: ${validStates.join(', ')}\n${getUsage()}`);
   }
 
   return result;
 }
 
-function printUsage() {
-  process.stderr.write(`Usage: node work-summary.mjs --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--author email] [--pr-state all|open|merged|closed]
-`);
+function getUsage() {
+  return 'Usage: node work-summary.mjs --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--author email] [--pr-state all|open|merged|closed]';
 }
 
 // ---------------------------------------------------------------------------
 // 2. Resolve author from git config
 // ---------------------------------------------------------------------------
-function resolveAuthor(cwd) {
+export function resolveAuthor(cwd) {
   try {
     const email = execFileSync('git', ['config', '--get', 'user.email'], {
       cwd,
@@ -101,7 +93,7 @@ function resolveAuthor(cwd) {
 // ---------------------------------------------------------------------------
 // 3. Discover projects
 // ---------------------------------------------------------------------------
-function discoverProjects(cwd) {
+export function discoverProjects(cwd) {
   // Case 1: cwd itself is a git repo
   try {
     const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -159,7 +151,7 @@ function discoverProjects(cwd) {
 // ---------------------------------------------------------------------------
 // 4. Fetch commits
 // ---------------------------------------------------------------------------
-function fetchCommits(dir, authorEmail, startDate, endDate) {
+export function fetchCommits(dir, authorEmail, startDate, endDate) {
   const output = execFileSync(
     'git',
     ['log', '--all', '--no-merges', '--format=%as\t%aE\t%s\t%h'],
@@ -185,7 +177,7 @@ function fetchCommits(dir, authorEmail, startDate, endDate) {
 // ---------------------------------------------------------------------------
 // 5. Filter squash-merge commits
 // ---------------------------------------------------------------------------
-function filterSquashMerge(commits) {
+export function filterSquashMerge(commits) {
   const seenKeys = new Set();
   const result = [];
 
@@ -231,7 +223,7 @@ function filterSquashMerge(commits) {
 // ---------------------------------------------------------------------------
 // 6. Check gh auth
 // ---------------------------------------------------------------------------
-function checkGhAuth() {
+export function checkGhAuth() {
   try {
     execFileSync('gh', ['auth', 'status'], { encoding: 'utf8', stdio: 'pipe' });
     return true;
@@ -243,7 +235,7 @@ function checkGhAuth() {
 // ---------------------------------------------------------------------------
 // 7. Query PRs
 // ---------------------------------------------------------------------------
-function queryPRs(dir, authorEmail, startDate, endDate, prState) {
+export function queryPRs(dir, authorEmail, startDate, endDate, prState) {
   if (!checkGhAuth()) return [];
 
   const stateArg = prState === 'all' ? 'all' : prState;
@@ -309,7 +301,22 @@ function queryPRs(dir, authorEmail, startDate, endDate, prState) {
 // 8. Main
 // ---------------------------------------------------------------------------
 function main() {
-  const { startDate, endDate, author, prState } = parseArgs(process.argv);
+  let args;
+  try {
+    args = parseArgs(process.argv);
+  } catch (err) {
+    if (err instanceof CliError) {
+      if (err.message === 'HELP') {
+        process.stdout.write(getUsage() + '\n');
+        process.exit(0);
+      }
+      process.stderr.write(err.message + '\n');
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  const { startDate, endDate, author, prState } = args;
 
   const cwd = process.cwd();
   const authorInfo = author
@@ -371,4 +378,6 @@ function main() {
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');
 }
 
-main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
