@@ -52,20 +52,20 @@ Does the user input contain resumption intent (e.g., `resume`, `continue`, `go b
 | Multi-file refactors, architecture changes | `high` |
 | Repository-wide changes | `maximum` |
 
-### Compose Final Prompt
+### Compose Final Prompt — MANDATORY: 3-Step Process
 
-**MANDATORY:** Prompt must be composed strictly from the templates below. No structural modifications allowed.
+No structural modifications allowed. Follow the 3 steps exactly.
 
 **Step 1: Select Template**
 
-| Mode   | Template Structure     | Why                                                  |
-| ------ | ---------------------- | ---------------------------------------------------- |
-| NEW    | Task + Context + Rules | Full context and decision rules required             |
-| RESUME | Task + Changes         | Historical context already exists; only delta needed |
+| Mode   | Template Description       | When to Use                                        |
+| ------ | -------------------------- | -------------------------------------------------- |
+| NEW    | Task + Context + Rules     | First interaction; full context required           |
+| RESUME | Task + Changes             | Continuing an existing session; only delta needed  |
 
-**Step 2: Fill Variables**
+**Step 2: Copy + Fill**
 
-Replace placeholders only. Do not add, remove, merge, or reorder sections.
+Open a code block. Paste the selected mode's template below, then replace `{{...}}` placeholders with actual values:
 
 | Placeholder              | Replacement                                                        |
 | ------------------------ | ------------------------------------------------------------------ |
@@ -73,9 +73,7 @@ Replace placeholders only. Do not add, remove, merge, or reorder sections.
 | `{{$files}}`             | Relevant file paths; omit entire Context section for trivial tasks |
 | `{{$technical_context}}` | Codebase background and architecture                               |
 
-**Templates**
-
-NEW mode:
+NEW mode template:
 
 ```
 ## Task
@@ -89,13 +87,32 @@ NEW mode:
 - **Mandatory:** When uncertain about the next step, list the options, mark the best one with ⭐, and end with `[NEEDS_DECISION: <reason>]`.
 ```
 
-RESUME mode:
+RESUME mode template:
 
 ```
 {{$task}}
 
 {{$files}}
 ```
+
+**Step 3: Verify**
+
+Check the completed code block contains **zero** `{{` sequences. The final prompt string must start with exactly `## Task` (NEW mode) or the resolved task text (RESUME mode).
+
+If the check fails, return to Step 2 — you did not use the template.
+
+Then assign to a variable:
+
+```bash
+finalPrompt=$(cat <<'__EOF__'
+## Task
+<resolved task>
+...
+__EOF__
+)
+```
+
+Use `$finalPrompt` in the Execute step. Never inline a raw heredoc.
 
 ### Execute by Your Platform
 
