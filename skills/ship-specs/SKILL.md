@@ -1,41 +1,42 @@
 ---
-name: ship-it
+name: ship-specs
 description: |
-  Orchestrate the full design-to-implementation pipeline: generate a design spec via brainstorming, have cursor review it, fix high-confidence issues, then delegate implementation to opencode.
-  Use when the user has clarified requirements and says "ship it" or wants to move from discussion to working code through a structured design-review-build workflow.
+  Orchestrate the implementation pipeline from an existing design spec: have cursor review it, fix high-confidence issues, then delegate implementation to opencode, auto-commit, and hand off the PR.
+  Use when the user has a design spec ready and wants to move from spec to working code through a structured review-build workflow.
 category: workflow
 date_added: "2026-06-01"
 ---
 
 ## Overview
 
-A combo skill that bridges the gap between requirement discussion and working code by chaining six phases: design (brainstorming), review (cursor), refinement (agent re-evaluation), implementation (opencode), commit, and PR handoff.
+A combo skill that bridges the gap between a ready design spec and working code by chaining five phases: spec validation, review (cursor), refinement (agent re-evaluation), implementation (opencode), commit, and PR handoff.
 
 ## When to Use
 
-- User says "ship it" after requirements have been clarified
-- User wants a structured path from discussion to implementation
+- User has a design spec ready and wants to "ship it"
+- User wants a structured path from spec to implementation
 - User wants peer review on the design before coding starts
-- Requirements are clear enough to generate a design spec
+- The spec file path is known or can be inferred from session context
 
 ## When NOT to Use
 
-- Requirements are still vague or exploratory
+- No design spec exists yet — use `brainstorming` first
 - User only wants a quick one-off edit
 - The project has no established conventions or codebase context
 - User explicitly wants to skip the design/review phase
 
 ## Quick Reference
 
-### Phase 1: Generate Design Spec
+### Phase 1: Validate Spec
 
-**REQUIRED SUB-SKILL:** `brainstorming`. Generate a design spec from the current session context. Capture:
-- Problem statement and goals
-- Proposed solution and architecture
-- Key decisions and trade-offs
-- Files and components to create or modify
+**Input:** Spec file path from session context (user mention, previous brainstorming output, or explicit path).
 
-Save the spec to `.knowledge/docs/specs/` with a descriptive filename. Note the filepath.
+**Action:**
+1. Extract the spec file path from session context
+2. Verify the file exists
+3. If not found: pause, report to user, wait for decision
+
+**Output:** Validated spec file path.
 
 ### Phase 2: Delegate Review to Cursor
 
@@ -102,8 +103,9 @@ If changes exist:
 
 ```mermaid
 flowchart TD
-    A([User says "ship it"]) --> B[Phase 1: Brainstorming → Design Spec]
-    B --> C[Phase 2: Runx → Cursor Review]
+    A([User says "ship it" or provides spec]) --> B[Phase 1: Validate Spec Path]
+    B -->|Path invalid| M[Pause & Report to User]
+    B -->|Path valid| C[Phase 2: Runx → Cursor Review]
     C --> D{High-confidence issues?}
     D -->|Yes| E[Revise Spec]
     D -->|No| F[Keep Original Spec]
@@ -129,12 +131,13 @@ flowchart TD
 - Looping for multiple review rounds instead of one round as specified
 - Committing without checking working tree status first — must verify changes exist before generating a message
 - Skipping PR handoff because "it's just a small change" — the handoff ensures branch freshness and pre-push checks
+- Failing to verify spec path exists before delegating to cursor — always validate in Phase 1
 
 ## Red Flags
 
 - Cursor review has no confidence ratings — prompt was malformed, stop and fix
-- Spec file cannot be found after brainstorming — check path before proceeding
+- Spec file cannot be found after validation — check path before proceeding
 - User interrupts mid-flow with new requirements — stop, clarify, and restart if needed
-- Attempting to skip brainstorming because "we already discussed it" — the spec must be materialized as a document
 - Working tree has changes but commit was skipped — the pipeline is incomplete, stop and investigate
 - PR handoff fails silently without reporting to user — always surface the error and wait for decision
+- Session context has no spec path and user did not provide one — cannot proceed without a spec
