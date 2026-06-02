@@ -1,20 +1,15 @@
 ---
 name: runx
-description: User directs a task to another AI coding CLI tool (cursor, opencode, omp, codex) by name, or references a generic "companion" — indicating they want that tool to handle the work rather than the current agent.
+description: Delegate tasks to a companion CLI with session-aware resumption support. A companion is an external AI agent that can execute long-running tasks and maintain context across multiple interactions.
 category: workflow
 date_added: "2026-05-29"
 ---
-
-## Overview
-
-Delegate tasks to a companion CLI with session-aware resumption support.
 
 ## When to Use
 
 - User asks to resume or continue a previous companion session
 - User wants to delegate a long-running task that may span multiple interactions
-- User explicitly references an agent by name (`cursor`, `opencode`, `omp`, `codex`) with a specific task
-- User references cursor, opencode, omp, codex, or "companion" with a task description
+- User explicitly references a "companion" with a task description
 - Task requires session-aware context that outlives a single command
 
 ## When NOT to Use
@@ -25,26 +20,29 @@ Delegate tasks to a companion CLI with session-aware resumption support.
 
 ## Quick Reference
 
+$cli_path: `<current_skill_root>/scripts/companion.mjs`
+
 ### Classify Intent and Extract Parameters
 
 **Step 1: Classify Mode**
 Does the user input contain resumption intent (e.g., `resume`, `continue`, `go back to`)?
+
 - **Yes** → RESUME mode, proceed to Step 2
 - **No** → NEW mode, proceed to Step 2
 
 **Step 2: Extract Parameters**
 
-| Parameter | Description | NEW Mode Source | RESUME Mode Source |
-|---|---|---|---|
-| `$task` | Core task description | Remaining text after parameter extraction | Resumption intent or new directive |
-| `$agent` | Target companion CLI | User mention, defaults to `opencode` | Inherit from original session or user override |
-| `$files` | Contextually relevant files | Related file paths from context | Related file paths from context |
-| `$modelTier` | Model capability level | User-specified or inferred from complexity | Inherit from original session or user override |
+| Parameter    | Description                 | NEW Mode Source                                                    | RESUME Mode Source                             |
+| ------------ | --------------------------- | ------------------------------------------------------------------ | ---------------------------------------------- |
+| `$task`      | Core task description       | Remaining text after parameter extraction                          | Resumption intent or new directive             |
+| `$companion` | Target companion type       | User mention (e.g., cursor, Claude Code, omp, opencode) or default | Inherit from original session or user override |
+| `$files`     | Contextually relevant files | Related file paths from context                                    | Related file paths from context                |
+| `$modelTier` | Model capability level      | User-specified or inferred from complexity                         | Inherit from original session or user override |
 
 **RESUME-specific:**
 | Parameter | Source | On No Match |
 |---|---|---|
-| `$sessionID` | Match history by agent reference, generic reference, or task similarity | Ask whether to start a new task |
+| `$sessionID` | Match history by companion reference or task similarity | Ask whether to start a new task |
 
 **Model Tier Inference:**
 | Complexity | Tier |
@@ -60,24 +58,25 @@ Does the user input contain resumption intent (e.g., `resume`, `continue`, `go b
 
 **Step 1: Select Template**
 
-| Mode | Template Structure | Why |
-|---|---|---|
-| NEW | Task + Context + Rules | Full context and decision rules required |
-| RESUME | Task + Changes | Historical context already exists; only delta needed |
+| Mode   | Template Structure     | Why                                                  |
+| ------ | ---------------------- | ---------------------------------------------------- |
+| NEW    | Task + Context + Rules | Full context and decision rules required             |
+| RESUME | Task + Changes         | Historical context already exists; only delta needed |
 
 **Step 2: Fill Variables**
 
 Replace placeholders only. Do not add, remove, merge, or reorder sections.
 
-| Placeholder | Replacement |
-|---|---|
-| `{{$task}}` | Core task description |
-| `{{$files}}` | Relevant file paths; omit entire Context section for trivial tasks |
-| `{{$technical_context}}` | Codebase background and architecture |
+| Placeholder              | Replacement                                                        |
+| ------------------------ | ------------------------------------------------------------------ |
+| `{{$task}}`              | Core task description                                              |
+| `{{$files}}`             | Relevant file paths; omit entire Context section for trivial tasks |
+| `{{$technical_context}}` | Codebase background and architecture                               |
 
 **Templates**
 
 NEW mode:
+
 ```
 ## Task
 {{$task}}
@@ -91,6 +90,7 @@ NEW mode:
 ```
 
 RESUME mode:
+
 ```
 {{$task}}
 
@@ -100,37 +100,33 @@ RESUME mode:
 ### Execute by Your Platform
 
 **Prerequisites**
+
 - `$finalPrompt` composed from template
 - All information extracted (Step 2)
+- The environment has a companion CLI installed and available in PATH
 
-**Claude Code**
+**Execution**
 
-Use `Monitor` tool to run the companion in background and stream output:
+Run the companion CLI with the composed prompt:
 
-```javascript
-Monitor({
-  command: `node "<SKILL_ROOT>/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
+```bash
+node $cli_path run --agent $companion --model $modelTier <<'__EOF__'
 ${finalPrompt}
-__EOF__`
-})
+__EOF__
 ```
 
-**OMP**
+For RESUME mode, add `--session "${sessionID}"` before the heredoc.
 
-Use `bash` with `async: true` to start background job, then `job` to await completion:
+**Variable mapping:** `$runCmd` is the command template defined in the Execution section above.
 
-```javascript
-bash({
-  command: `node "skill://runx/scripts/companion.mjs" run --agent "${agent}" --model "${modelTier}" <<'__EOF__'
-${finalPrompt}
-__EOF__`,
-  async: true,
-  timeout: 3600
-})
-// Then: job({ poll: ["bg_<id>"] })
-```
+**Execution (pick one based on your platform):**
 
-For RESUME mode, add `--session "${sessionID}"` before the heredoc in both platforms.
+| Platform        | Execution (pseudocode)                                                        | Notes                                      |
+| --------------- | ----------------------------------------------------------------------------- | ------------------------------------------ |
+| **Claude Code** | `Monitor({ command: "$runCmd" })`                                             | Background execution with streaming output |
+| **OMP**         | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })`    | Async launch then poll                     |
+| **OpenCode**    | `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks | Long timeout foreground execution          |
+| **Other**       | Adapt to platform's async job mechanism                                       | —                                          |
 
 ### Handle Response
 
@@ -138,11 +134,11 @@ Companion streams output, then final line: `{"type":"done","success":bool,"summa
 
 **Response Paths**
 
-| Path | Trigger | Action |
-|---|---|---|
-| Error | `sessionError` present | Report error and stop |
+| Path     | Trigger                              | Action                                          |
+| -------- | ------------------------------------ | ----------------------------------------------- |
+| Error    | `sessionError` present               | Report error and stop                           |
 | Decision | `[NEEDS_DECISION]` in `finalMessage` | [Decision Path Details](#decision-path-details) |
-| Default | Neither above | Summarize companion's results |
+| Default  | Neither above                        | Summarize companion's results                   |
 
 #### Decision Path Details
 
@@ -167,10 +163,7 @@ flowchart TD
 ## Common Mistakes
 
 - Using file contents instead of file paths in `$files`.
-- Using a platform-specific tool from the wrong section (e.g. calling `Monitor` on OMP, or calling `job` on Claude Code).
 - Not extracting `$sessionID` before resuming — creates a new session instead of continuing.
-- Using `read` or `find` to resolve the script path (`skill://runx/scripts/companion.mjs`). `read skill://runx/scripts` returns "File not found" because `skill://<name>/<path>` resolves as a **file** read, not a directory listing. **Correct**: pass `"skill://runx/scripts/companion.mjs"` directly to `bash` — internal URIs auto-resolve to filesystem paths, no manual path lookup needed.
-- After companion completes, digging into raw companion log files (`.jsonl`) for the full output. The companion's `finalMessage` in `{"type":"done",...}` already contains the complete result; if truncated in display, look for the `[raw output: artifact://<id>]` footer in the bash result instead.
 
 ## Red Flags
 
@@ -179,3 +172,4 @@ flowchart TD
 - Multiple `sessionError` in a row — companion may be broken, fall back to direct execution.
 - Empty `finalMessage` after a long execution — likely timeout or silent failure.
 - **Prompt structure deviates from template** — violation. See Compose Final Prompt.
+- **Skipping companion verification** — always confirm the companion CLI is available (`which companion` or equivalent) before attempting delegation. Do not assume unavailability without checking.
