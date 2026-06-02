@@ -42,36 +42,47 @@ flowchart TD
 ```bash
 node work-summary.mjs --start-date 2026-06-02 --end-date 2026-06-02
 node work-summary.mjs --start-date 2026-06-02 --end-date 2026-06-02 --author user@email.com
+node work-summary.mjs --start-date 2026-06-02 --end-date 2026-06-02 --pr-state merged
 ```
 
-无 `--mode` 参数，由 AI 在提取阶段将 mode 转为具体的 `start-date`/`end-date`。
+- 无 `--mode` 参数，由 AI 在提取阶段将 mode 转为具体的 `start-date`/`end-date`
+- `--author` 可选，默认从 `git config --get user.email` 自动解析
+- `--pr-state` 可选，默认 `all`（open/merged/closed），可选 `open`/`merged`/`closed`
+- 日期使用**本地时区**（`Intl.DateTimeFormat` 或 `new Date().getTimezoneOffset()`），不用 UTC，确保晚间提交不跨日
 
 ### 4.2 内部模块
 
 | 模块 | 职责 |
 |---|---|
-| `parseArgs()` | 解析 `--start-date`, `--end-date`, `--author`（可选，默认 `null`） |
+| `parseArgs()` | 解析 `--start-date`, `--end-date`, `--author`（可选，默认 `null`）, `--pr-state`（可选，默认 `all`） |
 | `resolveAuthor(cwd)` | `git config --get user.email` + `git config --get user.name` |
 | `discoverProjects(cwd)` | 检测当前目录是 git repo 或扫描一级子目录 |
-| `fetchCommits(dir, author, start, end)` | `git log` 按 author date 过滤，返回结构化 commit 列表 |
-| `filterSquashMerge(commits)` | 启发式检测 squash-merge commit，排除冗余项 |
-| `queryPRs(dir, author, start, end)` | `gh pr list` + `gh pr view` 获取 PR 信息 |
+| `fetchCommits(dir, author, start, end)` | 执行 `git log --all --no-merges --format='%as%x09%aE%x09%s'`，在脚本内按 `%as` 字段过滤日期范围，按 email 精确匹配作者 |
+| `filterSquashMerge(commits)` | 确定性规则检测 squash-merge commit：主题匹配 `#(\d+)` 且同一 PR 号在早期有非 squash 提交则排除 |
+| `checkGhAuth()` | `gh auth status` 检测认证状态，失败则跳过 PR 查询并在 JSON 中记录 `warnings` |
+| `queryPRs(dir, author, start, end, prState)` | 单次 `gh pr list --json number,title,state,url,createdAt,mergedAt --limit 100` 批量获取；按 `mergedAt`（默认）或 `createdAt` 过滤 |
 | `main()` | 编排各模块，输出 JSON |
 
 ### 4.3 JSON 输出结构
 
 ```json
 {
-  "mode": "today",
+  "meta": {
+    "generatedAt": "2026-06-02T12:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "prState": "all"
+  },
   "dateRange": { "start": "2026-06-02", "end": "2026-06-02" },
   "author": {
     "email": "manooog@gmail.com",
     "name": "manooog"
   },
+  "warnings": [],
   "projects": [
     {
       "name": "agents-for-myself",
       "dir": "/root/agents-for-myself",
+      "errors": [],
       "commits": [
         {
           "date": "2026-06-02",
@@ -84,7 +95,8 @@ node work-summary.mjs --start-date 2026-06-02 --end-date 2026-06-02 --author use
           "number": 42,
           "title": "Add X feature",
           "state": "MERGED",
-          "url": "https://github.com/manooog/agents-for-myself/pull/42"
+          "url": "https://github.com/manooog/agents-for-myself/pull/42",
+          "mergedAt": "2026-06-02T10:00:00Z"
         }
       ]
     }
@@ -96,14 +108,23 @@ node work-summary.mjs --start-date 2026-06-02 --end-date 2026-06-02 --author use
 
 ### 5.1 Commit 过滤
 
+⚠️ **关键约束：** `--after`/`--before` 按 committer date 过滤，与 author date 要求不一致。因此禁用 `--after`/`--before`，统一使用脚本端过滤。
+
 ```
-输入: git log --all --no-merges --format='%as%x09%aE%x09%s' --after=<start> --before=<end>
+输入: git log --all --no-merges --format='%as%x09%aE%x09%s'（无时间范围参数）
   ↓
-按 author email 精确匹配（大小写不敏感）
+按 author date（%as）在脚本内过滤: startDate ≤ %as ≤ endDate
   ↓
-按 author date 范围过滤（%as 格式）
+按 author email 精确匹配（大小写不敏感），如指定 `--author` 则使用指定值，否则用 `user.email`
   ↓
-Squash merge 检测: 主题含 #123 的 commit，如功能与已有 commit 重叠则排除
+Squash merge 检测（确定性规则 v1）:
+  1. 提取 subject 中的 `#(\d+)` 作为 PR 号
+  2. 如果一个 commit 的 subject 匹配 `#(\d+)`，且在相同 repo 和相同日期范围内存在
+     另一个不是 squash 模式（subject 不含 `#(\d+)` 或未匹配 squash 格式）的 commit，
+     则排除该 squash-merge commit
+  3. 不满足上述条件时保留该 commit
+  ↓
+去重: 完全相同的 subject + date 只保留一条
   ↓
 输出 JSON commits 数组
 ```
@@ -111,15 +132,17 @@ Squash merge 检测: 主题含 #123 的 commit，如功能与已有 commit 重�
 ### 5.2 PR 查询
 
 ```
+前提: 先执行 checkGhAuth()，认证失败 → 跳过 PR 查询，写入 warnings
+  ↓
 输入: 对每个 project 执行 gh pr list
   ↓
---author "@me" 或 --search "author:<email>"
+--author "@me"（CLI 登录用户）或 --search "author:<email>"
   ↓
---state all（默认 open/merged/closed；用户可通过 $prState 指定筛选）
+--state <prState>（从 --pr-state 参数传入，默认 all）
   ↓
-对每个 PR，gh pr view <number> --json title,state,url,createdAt
+--json number,title,state,url,createdAt,mergedAt（单次批量查询，避免 N+1）
   ↓
-按时间范围过滤 createdAt
+按 mergedAt（默认）在脚本内过滤日期范围；如 mergedAt 为空则 fallback 到 createdAt
   ↓
 输出 JSON prs 数组
 ```
@@ -136,7 +159,8 @@ Squash merge 检测: 主题含 #123 的 commit，如功能与已有 commit 重�
 
 ## 6. SKILL.md 结构
 
-按 skill-template 的 7 节重构，与标准保持一致：
+按 skill-template 的 7 节重构，与标准保持一致。
+> ⚠️ 以下中文占位仅为设计阶段表述参考。最终 `SKILL.md` 须 100% 英文（含触发词表格），遵循仓库 English-only 约定。
 
 ```yaml
 ---
@@ -186,10 +210,14 @@ Date Range Inference:
 
 **Step 2: Execute Script**
 
+脚本与 `SKILL.md` 同目录（经 `sync-skills.mjs` 扁平链接到 `~/.claude/skills/work-summary/`）：
+
 ```bash
-script=$(claude settings get skillRoot)/work-summary/work-summary.mjs
-node "$script" --start-date "$startDate" --end-date "$endDate" [--author "$email"]
+script="$(dirname "$0")/work-summary.mjs"
+node "$script" --start-date "$startDate" --end-date "$endDate" [--author "$email"] [--pr-state "$prState"]
 ```
+
+支持 omp/cursor/opencode 等平台 —— 使用 `SKILL_DIR`、`skill_dir` 或脚本所在目录的相对路径，不依赖 `claude settings get skillRoot`。
 
 **Step 3: Render Summary**
 
@@ -232,8 +260,13 @@ flowchart TD
 | `skills/magicdoor-skills/work-summary/work-summary.test.mjs` | 升级 | 适配新 CLI 接口的测试 |
 | `skills/magicdoor-skills/work-summary/workflows/` | 新增(可选) | 如果 skill 需要引用外部 step 脚本 |
 
+实施后需执行 `scripts/sync-skills.mjs` 确保 symlink 更新。
+
 ## 8. 测试策略
 
-- unit test: 日期计算、squash merge 检测、参数解析
-- integration test: 在临时 git 仓库中测试 commit 采集 + PR 查询（mock gh CLI）
-- snapshot test: JSON 输出结构验证
+| 类型 | 覆盖内容 | 方法 |
+|---|---|---|
+| unit test | 日期计算（本地时区）、squash merge 检测（确定性规则）、参数解析（`--start-date`/`--end-date`/`--author`/`--pr-state`） | 纯函数输入/输出断言 |
+| integration test | 临时 git 仓库中 `fetchCommits()` 按 author date 过滤 | `git init` + 构造不同日期/作者的 commits |
+| mock integration | `queryPRs()` 使用 mock `gh` CLI（`PATH` 覆盖或 shim 脚本） | shim 脚本读 `GH_TOKEN` 环境变量，控制 JSON 输出 |
+| snapshot test | JSON 输出结构完整性（`meta`/`warnings`/`errors` 字段存在） | JSON schema 断言 |
