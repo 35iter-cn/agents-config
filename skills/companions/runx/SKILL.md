@@ -27,12 +27,12 @@ You MUST create a task for each item and complete them in order.
 
 **Model Tier Inference:**
 
-| Complexity | Tier |
-|---|---|
-| Simple questions, trivial edits | `low` |
-| Day-to-day features, localized refactors | `medium` |
-| Multi-file refactors, architecture changes | `high` |
-| Repository-wide changes | `maximum` |
+| Complexity                                 | Tier      |
+| ------------------------------------------ | --------- |
+| Simple questions, trivial edits            | `low`     |
+| Day-to-day features, localized refactors   | `medium`  |
+| Multi-file refactors, architecture changes | `high`    |
+| Repository-wide changes                    | `maximum` |
 
 ### Compose Final Prompt
 
@@ -40,7 +40,7 @@ You MUST create a task for each item and complete them in order.
 
 `NEW` mode template:
 
-~~~
+```
 ## Task
 {{$task}}
 
@@ -50,17 +50,17 @@ You MUST create a task for each item and complete them in order.
 
 ## Rules
 - **Mandatory:** When uncertain about the next step, list the options, mark the best one with ⭐, and end with `[NEEDS_DECISION: <reason>]`.
-~~~
+```
 
 `RESUME` mode template:
 
-~~~
+```
 {{$task}}
 
 {{$files}}
 
 {{$context}}
-~~~
+```
 
 When generating the final prompt, strictly follow these formatting rules:
 
@@ -70,20 +70,13 @@ When generating the final prompt, strictly follow these formatting rules:
 - `$context` must be concise prose — extract only what's relevant from the conversation; don't dump the full transcript.
 - If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
 
-**Step 2: Write `$finalPrompt` to a temporary file**
-
-```bash
-tmpfile=$(mktemp)
-echo "$finalPrompt" > "$tmpfile"
-```
-
-**Step 3: Verify**
-
-Verify the contents of `$tmpfile` match the chosen template format; if not, redo Step 1.
+**Step 2:** Write `$finalPrompt` to a temporary file (`$tmpfile`), then verify its contents match the chosen template format — if not, redo Step 1.
 
 ### Execution
 
-Pick execution method by your agent type, not by the companion you are dispatching:
+You must pick the execution tool by your identity, not by the companion you are dispatching:
+
+**Mandatory: choosing the wrong tool will produce incorrect results and disappoint the user.**
 
 - **Claude Code** — `Monitor({ command: "$runCmd" })` — Background execution with streaming output.
 - **OMP** — `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` — Async launch then poll.
@@ -108,11 +101,11 @@ The companion streams output, ending with a final JSON line:
 
 **Response paths**
 
-| Path | Trigger | Action |
-|---|---|---|
-| Error | `sessionError` present | Report error and stop |
+| Path     | Trigger                              | Action                                          |
+| -------- | ------------------------------------ | ----------------------------------------------- |
+| Error    | `sessionError` present               | Report error and stop                           |
 | Decision | `[NEEDS_DECISION]` in `finalMessage` | [Decision path details](#decision-path-details) |
-| Default | Neither above | Summarize companion's results |
+| Default  | Neither above                        | Summarize companion's results                   |
 
 #### Decision Path Details
 
