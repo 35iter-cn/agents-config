@@ -74,14 +74,14 @@ When generating the final prompt, strictly follow these formatting rules:
 
 ### Execution
 
-You must pick the execution tool by your identity, not by the companion you are dispatching:
+You must pick the execution method by **tool availability**, not by who you think you are. Do not guess your platform — check which runtime tools you actually have:
 
-**Mandatory: choosing the wrong tool will produce incorrect results and disappoint the user.**
-
-- **Claude Code** — `Monitor({ command: "$runCmd" })` — Background execution with streaming output.
-- **OMP** — `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` — Async launch then poll.
-- **OpenCode** — `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks — Long timeout foreground execution.
-- **Other** — Adapt to the agent's async job mechanism.
+| If you have this tool            | Use this                                                                   | Why                                                             |
+| -------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `Monitor`                        | `Monitor({ command: "$runCmd" })`                                          | Background execution with streaming output; Claude Code native. |
+| A `job` tool with `poll` support | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll for completion; OMP native.              |
+| Only `bash` (no Monitor, no job) | `bash({ command: "$runCmd", timeout: 3600000 })`                           | Long timeout foreground; OpenCode and fallback.                 |
+| None of the above                | Adapt to whatever async job mechanism your runtime provides.               | Unknown platform — extrapolate from available tools.            |
 
 `$runCmd` is the following CLI command:
 
