@@ -1,33 +1,33 @@
 ---
-name: skill-name
 description: One-line summary of what this skill does.
-category: workflow  # workflow | coding | research | design
-date_added: "YYYY-MM-DD"
 ---
 
 ## Overview
 
 One sentence explaining the skill's purpose and output.
 
-## When to Use
+## Core Flow
 
-- Condition A
-- Condition B
-- Condition C
+You MUST create a task for each item and complete them in order.
 
-## When NOT to Use
+<!-- NOTE: Step names in the flowchart MUST match the section titles below exactly. -->
 
-- Condition that makes this skill inappropriate
-- Another condition
+```mermaid
+flowchart TD
+    A([Start]) --> B[Step one]
+    B --> C[Step two]
+    C --> D[Step three]
+    D --> E([Done])
+```
 
 ## Quick Reference
 
-<!-- LMB 定义行：仅 git 工作流相关 skill 需要 -->
+<!-- LMB definition line: only needed for git-workflow-related skills -->
 <!-- **LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.** -->
 
 ### Step one
 
-<!-- 如果需要引用子 skill： -->
+<!-- If referencing a sub-skill: -->
 <!-- **REQUIRED SUB-SKILL:** `sub-skill-name`. Description of what it does and why. -->
 
 Description of what this step does. Include commands, conventions, and expected output.
@@ -39,16 +39,6 @@ Description. Each step should be self-contained enough that someone can understa
 ### Step three
 
 (Only as many steps as needed. Prefer 2-4.)
-
-## Core Flow
-
-```mermaid
-flowchart TD
-    A([Start]) --> B[Step one]
-    B --> C[Step two]
-    C --> D[Step three]
-    D --> E([Done])
-```
 
 ## Common Mistakes
 
