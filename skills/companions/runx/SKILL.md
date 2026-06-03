@@ -85,7 +85,7 @@ Verify the contents of `$tmpfile` match the chosen template format; if not, redo
 
 Select the execution method matching the AI agent that is currently executing this skill:
 
-| Platform | Execution (pseudocode) | Notes |
+| Agent | Execution (pseudocode) | Notes |
 |---|---|---|
 | **Claude Code** | `Monitor({ command: "$runCmd" })` | Background execution with streaming output |
 | **OMP** | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll |
