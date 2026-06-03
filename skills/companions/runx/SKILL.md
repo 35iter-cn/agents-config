@@ -20,7 +20,9 @@ date_added: "2026-05-29"
 
 ## Quick Reference
 
-$cli_path: `<current_skill_root>/scripts/companion.mjs`
+- 可执行 companion cli 脚本，参见[companion.mjs](scripts/companion.mjs)
+
+**example**: `node companion.mjs --help`
 
 ### Classify Intent and Extract Parameters
 
@@ -127,7 +129,7 @@ Use `$finalPrompt` in the Execute step. Never inline a raw heredoc.
 Run the companion CLI with the composed prompt:
 
 ```bash
-node $cli_path run --agent $companion --model $modelTier <<'__EOF__'
+node $cli_path run --companion $companion --modelTier $modelTier <<'__EOF__'
 ${finalPrompt}
 __EOF__
 ```

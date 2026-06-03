@@ -89,7 +89,7 @@ flowchart TD
 ## Common Mistakes
 
 - Calling `--set` or `--reset` without confirming with the user first.
-- Passing `--model` or `--agent` flags to the `models` subcommand (they are not supported).
+- Passing `--modelTier` or `--companion` flags to the `models` subcommand (they are not supported).
 - Confusing adaptor names — `codex` has no `--list-models` command; its model config comes from `model-map.json`.
 - Not re-running `--get` after a write to confirm the change took effect.
 - Silently falling back to stale data when `--list` fails.
