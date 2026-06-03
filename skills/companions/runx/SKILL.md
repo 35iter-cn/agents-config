@@ -83,14 +83,12 @@ Verify the contents of `$tmpfile` match the chosen template format; if not, redo
 
 ### Execution
 
-Select the execution method matching the AI agent that is currently executing this skill:
+Pick execution method by your agent type, not by the companion you are dispatching:
 
-| Agent | Execution (pseudocode) | Notes |
-|---|---|---|
-| **Claude Code** | `Monitor({ command: "$runCmd" })` | Background execution with streaming output |
-| **OMP** | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll |
-| **OpenCode** | `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks | Long timeout foreground execution |
-| **Other** | Adapt to platform's async job mechanism | — |
+- **Claude Code** — `Monitor({ command: "$runCmd" })` — Background execution with streaming output.
+- **OMP** — `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` — Async launch then poll.
+- **OpenCode** — `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks — Long timeout foreground execution.
+- **Other** — Adapt to the agent's async job mechanism.
 
 `$runCmd` is the following CLI command:
 
