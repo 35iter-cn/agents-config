@@ -6,54 +6,54 @@ import {
   parseRunArguments,
 } from '../scripts/lib/companion.mjs';
 
-test('parseRunArguments keeps prompt and parses agent flag', () => {
+test('parseRunArguments keeps prompt and parses companion flag', () => {
   const result = parseRunArguments([
     'ship this prompt exactly',
-    '--agent',
+    '--companion',
     'reviewer',
   ]);
 
   assert.deepEqual(result, {
     prompt: 'ship this prompt exactly',
-    agent: 'reviewer',
+    companion: 'reviewer',
     modelTier: undefined,
     dryRun: false,
     session: undefined,
   });
 });
 
-test('parseRunArguments parses all supported --model tiers', () => {
-  assert.deepEqual(parseRunArguments(['task', '--model', 'low']), {
+test('parseRunArguments parses all supported --modelTier tiers', () => {
+  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'low']), {
     prompt: 'task',
-    agent: undefined,
+    companion: undefined,
     modelTier: 'low',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--model', 'medium']), {
+  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'medium']), {
     prompt: 'task',
-    agent: undefined,
+    companion: undefined,
     modelTier: 'medium',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--model', 'high']), {
+  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'high']), {
     prompt: 'task',
-    agent: undefined,
+    companion: undefined,
     modelTier: 'high',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--model', 'maximum']), {
+  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'maximum']), {
     prompt: 'task',
-    agent: undefined,
+    companion: undefined,
     modelTier: 'maximum',
     dryRun: false,
     session: undefined,
   });
 });
 
-test('parseRunArguments leaves modelTier undefined when --model is omitted', () => {
+test('parseRunArguments leaves modelTier undefined when --modelTier is omitted', () => {
   const result = parseRunArguments(['task only']);
   assert.equal(result.modelTier, undefined);
 });
@@ -68,7 +68,7 @@ test('main dispatches run subcommand and exits zero on success', async () => {
   };
 
   const code = await main(
-    ['run', 'do work', '--agent', 'plan'],
+    ['run', 'do work', '--companion', 'plan'],
     {
       runOpencode: async (prompt, options) => {
         calls.push({ prompt, options });
@@ -84,7 +84,7 @@ test('main dispatches run subcommand and exits zero on success', async () => {
     {
       prompt: 'do work',
       options: {
-        agent: 'plan',
+        companion: 'plan',
         modelTier: undefined,
         dryRun: false,
         session: undefined,
@@ -120,7 +120,7 @@ test('parseRunArguments parses --dry-run flag', () => {
 
   assert.deepEqual(result, {
     prompt: 'ship this prompt exactly',
-    agent: undefined,
+    companion: undefined,
     modelTier: undefined,
     dryRun: true,
     session: undefined,
@@ -180,7 +180,7 @@ test('main reads prompt from stdin when no positional arg and stdin has data', a
     assert.equal(calls.length, 1);
     assert.equal(calls[0].prompt, 'xx xx');
     assert.deepEqual(calls[0].options, {
-      agent: undefined,
+      companion: undefined,
       modelTier: undefined,
       dryRun: false,
       session: undefined,
@@ -197,7 +197,7 @@ test('main reads prompt from stdin when no positional arg and stdin has data', a
 test('main passes requested agent type to runCompanion', async () => {
   const calls = [];
 
-  const code = await main(['run', 'do work', '--agent', 'cursor'], {
+  const code = await main(['run', 'do work', '--companion', 'cursor'], {
     runCompanion: async (agentType, prompt, options) => {
       calls.push({ agentType, prompt, options });
       return { success: true };
@@ -211,7 +211,7 @@ test('main passes requested agent type to runCompanion', async () => {
       agentType: 'cursor',
       prompt: 'do work',
       options: {
-        agent: 'cursor',
+        companion: 'cursor',
         modelTier: undefined,
         dryRun: false,
         session: undefined,
@@ -223,7 +223,7 @@ test('main passes requested agent type to runCompanion', async () => {
 test('main passes modelTier to runCompanion when --model is set', async () => {
   const calls = [];
 
-  await main(['run', 'do work', '--model', 'high'], {
+  await main(['run', 'do work', '--modelTier', 'high'], {
     runCompanion: async (agentType, prompt, options) => {
       calls.push({ agentType, prompt, options });
       return { success: true };
@@ -236,7 +236,7 @@ test('main passes modelTier to runCompanion when --model is set', async () => {
       agentType: 'opencode',
       prompt: 'do work',
       options: {
-        agent: undefined,
+        companion: undefined,
         modelTier: 'high',
         dryRun: false,
         session: undefined,
@@ -357,24 +357,24 @@ test('parseRunArguments parses --session flag', () => {
 
   assert.deepEqual(result, {
     prompt: 'continue the task',
-    agent: undefined,
+    companion: undefined,
     modelTier: undefined,
     dryRun: false,
     session: 'sid-abc-123',
   });
 });
 
-test('parseRunArguments parses --session alongside --agent and --model', () => {
+test('parseRunArguments parses --session alongside --companion and --modelTier', () => {
   const result = parseRunArguments([
     'do work',
-    '--agent', 'cursor',
-    '--model', 'high',
+    '--companion', 'cursor',
+    '--modelTier', 'high',
     '--session', 'sid-xyz',
   ]);
 
   assert.deepEqual(result, {
     prompt: 'do work',
-    agent: 'cursor',
+    companion: 'cursor',
     modelTier: 'high',
     dryRun: false,
     session: 'sid-xyz',
@@ -396,7 +396,7 @@ test('main passes session option to runCompanion', async () => {
     agentType: 'opencode',
     prompt: 'resume task',
     options: {
-      agent: undefined,
+      companion: undefined,
       modelTier: undefined,
       dryRun: false,
       session: 'sid-123',

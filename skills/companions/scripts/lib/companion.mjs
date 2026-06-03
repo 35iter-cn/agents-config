@@ -15,7 +15,7 @@ function stdinHasData() {
 export function parseRunArguments(args) {
   const result = {
     prompt: undefined,
-    agent: undefined,
+    companion: undefined,
     modelTier: undefined,
     dryRun: false,
     session: undefined,
@@ -24,13 +24,13 @@ export function parseRunArguments(args) {
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
 
-    if (current === '--agent') {
-      result.agent = args[index + 1];
+    if (current === '--companion') {
+      result.companion = args[index + 1];
       index += 1;
       continue;
     }
 
-    if (current === '--model') {
+    if (current === '--modelTier') {
       result.modelTier = args[index + 1];
       index += 1;
       continue;
@@ -138,8 +138,8 @@ export async function main(argv, deps = {}) {
     prompt = await readStdin();
   }
 
-  const result = await runCompanionFn(parsed.agent ?? 'opencode', prompt, {
-    agent: parsed.agent,
+  const result = await runCompanionFn(parsed.companion ?? 'opencode', prompt, {
+    companion: parsed.companion,
     modelTier: parsed.modelTier,
     dryRun: parsed.dryRun,
     session: parsed.session,
