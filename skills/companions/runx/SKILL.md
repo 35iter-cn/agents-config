@@ -83,7 +83,7 @@ Verify the contents of `$tmpfile` match the chosen template format; if not, redo
 
 ### Execution
 
-Select the execution method matching your current platform:
+Select the execution method matching the AI agent that is currently executing this skill:
 
 | Platform | Execution (pseudocode) | Notes |
 |---|---|---|
