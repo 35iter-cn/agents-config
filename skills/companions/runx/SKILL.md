@@ -1,52 +1,32 @@
 ---
 name: runx
-description: Delegate tasks to a companion CLI with session-aware resumption support. A companion is an external AI agent that can execute long-running tasks and maintain context across multiple interactions.
+description: |
+  Trigger when the user explicitly asks a companion to execute a task — regardless of task complexity or duration.
 category: workflow
-date_added: "2026-05-29"
+date_added: "2026-06-03"
 ---
-
-## When to Use
-
-- User asks to resume or continue a previous companion session
-- User wants to delegate a long-running task that may span multiple interactions
-- User explicitly references a "companion" with a task description
-- Task requires session-aware context that outlives a single command
 
 ## When NOT to Use
 
-- Simple local commands — one-off file reads, git status, or quick edits
-- User says "run this in terminal" or "execute locally" — implies the current environment
-- Exploratory questions — "what is X?" or "how does Y work?" should be answered directly
+- One-off commands in the current environment.
+- Questions answerable directly without companion involvement.
 
-## Quick Reference
+## Workflow
 
-- 可执行 companion cli 脚本，参见[companion.mjs](scripts/companion.mjs)
-
-**example**: `node companion.mjs --help`
+You MUST create a task for each item and complete them in order.
 
 ### Classify Intent and Extract Parameters
 
-**Step 1: Classify Mode**
-Does the user input contain resumption intent (e.g., `resume`, `continue`, `go back to`)?
-
-- **Yes** → RESUME mode, proceed to Step 2
-- **No** → NEW mode, proceed to Step 2
-
-**Step 2: Extract Parameters**
-
-| Parameter    | Description                 | NEW Mode Source                                                    | RESUME Mode Source                             |
-| ------------ | --------------------------- | ------------------------------------------------------------------ | ---------------------------------------------- |
-| `$task`      | Core task description       | Remaining text after parameter extraction                          | Resumption intent or new directive             |
-| `$companion` | Target companion type       | User mention (e.g., cursor, Claude Code, omp, opencode) or default | Inherit from original session or user override |
-| `$files`     | Contextually relevant files | Related file paths from context                                    | Related file paths from context                |
-| `$modelTier` | Model capability level      | User-specified or inferred from complexity                         | Inherit from original session or user override |
-
-**RESUME-specific:**
-| Parameter | Source | On No Match |
-|---|---|---|
-| `$sessionID` | Match history by companion reference or task similarity | Ask whether to start a new task |
+- `$mode` — Defaults to `NEW`. Set to `RESUME` only when continuing an existing companion session.
+- `$companion` — Defaults to `opencode` unless the user explicitly names one of: `cursor`, `omp`, `codex`.
+- `$modelTier` — Infer from task complexity (see table below) or use the user's explicit request.
+- `$files` — File paths relevant to the user's intent and the task.
+- `$context` — Background information from the current conversation that helps the companion understand the task. Include relevant decisions, constraints, or findings already discussed. Omit if the task is self-contained.
+- `$task` — The user's original intent after stripping extracted parameters. May be expanded, but preserve the user's key terms.
+- `$sessionID` — Required only for `RESUME` mode. The session ID returned by the companion after a `NEW` run.
 
 **Model Tier Inference:**
+
 | Complexity | Tier |
 |---|---|
 | Simple questions, trivial edits | `low` |
@@ -54,141 +34,93 @@ Does the user input contain resumption intent (e.g., `resume`, `continue`, `go b
 | Multi-file refactors, architecture changes | `high` |
 | Repository-wide changes | `maximum` |
 
-### Compose Final Prompt — MANDATORY: 3-Step Process
+### Compose Final Prompt
 
-No structural modifications allowed. Follow the 3 steps exactly.
+**Step 1: Select template by mode**
 
-**Step 1: Select Template**
+`NEW` mode template:
 
-| Mode   | Template Description       | When to Use                                        |
-| ------ | -------------------------- | -------------------------------------------------- |
-| NEW    | Task + Context + Rules     | First interaction; full context required           |
-| RESUME | Task + Changes             | Continuing an existing session; only delta needed  |
-
-**Step 2: Copy + Fill**
-
-Open a code block. Paste the selected mode's template below, then replace `{{...}}` placeholders with actual values:
-
-| Placeholder              | Replacement                                                        |
-| ------------------------ | ------------------------------------------------------------------ |
-| `{{$task}}`              | Core task description                                              |
-| `{{$files}}`             | Relevant file paths; omit entire Context section for trivial tasks |
-| `{{$technical_context}}` | Codebase background and architecture                               |
-
-NEW mode template:
-
-```
+~~~
 ## Task
 {{$task}}
 
 ## Context
-{{$technical_context}}
 {{$files}}
+{{$context}}
 
 ## Rules
 - **Mandatory:** When uncertain about the next step, list the options, mark the best one with ⭐, and end with `[NEEDS_DECISION: <reason>]`.
-```
+~~~
 
-RESUME mode template:
+`RESUME` mode template:
 
-```
+~~~
 {{$task}}
 
 {{$files}}
+
+{{$context}}
+~~~
+
+When generating the final prompt, strictly follow these formatting rules:
+
+- Replace template variables with actual content.
+- Do not add extra level-2 headings (the templates above define the complete heading structure).
+- `$files` must contain only file paths, never file contents.
+- `$context` must be concise prose — extract only what's relevant from the conversation; don't dump the full transcript.
+- If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
+
+**Step 2: Write `$finalPrompt` to a temporary file**
+
+```bash
+tmpfile=$(mktemp)
+echo "$finalPrompt" > "$tmpfile"
 ```
 
 **Step 3: Verify**
 
-Check the completed code block contains **zero** `{{` sequences. The final prompt string must start with exactly `## Task` (NEW mode) or the resolved task text (RESUME mode).
+Verify the contents of `$tmpfile` match the chosen template format; if not, redo Step 1.
 
-If the check fails, return to Step 2 — you did not use the template.
+### Execution
 
-Then assign to a variable:
+Select the execution method matching your current platform:
 
-```bash
-finalPrompt=$(cat <<'__EOF__'
-## Task
-<resolved task>
-...
-__EOF__
-)
-```
+| Platform | Execution (pseudocode) | Notes |
+|---|---|---|
+| **Claude Code** | `Monitor({ command: "$runCmd" })` | Background execution with streaming output |
+| **OMP** | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll |
+| **OpenCode** | `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks | Long timeout foreground execution |
+| **Other** | Adapt to platform's async job mechanism | — |
 
-Use `$finalPrompt` in the Execute step. Never inline a raw heredoc.
-
-### Execute by Your Platform
-
-**Prerequisites**
-
-- `$finalPrompt` composed from template
-- All information extracted (Step 2)
-- The environment has a companion CLI installed and available in PATH
-
-**Execution**
-
-Run the companion CLI with the composed prompt:
+`$runCmd` is the following CLI command:
 
 ```bash
-node $cli_path run --companion $companion --modelTier $modelTier <<'__EOF__'
-${finalPrompt}
-__EOF__
+node "${CLAUDE_SKILL_DIR}/scripts/companion.mjs" run --companion $companion --modelTier $modelTier < "$tmpfile"
 ```
 
-For RESUME mode, add `--session "${sessionID}"` before the heredoc.
-
-**Variable mapping:** `$runCmd` is the command template defined in the Execution section above.
-
-**Execution (pick one based on your platform):**
-
-| Platform        | Execution (pseudocode)                                                        | Notes                                      |
-| --------------- | ----------------------------------------------------------------------------- | ------------------------------------------ |
-| **Claude Code** | `Monitor({ command: "$runCmd" })`                                             | Background execution with streaming output |
-| **OMP**         | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })`    | Async launch then poll                     |
-| **OpenCode**    | `bash({ command: "$runCmd", timeout: 3600000 })`; use `task` for complex tasks | Long timeout foreground execution          |
-| **Other**       | Adapt to platform's async job mechanism                                       | —                                          |
+**RESUME mode**: Append `--session "${sessionID}"` after `--modelTier`.
 
 ### Handle Response
 
-Companion streams output, then final line: `{"type":"done","success":bool,"summary":{"finalMessage":"...","sessionID":"...","sessionError":"..."}}`
+The companion streams output, ending with a final JSON line:
 
-**Response Paths**
+```
+{"type":"done","success":bool,"summary":{"finalMessage":"...","sessionID":"...","sessionError":"..."}}
+```
 
-| Path     | Trigger                              | Action                                          |
-| -------- | ------------------------------------ | ----------------------------------------------- |
-| Error    | `sessionError` present               | Report error and stop                           |
-| Decision | `[NEEDS_DECISION]` in `finalMessage` | [Decision Path Details](#decision-path-details) |
-| Default  | Neither above                        | Summarize companion's results                   |
+**Response paths**
+
+| Path | Trigger | Action |
+|---|---|---|
+| Error | `sessionError` present | Report error and stop |
+| Decision | `[NEEDS_DECISION]` in `finalMessage` | [Decision path details](#decision-path-details) |
+| Default | Neither above | Summarize companion's results |
 
 #### Decision Path Details
 
-When companion returns `[NEEDS_DECISION: ...]`:
+When the companion returns `[NEEDS_DECISION: ...]`:
 
 1. **Parse** — Extract all options and the ⭐-marked recommendation from `finalMessage`.
-2. **Evaluate** — Combine companion's analysis with your existing context. The ⭐ is a strong signal, not an order — use your own judgment.
-3. **Decide** — Select the option that best advances the task. Priority: your judgment + ⭐ companion recommendation > task alignment > specificity > first option.
-4. **Resume** — Execute RESUME mode via `Execute by Your Platform` with the chosen option, same `$sessionID` and `$modelTier`.
-
-## Core Flow
-
-```mermaid
-flowchart TD
-    A([Start]) --> B[Classify Intent and Extract Parameters]
-    B --> C[Compose Final Prompt]
-    C --> D[Execute by Your Platform]
-    D --> E[Handle Response]
-    E --> F([Done])
-```
-
-## Common Mistakes
-
-- Using file contents instead of file paths in `$files`.
-- Not extracting `$sessionID` before resuming — creates a new session instead of continuing.
-
-## Red Flags
-
-- `[NEEDS_DECISION]` without a ⭐-marked option — companion is uncertain, escalate.
-- **Asking the user on `[NEEDS_DECISION]`** — violation. See Decision Path Details.
-- Multiple `sessionError` in a row — companion may be broken, fall back to direct execution.
-- Empty `finalMessage` after a long execution — likely timeout or silent failure.
-- **Prompt structure deviates from template** — violation. See Compose Final Prompt.
-- **Skipping companion verification** — always confirm the companion CLI is available (`which companion` or equivalent) before attempting delegation. Do not assume unavailability without checking.
+2. **Evaluate** — Combine the companion's analysis with your existing context. The ⭐ is a strong signal, not an order — use your own judgment.
+3. **Decide** — Select the option that best advances the task. Priority: your judgment + ⭐ recommendation > task alignment > specificity > first option.
+4. **Resume** — Execute `RESUME` mode via your platform's execution method with the chosen option, using the same `$sessionID` and `$modelTier`.
