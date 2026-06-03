@@ -468,3 +468,51 @@ test('main dispatches models --reset and exits non-zero on failure', async () =>
   assert.deepEqual(exits, [1]);
   assert.match(writes[0], /"success":false/);
 });
+
+test('main prints help and exits zero for --help', async () => {
+  const writes = [];
+  const exits = [];
+
+  const code = await main(['--help'], {
+    stdoutWrite: (chunk) => writes.push(chunk),
+    exit: (value) => exits.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(exits, [0]);
+  const output = writes.join('');
+  assert.match(output, /Usage:/);
+  assert.match(output, /run \[prompt\]/);
+  assert.match(output, /--companion/);
+  assert.match(output, /--modelTier/);
+});
+
+test('main prints help for -h', async () => {
+  const writes = [];
+  const exits = [];
+
+  const code = await main(['-h'], {
+    stdoutWrite: (chunk) => writes.push(chunk),
+    exit: (value) => exits.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(exits, [0]);
+  const output = writes.join('');
+  assert.match(output, /Usage:/);
+});
+
+test('main prints help for run --help', async () => {
+  const writes = [];
+  const exits = [];
+
+  const code = await main(['run', '--help'], {
+    stdoutWrite: (chunk) => writes.push(chunk),
+    exit: (value) => exits.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(exits, [0]);
+  const output = writes.join('');
+  assert.match(output, /Usage:/);
+});

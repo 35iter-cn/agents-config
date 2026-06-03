@@ -68,6 +68,31 @@ export async function main(argv, deps = {}) {
   const exit = deps.exit ?? process.exit;
   const stdoutWrite = deps.stdoutWrite ?? ((chunk) => process.stdout.write(chunk));
 
+  const HELP_TEXT = `Usage: companion <command> [options]
+
+Commands:
+  run [prompt]           Run a companion agent. If [prompt] is omitted, reads from stdin.
+  models                 Manage model configurations
+
+Run options:
+  --companion <name>     Companion type (opencode, cursor, omp, codex)
+  --modelTier <tier>     Model tier (low, medium, high, maximum)
+  --session <id>         Resume an existing session
+  --dry-run              Show what would run without executing
+
+Models options:
+  --list                 List configured and available models
+  --get [adaptor]        Get model configuration
+  --set                  Set model configuration (reads JSON from stdin)
+  --reset [adaptor]      Reset model configuration to defaults
+`;
+
+  if (argv.includes('--help') || argv.includes('-h')) {
+    stdoutWrite(HELP_TEXT);
+    exit(0);
+    return 0;
+  }
+
   if (command === 'models') {
     const modelsLib = await import('./models.mjs');
 
