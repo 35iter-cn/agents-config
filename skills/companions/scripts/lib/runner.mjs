@@ -58,11 +58,11 @@ const AGENTS = {
       if (options.session) {
         args.push('--session', options.session);
       }
-      if (options.agent === 'opencode') {
+      if (options.companion === 'opencode') {
         return args;
       }
-      if (options.agent && options.agent !== 'cursor') {
-        args.push('--agent', String(options.agent));
+      if (options.companion && options.companion !== 'cursor') {
+        args.push('--agent', String(options.companion));
       }
       return args;
     },
