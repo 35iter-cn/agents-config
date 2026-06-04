@@ -76,6 +76,22 @@ When generating the final prompt, strictly follow these formatting rules:
 
 **Step 2:** Write `$finalPrompt` to a temporary file (`$tmpfile`), then verify its contents match the chosen template format — if not, redo Step 1.
 
+### Tool Selection Pre-Check (Mandatory)
+
+Before executing the companion command, you MUST complete the following checks in order and select the tool based on the result:
+
+1. Is the `Monitor` tool available?
+   - **Yes** → You MUST use `Monitor({ command: "$companionCommand", persistent: true })`. Skip to Execution.
+   - **No** → Continue to the next check.
+
+2. Is a `job` tool with `poll` support available?
+   - **Yes** → Use `bash({ command: "$companionCommand", async: true })` followed by `job({ poll: ["bg_<id>"] })`. Skip to Execution.
+   - **No** → Continue to the next check.
+
+3. Is only `bash` available (no Monitor, no job)?
+   - **Yes** → Use `bash({ command: "$companionCommand", timeout: 3600000 })`.
+   - **No** → Report an error and stop.
+
 ### Execution
 
 Construct the `$companionCommand` for launching the companion using all inferred parameters:
@@ -84,14 +100,19 @@ Construct the `$companionCommand` for launching the companion using all inferred
 node "${CLAUDE_SKILL_DIR}/scripts/companion.mjs" run --companion $companion --modelTier $modelTier < "$tmpfile"
 ```
 
-Then execute this command using whichever tool your platform provides:
+Execute the command using the tool selected in the pre-check above.
 
-| If you have this tool            | Use this                                                                             | Why                                                             |
-| -------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `Monitor`                        | `Monitor({ command: "$companionCommand" })`                                          | Background execution with streaming output; Claude Code native. |
-| A `job` tool with `poll` support | `bash({ command: "$companionCommand", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll for completion; OMP native.              |
-| Only `bash` (no Monitor, no job) | `bash({ command: "$companionCommand", timeout: 3600000 })`                           | Long timeout foreground; OpenCode and fallback.                 |
-| None of the above                | Adapt to whatever async job mechanism your runtime provides.                         | Unknown platform — extrapolate from available tools.            |
+### Pre-Execution Declaration
+
+After constructing `$companionCommand` but before invoking any tool, you MUST explicitly output the following in your reasoning:
+
+```
+[TOOL_SELECTION] Checked available tools: Monitor=[yes/no], job-poll=[yes/no], bash-only=[yes/no]
+[TOOL_SELECTION] Selected tool: [Monitor/job/bash]
+[TOOL_SELECTION] Reason: [one-sentence explanation]
+```
+
+Proceed with execution only if the `[TOOL_SELECTION] Selected tool` matches the priority order of available tools.
 
 **RESUME mode**: Append `--session "${sessionID}"` after `--modelTier`.
 
