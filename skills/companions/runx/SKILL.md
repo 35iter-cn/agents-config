@@ -6,6 +6,10 @@ category: workflow
 date_added: "2026-06-03"
 ---
 
+# Overview
+
+This skill enables delegation of any task to other companion agents via the companion.mjs script. Supported companions include opencode, cursor, omp, and codex — all are agent CLI tools.
+
 ## When NOT to Use
 
 - One-off commands in the current environment.
@@ -13,12 +17,12 @@ date_added: "2026-06-03"
 
 ## Workflow
 
-You MUST create a task for each item and complete them in order.
+You MUST create a task for each step and complete them sequentially.
 
 ### Classify Intent and Extract Parameters
 
 - `$mode` — Defaults to `NEW`. Set to `RESUME` only when continuing an existing companion session.
-- `$companion` — Defaults to `opencode` unless the user explicitly names one of: `cursor`, `omp`, `codex`.
+- `$companion` — Defaults to `opencode` unless the user explicitly specifies otherwise.
 - `$modelTier` — Infer from task complexity (see table below) or use the user's explicit request.
 - `$files` — File paths relevant to the user's intent and the task.
 - `$context` — Background information from the current conversation that helps the companion understand the task. Include relevant decisions, constraints, or findings already discussed. Omit if the task is self-contained.
@@ -74,20 +78,20 @@ When generating the final prompt, strictly follow these formatting rules:
 
 ### Execution
 
-You must pick the execution method by **tool availability**, not by who you think you are. Do not guess your platform — check which runtime tools you actually have:
+Construct the `$companionCommand` for launching the companion using all inferred parameters:
 
-| If you have this tool            | Use this                                                                   | Why                                                             |
-| -------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `Monitor`                        | `Monitor({ command: "$runCmd" })`                                          | Background execution with streaming output; Claude Code native. |
-| A `job` tool with `poll` support | `bash({ command: "$runCmd", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll for completion; OMP native.              |
-| Only `bash` (no Monitor, no job) | `bash({ command: "$runCmd", timeout: 3600000 })`                           | Long timeout foreground; OpenCode and fallback.                 |
-| None of the above                | Adapt to whatever async job mechanism your runtime provides.               | Unknown platform — extrapolate from available tools.            |
-
-`$runCmd` is the following CLI command:
-
-```bash
+```
 node "${CLAUDE_SKILL_DIR}/scripts/companion.mjs" run --companion $companion --modelTier $modelTier < "$tmpfile"
 ```
+
+Then execute this command using whichever tool your platform provides:
+
+| If you have this tool            | Use this                                                                             | Why                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `Monitor`                        | `Monitor({ command: "$companionCommand" })`                                          | Background execution with streaming output; Claude Code native. |
+| A `job` tool with `poll` support | `bash({ command: "$companionCommand", async: true })` → `job({ poll: ["bg_<id>"] })` | Async launch then poll for completion; OMP native.              |
+| Only `bash` (no Monitor, no job) | `bash({ command: "$companionCommand", timeout: 3600000 })`                           | Long timeout foreground; OpenCode and fallback.                 |
+| None of the above                | Adapt to whatever async job mechanism your runtime provides.                         | Unknown platform — extrapolate from available tools.            |
 
 **RESUME mode**: Append `--session "${sessionID}"` after `--modelTier`.
 

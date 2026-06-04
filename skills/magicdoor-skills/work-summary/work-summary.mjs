@@ -2,7 +2,7 @@
 // End-to-end work summary data collector.
 // Outputs JSON with commits and PRs grouped by project.
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, realpathSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,23 @@ export function resolveAuthor(cwd) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Discover projects
+// 3. Resolve GitHub username from gh CLI
+// ---------------------------------------------------------------------------
+export function resolveGitHubUsername() {
+  if (!checkGhAuth()) return null;
+  try {
+    const raw = execFileSync('gh', ['api', 'user', '--jq', '.login'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Discover projects
 // ---------------------------------------------------------------------------
 export function discoverProjects(cwd) {
   // Case 1: cwd itself is a git repo
@@ -145,7 +161,30 @@ export function discoverProjects(cwd) {
     projects.push({ name: basename(repoRoot), dir: realCandidate });
   }
 
-  return projects;
+  // Deduplicate by normalized remote URL (e.g. ai-backend and backend share the same origin)
+  // When duplicates are found, keep the one with the shorter name (more canonical).
+  const remoteMap = new Map();
+  for (const p of projects) {
+    let remoteUrl;
+    try {
+      remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
+        cwd: p.dir,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }).trim();
+      // Normalize: git@github.com:owner/repo.git → github.com/owner/repo.git
+      // Normalize: https://github.com/owner/repo.git → github.com/owner/repo.git
+      remoteUrl = remoteUrl.replace(/^git@/, '').replace(/^https?:\/\//, '').replace(':', '/');
+    } catch {
+      remoteUrl = p.dir;
+    }
+    const existing = remoteMap.get(remoteUrl);
+    if (!existing || p.name.length < existing.name.length) {
+      remoteMap.set(remoteUrl, p);
+    }
+  }
+
+  return Array.from(remoteMap.values());
 }
 
 // ---------------------------------------------------------------------------
@@ -248,10 +287,16 @@ export function queryPRs(dir, authorEmail, startDate, endDate, prState) {
 
   // Try to filter by author; gh --author accepts GitHub username.
   // If the email looks like a GitHub username (no @), use --author.
-  // Otherwise we filter client-side.
+  // Otherwise resolve the current gh user's login and use that.
   const isUsername = !authorEmail.includes('@');
   if (isUsername) {
     args.push('--author', authorEmail);
+  } else {
+    const ghUser = resolveGitHubUsername();
+    if (ghUser) {
+      args.push('--author', ghUser);
+    }
+    // If ghUser is null, we fall back to listing all PRs (legacy behaviour)
   }
 
   let raw;
@@ -272,13 +317,6 @@ export function queryPRs(dir, authorEmail, startDate, endDate, prState) {
 
   const result = [];
   for (const pr of prs) {
-    // Client-side author filtering when we couldn't use --author
-    if (!isUsername) {
-      // We can't reliably match email from gh pr list output.
-      // Skip client-side email filtering; rely on --search when possible.
-      // For now, include all PRs from the repo and let the AI handle filtering.
-    }
-
     const dateField = pr.mergedAt || pr.createdAt;
     if (!dateField) continue;
     const dateStr = dateField.slice(0, 10); // YYYY-MM-DD
@@ -378,6 +416,6 @@ function main() {
   process.stdout.write(JSON.stringify(output, null, 2) + '\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === `file://${realpathSync(process.argv[1])}`) {
   main();
 }

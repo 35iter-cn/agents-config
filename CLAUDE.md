@@ -47,17 +47,9 @@ skill-name/
 └── shared/               # Optional: shared references
 ```
 
-### SKILL.md Frontmatter
+### SKILL.md Structure
 
-```yaml
----
-name: kebab-case-name
-description: |
-  When to use this skill. Include specific triggers.
-category: framework|tool|workflow|development
-date_added: "2026-03-21"
----
-```
+参考 `docs/skill-template.md`。
 
 Some skills have `workflows/` containing modular step-by-step scripts sourced or referenced from `SKILL.md`.
 
@@ -145,7 +137,7 @@ Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed
 
 - **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
 - **English only:** All SKILL.md files must be written entirely in English. No other languages are permitted in skill content.
-- **Strict template compliance:** Every skill (new or rewritten) must follow `docs/skill-template.md` exactly — all 7 sections (Overview, When to Use, When NOT to Use, Quick Reference, Core Flow, Common Mistakes, Red Flags), no additions or omissions. Frontmatter must match the template schema (`name`, `description`, `category`, `date_added`).
+- **Strict template compliance:** 参考 `docs/skill-template.md`。
 - **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs` to keep target directory symlinks in sync.
 - **Knowledge docs:** Design specs go in `.knowledge/docs/specs/`
 - **No build system:** This repo is pure Markdown with occasional shell scripts — no package.json, no tests, no CI
