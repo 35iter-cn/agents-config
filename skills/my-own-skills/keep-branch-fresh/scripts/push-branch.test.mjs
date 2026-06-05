@@ -66,3 +66,39 @@ test('push-branch uses force-with-lease for existing upstream', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('push-branch exits 2 when remote has new commits', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'push-test-'));
+  try {
+    const { local, remote } = setupRepoWithRemote(tmp);
+    git(['checkout', '-b', 'feature'], local);
+    writeFileSync(join(local, 'feat.txt'), 'feature work\n');
+    git(['add', '-A'], local);
+    git(['commit', '-m', 'add feature'], local);
+    git(['push', '--set-upstream', 'origin', 'feature'], local);
+
+    // Simulate another clone pushing to the same branch
+    const other = join(tmp, 'other');
+    git(['clone', remote, other], tmp);
+    git(['checkout', 'feature'], other);
+    writeFileSync(join(other, 'other.txt'), 'other work\n');
+    git(['add', '-A'], other);
+    git(['commit', '-m', 'other commit'], other);
+    git(['push', 'origin', 'feature'], other);
+
+    // Now local push should fail with exit 2
+    let out = '';
+    let exitCode = 0;
+    try {
+      out = execFileSync(SCRIPT, [], { cwd: local, encoding: 'utf8', stdio: 'pipe' }).trim();
+    } catch (e) {
+      out = e.stdout ? e.stdout.trim() : '';
+      exitCode = e.status;
+    }
+    assert.strictEqual(exitCode, 2);
+    assert.match(out, /RESULT: failed/);
+    assert.match(out, /远程分支有新提交/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
