@@ -9,17 +9,6 @@ date_added: "2026-05-27"
 
 Safely rebase a feature branch onto the latest main branch (LMB).
 
-## When to Use
-
-- Feature branch is behind LMB and needs a fast-forward/rebase
-- User asks to rebase, sync, or update a branch to the latest main
-
-## When NOT to Use
-
-- Working directory has uncommitted changes
-- Branch has no upstream remote set
-- Force push is prohibited on the target branch
-
 ## Quick Reference
 
 **LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
@@ -28,7 +17,7 @@ Safely rebase a feature branch onto the latest main branch (LMB).
 
 ### Dry-run
 
-`$SKILL_ROOT/scripts/dry-run-conflicts.mjs [LMB] [FEATURE_BRANCH]`
+`skill://keep-branch-fresh/scripts/dry-run-conflicts.mjs [LMB] [FEATURE_BRANCH]`
 
 Fetches latest LMB and detects conflicts in one step. The actual rebase only proceeds after dry-run confirms safety or the user approves a resolution plan.
 
@@ -39,10 +28,10 @@ Fetches latest LMB and detects conflicts in one step. The actual rebase only pro
 
 Only needed when dry-run detects conflicts.
 
-| Category | Strategy |
-|---|---|
-| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit. |
-| **Source code & docs** | Preserve each feature commit's intent by transplanting onto LMB's refactored structure. Read the commit message to determine intent. Defer to user only when preservation is infeasible. |
+| Category                                                           | Strategy                                                                                                                                                                                 |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                                                                                                                                  |
+| **Source code & docs**                                             | Preserve each feature commit's intent by transplanting onto LMB's refactored structure. Read the commit message to determine intent. Defer to user only when preservation is infeasible. |
 
 Present plan to user, get confirmation, then proceed to rebase.
 
@@ -54,7 +43,7 @@ If `git rebase --continue` opens an editor and hangs in non-interactive terminal
 
 ### Verify & push
 
-`$SKILL_ROOT/scripts/verify-no-conflicts.mjs`
+`skill://keep-branch-fresh/scripts/verify-no-conflicts.mjs`
 
 Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
 

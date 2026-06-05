@@ -97,7 +97,7 @@ Before executing the companion command, you MUST complete the following checks i
 Construct the `$companionCommand` for launching the companion using all inferred parameters:
 
 ```
-node "${CLAUDE_SKILL_DIR}/scripts/companion.mjs" run --companion $companion --modelTier $modelTier < "$tmpfile"
+skill:runx/scripts/companion.mjs run --companion $companion --modelTier $modelTier < $tmpfile
 ```
 
 Execute the command using the tool selected in the pre-check above.
@@ -140,3 +140,7 @@ When the companion returns `[NEEDS_DECISION: ...]`:
 2. **Evaluate** — Combine the companion's analysis with your existing context. The ⭐ is a strong signal, not an order — use your own judgment.
 3. **Decide** — Select the option that best advances the task. Priority: your judgment + ⭐ recommendation > task alignment > specificity > first option.
 4. **Resume** — Execute `RESUME` mode via your platform's execution method with the chosen option, using the same `$sessionID` and `$modelTier`.
+
+## Common Mistakes
+
+- **Checking companion CLI availability before execution.** The command will fail with a clear error if the CLI is missing; an explicit pre-check wastes an LLM call.
