@@ -92,29 +92,21 @@ Before executing the companion command, you MUST complete the following checks i
    - **Yes** → Use `bash({ command: "$companionCommand", timeout: 3600000 })`.
    - **No** → Report an error and stop.
 
-### Execution
+### Execute with Declaration
 
-Construct the `$companionCommand` for launching the companion using all inferred parameters:
+1. **Assemble the command.** Build `$companionCommand` from the script located at `skill:runx/scripts/companion.mjs` and the arguments `run --companion $companion --modelTier $modelTier < $tmpfile`, adding `--session "${sessionID}"` after `--modelTier` when in RESUME mode.
 
-```
-skill:runx/scripts/companion.mjs run --companion $companion --modelTier $modelTier < $tmpfile
-```
+2. **Declare tool selection.** Before invoking any tool, explicitly output the following in your reasoning:
 
-Execute the command using the tool selected in the pre-check above.
+   ```
+   [TOOL_SELECTION] Checked available tools: Monitor=[yes/no], job-poll=[yes/no], bash-only=[yes/no]
+   [TOOL_SELECTION] Selected tool: [Monitor/job/bash]
+   [TOOL_SELECTION] Reason: [one-sentence explanation]
+   ```
 
-### Pre-Execution Declaration
+   Proceed only if the selected tool matches the priority order of available tools.
 
-After constructing `$companionCommand` but before invoking any tool, you MUST explicitly output the following in your reasoning:
-
-```
-[TOOL_SELECTION] Checked available tools: Monitor=[yes/no], job-poll=[yes/no], bash-only=[yes/no]
-[TOOL_SELECTION] Selected tool: [Monitor/job/bash]
-[TOOL_SELECTION] Reason: [one-sentence explanation]
-```
-
-Proceed with execution only if the `[TOOL_SELECTION] Selected tool` matches the priority order of available tools.
-
-**RESUME mode**: Append `--session "${sessionID}"` after `--modelTier`.
+3. **Run it.** Execute `$companionCommand` using the selected tool.
 
 ### Handle Response
 
