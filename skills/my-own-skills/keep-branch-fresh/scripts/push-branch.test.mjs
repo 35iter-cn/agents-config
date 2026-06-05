@@ -46,3 +46,23 @@ test('push-branch sets upstream for first push', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('push-branch uses force-with-lease for existing upstream', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'push-test-'));
+  try {
+    const { local } = setupRepoWithRemote(tmp);
+    git(['checkout', '-b', 'feature'], local);
+    writeFileSync(join(local, 'feat.txt'), 'feature work\n');
+    git(['add', '-A'], local);
+    git(['commit', '-m', 'add feature'], local);
+    // First push to establish upstream
+    git(['push', '--set-upstream', 'origin', 'feature'], local);
+
+    // Second push should use force-with-lease
+    const out = execFileSync(SCRIPT, [], { cwd: local, encoding: 'utf8', stdio: 'pipe' }).trim();
+    assert.match(out, /RESULT: pushed/);
+    assert.match(out, /Strategy: force-with-lease/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
