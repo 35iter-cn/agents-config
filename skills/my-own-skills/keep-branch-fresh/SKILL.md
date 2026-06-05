@@ -41,30 +41,24 @@ Execute the rebase onto LMB. Each commit's intent is preserved.
 
 If `git rebase --continue` opens an editor and hangs in non-interactive terminal: `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit`.
 
-### Verify & push
+### Verify
 
 `skill://keep-branch-fresh/scripts/verify-no-conflicts.mjs`
 
-Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
+检查 rebase 是否干净完成。Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
 
-Then `git push --force-with-lease`.
+### Push
 
-## Core Flow
+`skill://keep-branch-fresh/scripts/push-branch.mjs`
 
-```mermaid
-flowchart TD
-    A([Start]) --> B[Dry-run]
-    B --> C{Result?}
-    C -->|Clean| D[Rebase]
-    C -->|Conflicts| E[Resolve conflicts]
-    E --> F[Present resolution plan]
-    F --> F1[Ask user to confirm]
-    F1 -->|Confirmed| D
-    F1 -->|Rejected| K
-    D --> H[Verify & push]
-    H --> J([Done])
-    K --> J
-```
+将当前分支安全推送到远程。脚本自动检测 upstream 状态并选择推送策略：
+
+- **已有 upstream**：使用安全的 force-push 方式（如 `--force-with-lease`）
+- **首次推送**：建立 upstream 追踪关系后推送
+
+**失败处理：**
+- exit 1：通用错误（网络、权限等），阅读错误输出后重试或中止
+- exit 2：远程分支已有新提交，需要回到 Dry-run 阶段重新评估
 
 ## Common Mistakes
 
@@ -76,6 +70,7 @@ flowchart TD
 - Using local branch name instead of LMB — local branch may be behind remote. Use `git remote show origin | grep "HEAD branch"` to detect LMB.
 - Skipping verification — silent merge conflicts or build breaks.
 - `git rebase --continue` hangs in non-interactive terminal — use `GIT_EDITOR=true git rebase --continue`.
+- Push 脚本返回 exit 2 时未回到 dry-run，而是直接重试 push → 会反复失败，浪费 CI 资源。
 
 ## Red Flags
 
