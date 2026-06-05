@@ -102,3 +102,29 @@ test('push-branch exits 2 when remote has new commits', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('push-branch exits 1 when no remote configured', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'push-test-'));
+  try {
+    git(['init', '--initial-branch=main'], tmp);
+    git(['config', 'user.email', 'test@test.com'], tmp);
+    git(['config', 'user.name', 'Test'], tmp);
+    writeFileSync(join(tmp, 'README.md'), '# init\n');
+    git(['add', '-A'], tmp);
+    git(['commit', '-m', 'initial'], tmp);
+
+    let out = '';
+    let exitCode = 0;
+    try {
+      out = execFileSync(SCRIPT, [], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }).trim();
+    } catch (e) {
+      out = e.stdout ? e.stdout.trim() : '';
+      out += e.stderr ? e.stderr.toString().trim() : '';
+      exitCode = e.status;
+    }
+    assert.strictEqual(exitCode, 1);
+    assert.match(out, /No remote configured/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
