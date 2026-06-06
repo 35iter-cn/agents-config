@@ -7,6 +7,8 @@ description: |
 
 Dispatch user requests to another companion via `companion.mjs` script.
 
+> `$script_path` = current skill directory + `scripts/companion.mjs`
+
 ## Process flow
 
 You MUST create a task for each of these items and complete them in order.
@@ -67,8 +69,6 @@ When generating the final prompt, strictly follow these formatting rules:
 - If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
 
 **Step 2:** Generate a temporary file path and write `$finalPrompt` to it.
-
-> `$script_path` = current skill directory + `scripts/companion.mjs`
 
 ```bash
 $tmpfile = $(node "$script_path" tmpfile)
