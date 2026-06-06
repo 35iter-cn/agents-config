@@ -1,25 +1,28 @@
 ---
-name: runx
 description: |
   Trigger when the user explicitly asks a companion to execute a task — regardless of task complexity or duration.
-category: workflow
-date_added: "2026-06-03"
 ---
 
 # Overview
 
-This skill enables delegation of any task to other companion agents via the companion.mjs script. Supported companions include opencode, cursor, omp, and codex — all are agent CLI tools.
+Dispatch user requests to another companion via `companion.mjs`.
 
-## When NOT to Use
+Example usage:
 
-- One-off commands in the current environment.
-- Questions answerable directly without companion involvement.
+```bash
+# companion.mjs is located in this skill's directory
+scripts/companion.mjs run --help
+```
 
-## Workflow
+Select the appropriate tool for your platform to execute the `companion.mjs` script.
+
+Depending on task complexity, a companion may run for minutes to hours. Once the script starts, it streams output via stdout/stderr. Use your platform's capabilities to capture the output and decide the next step.
+
+## Process flow
 
 You MUST create a task for each step and complete them sequentially.
 
-### Classify Intent and Extract Parameters
+### 1. Classify Intent and Extract Parameters
 
 - `$mode` — Defaults to `NEW`. Set to `RESUME` only when continuing an existing companion session.
 - `$companion` — Defaults to `opencode` unless the user explicitly specifies otherwise.
@@ -38,7 +41,7 @@ You MUST create a task for each step and complete them sequentially.
 | Multi-file refactors, architecture changes | `high`    |
 | Repository-wide changes                    | `maximum` |
 
-### Compose Final Prompt
+### 2. Compose Final Prompt
 
 **Step 1: Select template by mode**
 
@@ -78,35 +81,35 @@ When generating the final prompt, strictly follow these formatting rules:
 
 ### Tool Selection Pre-Check (Mandatory)
 
-Before executing the companion command, you MUST complete the following checks in order and select the tool based on the result:
+Before executing `companion.mjs`, verify available tools:
 
-1. Is the `Monitor` tool available?
-   - **Yes** → You MUST use `Monitor({ command: "$companionCommand", persistent: true })`. Skip to Execution.
-   - **No** → Continue to the next check.
+1. 哪个工具最适合用来执行长时任务？
+2. 哪个工具支持 push 状态给我，而不需要你主动 poll？
 
-2. Is a `job` tool with `poll` support available?
-   - **Yes** → Use `bash({ command: "$companionCommand", async: true })` followed by `job({ poll: ["bg_<id>"] })`. Skip to Execution.
-   - **No** → Continue to the next check.
-
-3. Is only `bash` available (no Monitor, no job)?
-   - **Yes** → Use `bash({ command: "$companionCommand", timeout: 3600000 })`.
-   - **No** → Report an error and stop.
+选择你认为最合适的工具和参数。
 
 ### Execute with Declaration
 
-1. **Assemble the command.** Build `$companionCommand` from the script located at `skill:runx/scripts/companion.mjs` and the arguments `run --companion $companion --modelTier $modelTier < $tmpfile`, adding `--session "${sessionID}"` after `--modelTier` when in RESUME mode.
+1. **Assemble the command**
+
+```bash
+# Relative to the skill's directory
+scripts/companion.mjs run --companion $companion --modelTier $modelTier < $tmpfile
+```
+
+If in RESUME mode, add `--session "$sessionID"`
 
 2. **Declare tool selection.** Before invoking any tool, explicitly output the following in your reasoning:
 
    ```
-   [TOOL_SELECTION] Checked available tools: Monitor=[yes/no], job-poll=[yes/no], bash-only=[yes/no]
-   [TOOL_SELECTION] Selected tool: [Monitor/job/bash]
+   [TOOL_SELECTION] Checked available tools: <tool1>、<tool2>
+   [TOOL_SELECTION] Selected tool: <tool> with params <params>
    [TOOL_SELECTION] Reason: [one-sentence explanation]
    ```
 
    Proceed only if the selected tool matches the priority order of available tools.
 
-3. **Run it.** Execute `$companionCommand` using the selected tool.
+3. **Run it.** Execute command using the selected tool.
 
 ### Handle Response
 
