@@ -5,22 +5,11 @@ description: |
 
 # Overview
 
-Dispatch user requests to another companion via `companion.mjs`.
-
-Example usage:
-
-```bash
-# companion.mjs is located in this skill's directory
-scripts/companion.mjs run --help
-```
-
-Select the appropriate tool for your platform to execute the `companion.mjs` script.
-
-Depending on task complexity, a companion may run for minutes to hours. Once the script starts, it streams output via stdout/stderr. Use your platform's capabilities to capture the output and decide the next step.
+Dispatch user requests to another companion via `companion.mjs` script.
 
 ## Process flow
 
-You MUST create a task for each step and complete them sequentially.
+You MUST create a task for each of these items and complete them in order.
 
 ### 1. Classify Intent and Extract Parameters
 
@@ -77,39 +66,43 @@ When generating the final prompt, strictly follow these formatting rules:
 - `$context` must be concise prose — extract only what's relevant from the conversation; don't dump the full transcript.
 - If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
 
-**Step 2:** Write `$finalPrompt` to a temporary file (`$tmpfile`), then verify its contents match the chosen template format — if not, redo Step 1.
+**Step 2:** Write `$finalPrompt` to a temporary file (`$tmpfile`).
 
-### Tool Selection Pre-Check (Mandatory)
+### Execution Capability Check (Mandatory)
 
-Before executing `companion.mjs`, verify available tools:
+Companion execution is open-ended. Even questions that appear simple often require exploration, retries, or multi-step work. **Assume the task will exceed 1 hour** when selecting execution parameters.
 
-1. 哪个工具最适合用来执行长时任务？
-2. 哪个工具支持 push 状态给我，而不需要你主动 poll？
+Before executing `companion.mjs`, verify the execution method satisfies these requirements:
 
-选择你认为最合适的工具和参数。
+1. Supports processes that run longer than one hour without timing out.
+2. Captures stdout/stderr output as it streams, line by line.
+3. Pushes each output line to you automatically — no polling or periodic checking.
+4. Persists across conversation turns until the companion emits its final JSON line.
+
+Select the most appropriate tool and parameters.
 
 ### Execute with Declaration
 
-1. **Assemble the command**
+1. **Declare execution method selection.** Before invoking the execution method, explicitly output the following in your reasoning:
+
+   ```
+   [EXECUTION_SELECTION] Verified requirements: [requirement1], [requirement2], [requirement3], [requirement4]
+   [EXECUTION_SELECTION] Selected method: [method] with params [params]
+   [EXECUTION_SELECTION] Reason: [one-sentence explanation]
+   ```
+
+2. **Assemble the command**
+
+> $script_path = current skill directory + `scripts/companion.mjs`
 
 ```bash
-# Relative to the skill's directory
-scripts/companion.mjs run --companion $companion --modelTier $modelTier < $tmpfile
+# node $script_path --help for usage instructions
+node "$script_path" launch --companion $companion --modelTier $modelTier --prompt-path $tmpfile
 ```
 
 If in RESUME mode, add `--session "$sessionID"`
 
-2. **Declare tool selection.** Before invoking any tool, explicitly output the following in your reasoning:
-
-   ```
-   [TOOL_SELECTION] Checked available tools: <tool1>、<tool2>
-   [TOOL_SELECTION] Selected tool: <tool> with params <params>
-   [TOOL_SELECTION] Reason: [one-sentence explanation]
-   ```
-
-   Proceed only if the selected tool matches the priority order of available tools.
-
-3. **Run it.** Execute command using the selected tool.
+3. **Run it.** Execute command using the selected method.
 
 ### Handle Response
 
