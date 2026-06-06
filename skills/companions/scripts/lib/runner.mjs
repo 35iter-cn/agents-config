@@ -37,13 +37,13 @@ function createRetryNotification({ attempt, model, errorClass, message }) {
   });
 }
 
-function createDoneMarker(result, summary) {
+function createDoneMarker(result, summary, summaryPath) {
   return JSON.stringify({
     type: 'done',
     success: result.success,
     exitCode: result.exitCode,
     durationMs: summary.durationMs,
-    summary,
+    summaryPath,
   });
 }
 
@@ -508,7 +508,12 @@ export function runCompanion(agentType, prompt, options = {}) {
     summary.durationMs = Date.now() - overallStart;
     summary.heartbeatsEmitted = outcome.heartbeatsEmitted ?? 0;
 
-    writeLine(createDoneMarker(outcome.result, summary));
+    const logDir = '/tmp/companions';
+    const sessionName = options.sessionName ?? 'unknown';
+    const summaryPath = `${logDir}/summary-${sessionName}.jsonl`;
+    writeFileSync(summaryPath, JSON.stringify(summary) + '\n');
+
+    writeLine(createDoneMarker(outcome.result, summary, summaryPath));
     return summary;
   });
 }
