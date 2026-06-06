@@ -66,16 +66,17 @@ When generating the final prompt, strictly follow these formatting rules:
 - `$context` must be concise prose — extract only what's relevant from the conversation; don't dump the full transcript.
 - If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
 
-**Step 2:** 生成临时文件路径并写入 `$finalPrompt`。
+**Step 2:** Generate a temporary file path and write `$finalPrompt` to it.
+
+> `$script_path` = current skill directory + `scripts/companion.mjs`
 
 ```bash
-$script_path = current skill directory + `scripts/companion.mjs`
 $tmpfile = $(node "$script_path" tmpfile)
 echo "$finalPrompt" > "$tmpfile"
 ```
 
-`companion.mjs tmpfile` 自动生成 `/tmp/companions/prompt-{adjective}-{noun}.md`，
-包含碰撞检测（最多重试 10 次）。
+`companion.mjs tmpfile` automatically generates `/tmp/companions/prompt-{adjective}-{noun}.md`
+with collision detection (up to 10 retries).
 
 ### Execution Capability Check (Mandatory)
 
