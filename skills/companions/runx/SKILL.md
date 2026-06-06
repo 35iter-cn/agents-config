@@ -66,7 +66,15 @@ When generating the final prompt, strictly follow these formatting rules:
 - `$context` must be concise prose — extract only what's relevant from the conversation; don't dump the full transcript.
 - If `## Context` would be empty (no `$files` and no `$context`), omit the entire `## Context` heading and its content from the prompt.
 
-**Step 2:** Write `$finalPrompt` to a temporary file (`$tmpfile`).
+**Step 2:** 生成临时文件路径并写入 `$finalPrompt`。
+
+```bash
+$tmpfile = $(node "$script_path" tmpfile)
+echo "$finalPrompt" > "$tmpfile"
+```
+
+`companion.mjs tmpfile` 自动生成 `/tmp/companions/prompt-{adjective}-{noun}.md`，
+包含碰撞检测（最多重试 10 次）。`$script_path` 定义见下文。
 
 ### Execution Capability Check (Mandatory)
 
@@ -106,17 +114,17 @@ If in RESUME mode, add `--session "$sessionID"`
 
 ### Handle Response
 
-The companion streams output, ending with a final JSON line:
+The companion streams output, ending with a final JSON line (done marker):
 
 ```
-{"type":"done","success":bool,"summary":{"finalMessage":"...","sessionID":"...","sessionError":"..."}}
+{"type":"done","success":bool,"summaryPath":"/tmp/companions/summary-happy-cat.jsonl"}
 ```
 
-**Response paths**
+**Read the summary file** from `summaryPath`, then follow response paths:
 
 | Path     | Trigger                              | Action                                          |
 | -------- | ------------------------------------ | ----------------------------------------------- |
-| Error    | `sessionError` present               | Report error and stop                           |
+| Error    | `sessionError` present in summary    | Report error and stop                           |
 | Decision | `[NEEDS_DECISION]` in `finalMessage` | [Decision path details](#decision-path-details) |
 | Default  | Neither above                        | Summarize companion's results                   |
 
