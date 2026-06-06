@@ -7,7 +7,8 @@ description: |
 
 Dispatch user requests to another companion via `companion.mjs` script.
 
-> `$script_path` = current skill directory + `scripts/companion.mjs`
+> `$script_path` = current skill directory + `scripts/companion.mjs`  
+> Run `node "$script_path" --help` for usage instructions.
 
 ## Process flow
 
