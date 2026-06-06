@@ -9,6 +9,8 @@
 | **brainstorming** | `docs/superpowers/specs/` | `.knowledge/docs/specs/`  |
 | **writing-plans** | `docs/superpowers/plans/` | `.knowledge/notes/plans/` |
 
+- **Plans are NOT under version control.** They are session artifacts and should not be committed.
+
 ## Diagrams in Specs
 
 When using the `brainstorming` skill to write spec documents, proactively use the `mermaid-diagrams` skill for architectures, data models, workflows, and code structures.
