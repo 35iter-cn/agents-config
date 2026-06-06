@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { runCompanion as defaultRunCompanion } from './runner.mjs';
+import { generateTmpfilePath } from './tmpfile.mjs';
 
 export function parseRunArguments(args) {
   const result = {
@@ -54,6 +56,13 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf-8').trimEnd();
 }
 
+export function extractSessionName(promptPath) {
+  const name = basename(promptPath)
+    .replace(/^prompt-/, '')
+    .replace(/\.md$/, '');
+  return name || 'unknown';
+}
+
 export async function main(argv, deps = {}) {
   const [command, ...args] = argv;
   const exit = deps.exit ?? process.exit;
@@ -81,6 +90,27 @@ Models options:
 
   if (argv.includes('--help') || argv.includes('-h')) {
     stdoutWrite(HELP_TEXT);
+    exit(0);
+    return 0;
+  }
+
+  if (command === 'tmpfile') {
+    const tmpfileOptions = {};
+    for (let i = 0; i < args.length; i += 1) {
+      const current = args[i];
+      if (current === '--prefix') {
+        tmpfileOptions.prefix = args[i + 1];
+        i += 1;
+      } else if (current === '--dir') {
+        tmpfileOptions.dir = args[i + 1];
+        i += 1;
+      } else if (current === '--ext') {
+        tmpfileOptions.ext = args[i + 1];
+        i += 1;
+      }
+    }
+    const path = generateTmpfilePath(tmpfileOptions);
+    stdoutWrite(path + '\n');
     exit(0);
     return 0;
   }
@@ -173,6 +203,7 @@ Models options:
     modelTier: parsed.modelTier,
     dryRun: parsed.dryRun,
     session: parsed.session,
+    sessionName: extractSessionName(parsed.promptPath),
   });
   const code = result.success ? 0 : 1;
 
