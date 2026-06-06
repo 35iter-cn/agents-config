@@ -1,20 +1,9 @@
-import { fstatSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { runCompanion as defaultRunCompanion } from './runner.mjs';
-
-function stdinHasData() {
-  try {
-    const stat = fstatSync(0);
-    return stat.isFIFO() || stat.isFile();
-  } catch {
-    return false;
-  }
-}
 
 export function parseRunArguments(args) {
   const result = {
-    prompt: undefined,
+    promptPath: undefined,
     companion: undefined,
     modelTier: undefined,
     dryRun: false,
@@ -47,8 +36,10 @@ export function parseRunArguments(args) {
       continue;
     }
 
-    if (result.prompt === undefined) {
-      result.prompt = current;
+    if (current === '--prompt-path') {
+      result.promptPath = args[index + 1];
+      index += 1;
+      continue;
     }
   }
 
@@ -71,10 +62,11 @@ export async function main(argv, deps = {}) {
   const HELP_TEXT = `Usage: companion <command> [options]
 
 Commands:
-  run [prompt]           Run a companion agent. If [prompt] is omitted, reads from stdin.
+  launch                 Launch a companion agent to process the prompt
   models                 Manage model configurations
 
-Run options:
+Launch options:
+  --prompt-path <path>   Path to the prompt file (required)
   --companion <name>     Companion type (opencode, cursor, omp, codex)
   --modelTier <tier>     Model tier (low, medium, high, maximum)
   --session <id>         Resume an existing session
@@ -147,21 +139,34 @@ Models options:
     throw new Error('Unsupported models subcommand');
   }
 
-  if (command !== 'run') {
+  if (command !== 'launch') {
     throw new Error(`Unsupported subcommand: ${command}`);
   }
 
   const parsed = parseRunArguments(args);
 
+  const readPromptFile = deps.readPromptFile
+    ?? ((path) => readFileSync(path, 'utf-8').trimEnd());
+
+  if (!parsed.promptPath) {
+    stdoutWrite('Error: --prompt-path is required\n');
+    exit(1);
+    return 1;
+  }
+
+  let prompt;
+  try {
+    prompt = readPromptFile(parsed.promptPath);
+  } catch (error) {
+    stdoutWrite(`Error: cannot read prompt file: ${error.message}\n`);
+    exit(1);
+    return 1;
+  }
+
   const runCompanionFn = deps.runCompanion
     ?? (deps.runOpencode
       ? (_agentType, prompt, options) => deps.runOpencode(prompt, options)
       : defaultRunCompanion);
-  let prompt = parsed.prompt;
-  const hasStdinData = deps.stdinHasData ?? stdinHasData;
-  if (prompt === undefined && hasStdinData()) {
-    prompt = await readStdin();
-  }
 
   const result = await runCompanionFn(parsed.companion ?? 'opencode', prompt, {
     companion: parsed.companion,

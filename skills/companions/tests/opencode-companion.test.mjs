@@ -6,15 +6,16 @@ import {
   parseRunArguments,
 } from '../scripts/lib/companion.mjs';
 
-test('parseRunArguments keeps prompt and parses companion flag', () => {
+test('parseRunArguments parses --prompt-path and companion flag', () => {
   const result = parseRunArguments([
-    'ship this prompt exactly',
+    '--prompt-path',
+    '/tmp/prompt.txt',
     '--companion',
     'reviewer',
   ]);
 
   assert.deepEqual(result, {
-    prompt: 'ship this prompt exactly',
+    promptPath: '/tmp/prompt.txt',
     companion: 'reviewer',
     modelTier: undefined,
     dryRun: false,
@@ -23,29 +24,29 @@ test('parseRunArguments keeps prompt and parses companion flag', () => {
 });
 
 test('parseRunArguments parses all supported --modelTier tiers', () => {
-  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'low']), {
-    prompt: 'task',
+  assert.deepEqual(parseRunArguments(['--prompt-path', 'p.txt', '--modelTier', 'low']), {
+    promptPath: 'p.txt',
     companion: undefined,
     modelTier: 'low',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'medium']), {
-    prompt: 'task',
+  assert.deepEqual(parseRunArguments(['--prompt-path', 'p.txt', '--modelTier', 'medium']), {
+    promptPath: 'p.txt',
     companion: undefined,
     modelTier: 'medium',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'high']), {
-    prompt: 'task',
+  assert.deepEqual(parseRunArguments(['--prompt-path', 'p.txt', '--modelTier', 'high']), {
+    promptPath: 'p.txt',
     companion: undefined,
     modelTier: 'high',
     dryRun: false,
     session: undefined,
   });
-  assert.deepEqual(parseRunArguments(['task', '--modelTier', 'maximum']), {
-    prompt: 'task',
+  assert.deepEqual(parseRunArguments(['--prompt-path', 'p.txt', '--modelTier', 'maximum']), {
+    promptPath: 'p.txt',
     companion: undefined,
     modelTier: 'maximum',
     dryRun: false,
@@ -54,11 +55,12 @@ test('parseRunArguments parses all supported --modelTier tiers', () => {
 });
 
 test('parseRunArguments leaves modelTier undefined when --modelTier is omitted', () => {
-  const result = parseRunArguments(['task only']);
+  const result = parseRunArguments(['--prompt-path', 'task.txt']);
   assert.equal(result.modelTier, undefined);
+  assert.equal(result.promptPath, 'task.txt');
 });
 
-test('main dispatches run subcommand and exits zero on success', async () => {
+test('main dispatches launch subcommand and exits zero on success', async () => {
   const exits = [];
   const calls = [];
   const result = {
@@ -68,7 +70,7 @@ test('main dispatches run subcommand and exits zero on success', async () => {
   };
 
   const code = await main(
-    ['run', 'do work', '--companion', 'plan'],
+    ['launch', '--prompt-path', 'prompt.txt', '--companion', 'plan'],
     {
       runOpencode: async (prompt, options) => {
         calls.push({ prompt, options });
@@ -77,6 +79,7 @@ test('main dispatches run subcommand and exits zero on success', async () => {
       exit(code) {
         exits.push(code);
       },
+      readPromptFile: () => 'do work',
     },
   );
 
@@ -96,7 +99,7 @@ test('main dispatches run subcommand and exits zero on success', async () => {
 });
 
 
-test('main exits non-zero when runOpencode fails', async () => {
+test('main exits non-zero when launch fails', async () => {
   const exits = [];
   const result = {
     success: false,
@@ -104,11 +107,12 @@ test('main exits non-zero when runOpencode fails', async () => {
     errors: [{ tool: 'bash', error: 'failed' }],
   };
 
-  const code = await main(['run', 'demo prompt'], {
+  const code = await main(['launch', '--prompt-path', 'demo.txt'], {
     runOpencode: async () => result,
     exit(value) {
       exits.push(value);
     },
+    readPromptFile: () => 'demo prompt',
   });
 
   assert.deepEqual(exits, [1]);
@@ -116,10 +120,10 @@ test('main exits non-zero when runOpencode fails', async () => {
 });
 
 test('parseRunArguments parses --dry-run flag', () => {
-  const result = parseRunArguments(['ship this prompt exactly', '--dry-run']);
+  const result = parseRunArguments(['--prompt-path', 'ship.txt', '--dry-run']);
 
   assert.deepEqual(result, {
-    prompt: 'ship this prompt exactly',
+    promptPath: 'ship.txt',
     companion: undefined,
     modelTier: undefined,
     dryRun: true,
@@ -131,12 +135,13 @@ test('main passes dryRun to runOpencode when --dry-run flag is set', async () =>
   const calls = [];
   const exits = [];
 
-  const code = await main(['run', 'do work', '--dry-run'], {
+  const code = await main(['launch', '--prompt-path', 'work.txt', '--dry-run'], {
     runOpencode: async (prompt, options) => {
       calls.push({ prompt, options });
       return { success: true };
     },
     exit: (c) => exits.push(c),
+    readPromptFile: () => 'do work',
   });
 
   assert.equal(code, 0);
@@ -145,64 +150,16 @@ test('main passes dryRun to runOpencode when --dry-run flag is set', async () =>
   assert.equal(calls[0].options.dryRun, true);
 });
 
-test('main reads prompt from stdin when no positional arg and stdin has data', async () => {
-  const calls = [];
-  const exits = [];
-
-  const mockRunOpencode = async (prompt, options) => {
-    calls.push({ prompt, options });
-    return { success: true };
-  };
-
-  const mockStdin = new Readable({
-    read() {
-      this.push('xx xx');
-      this.push(null);
-    },
-  });
-
-  const originalStdin = process.stdin;
-  Object.defineProperty(process, 'stdin', {
-    value: mockStdin,
-    configurable: true,
-    writable: true,
-  });
-
-  try {
-    const code = await main(['run'], {
-      runOpencode: mockRunOpencode,
-      exit: (c) => exits.push(c),
-      stdinHasData: () => true,
-    });
-
-    assert.equal(code, 0);
-    assert.deepEqual(exits, [0]);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].prompt, 'xx xx');
-    assert.deepEqual(calls[0].options, {
-      companion: undefined,
-      modelTier: undefined,
-      dryRun: false,
-      session: undefined,
-    });
-  } finally {
-    Object.defineProperty(process, 'stdin', {
-      value: originalStdin,
-      configurable: true,
-      writable: true,
-    });
-  }
-});
-
 test('main passes requested agent type to runCompanion', async () => {
   const calls = [];
 
-  const code = await main(['run', 'do work', '--companion', 'cursor'], {
+  const code = await main(['launch', '--prompt-path', 'work.txt', '--companion', 'cursor'], {
     runCompanion: async (agentType, prompt, options) => {
       calls.push({ agentType, prompt, options });
       return { success: true };
     },
     exit() {},
+    readPromptFile: () => 'do work',
   });
 
   assert.equal(code, 0);
@@ -223,12 +180,13 @@ test('main passes requested agent type to runCompanion', async () => {
 test('main passes modelTier to runCompanion when --model is set', async () => {
   const calls = [];
 
-  await main(['run', 'do work', '--modelTier', 'high'], {
+  await main(['launch', '--prompt-path', 'work.txt', '--modelTier', 'high'], {
     runCompanion: async (agentType, prompt, options) => {
       calls.push({ agentType, prompt, options });
       return { success: true };
     },
     exit() {},
+    readPromptFile: () => 'do work',
   });
 
   assert.deepEqual(calls, [
@@ -350,13 +308,14 @@ test('main returns failure marker for invalid models --set JSON', async () => {
 
 test('parseRunArguments parses --session flag', () => {
   const result = parseRunArguments([
-    'continue the task',
+    '--prompt-path',
+    'continue.txt',
     '--session',
     'sid-abc-123',
   ]);
 
   assert.deepEqual(result, {
-    prompt: 'continue the task',
+    promptPath: 'continue.txt',
     companion: undefined,
     modelTier: undefined,
     dryRun: false,
@@ -366,14 +325,15 @@ test('parseRunArguments parses --session flag', () => {
 
 test('parseRunArguments parses --session alongside --companion and --modelTier', () => {
   const result = parseRunArguments([
-    'do work',
+    '--prompt-path',
+    'do-work.txt',
     '--companion', 'cursor',
     '--modelTier', 'high',
     '--session', 'sid-xyz',
   ]);
 
   assert.deepEqual(result, {
-    prompt: 'do work',
+    promptPath: 'do-work.txt',
     companion: 'cursor',
     modelTier: 'high',
     dryRun: false,
@@ -383,12 +343,13 @@ test('parseRunArguments parses --session alongside --companion and --modelTier',
 
 test('main passes session option to runCompanion', async () => {
   const calls = [];
-  const code = await main(['run', 'resume task', '--session', 'sid-123'], {
+  const code = await main(['launch', '--prompt-path', 'task.txt', '--session', 'sid-123'], {
     runCompanion: async (agentType, prompt, options) => {
       calls.push({ agentType, prompt, options });
       return { success: true };
     },
     exit() {},
+    readPromptFile: () => 'resume task',
   });
 
   assert.equal(code, 0);
@@ -482,7 +443,8 @@ test('main prints help and exits zero for --help', async () => {
   assert.deepEqual(exits, [0]);
   const output = writes.join('');
   assert.match(output, /Usage:/);
-  assert.match(output, /run \[prompt\]/);
+  assert.match(output, /launch/);
+  assert.match(output, /--prompt-path/);
   assert.match(output, /--companion/);
   assert.match(output, /--modelTier/);
 });
@@ -500,13 +462,14 @@ test('main prints help for -h', async () => {
   assert.deepEqual(exits, [0]);
   const output = writes.join('');
   assert.match(output, /Usage:/);
+  assert.match(output, /launch/);
 });
 
-test('main prints help for run --help', async () => {
+test('main prints help for launch --help', async () => {
   const writes = [];
   const exits = [];
 
-  const code = await main(['run', '--help'], {
+  const code = await main(['launch', '--help'], {
     stdoutWrite: (chunk) => writes.push(chunk),
     exit: (value) => exits.push(value),
   });
@@ -515,4 +478,58 @@ test('main prints help for run --help', async () => {
   assert.deepEqual(exits, [0]);
   const output = writes.join('');
   assert.match(output, /Usage:/);
+  assert.match(output, /launch/);
+});
+
+test('main reads prompt from file when --prompt-path is provided', async () => {
+  const calls = [];
+  const exits = [];
+
+  const code = await main(
+    ['launch', '--prompt-path', 'my-prompt.txt'],
+    {
+      runCompanion: async (agentType, prompt, options) => {
+        calls.push({ agentType, prompt, options });
+        return { success: true };
+      },
+      exit: (value) => exits.push(value),
+      readPromptFile: () => 'file contents here',
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(exits, [0]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prompt, 'file contents here');
+  assert.equal(calls[0].agentType, 'opencode');
+});
+
+test('main requires --prompt-path and exits non-zero when missing', async () => {
+  const writes = [];
+  const exits = [];
+
+  const code = await main(['launch'], {
+    stdoutWrite: (chunk) => writes.push(chunk),
+    exit: (value) => exits.push(value),
+  });
+
+  assert.equal(code, 1);
+  assert.deepEqual(exits, [1]);
+  assert.match(writes.join(''), /--prompt-path is required/);
+});
+
+test('main exits non-zero when prompt file does not exist', async () => {
+  const writes = [];
+  const exits = [];
+
+  const code = await main(['launch', '--prompt-path', '/nonexistent/prompt.txt'], {
+    stdoutWrite: (chunk) => writes.push(chunk),
+    exit: (value) => exits.push(value),
+  });
+
+  assert.equal(code, 1);
+  assert.deepEqual(exits, [1]);
+  const output = writes.join('');
+  assert.match(output, /cannot read prompt file/);
+  assert.match(output, /ENOENT/);
 });

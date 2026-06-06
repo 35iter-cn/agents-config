@@ -163,6 +163,7 @@ Symlinks the canonical instruction from `instructions/<stem>.md` to paths listed
 - Plans and specs live under `.knowledge/`, following the user's preferred paths:
   - `brainstorming` specs: `.knowledge/docs/specs/`
   - `writing-plans` plans: `.knowledge/notes/plans/`
+- **Plans are NOT under version control.** They are session artifacts and should not be committed. Keep `.gitignore` rules so that `plans/` directories are ignored.
 
 ## Agent Preferences
 
