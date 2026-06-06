@@ -69,12 +69,13 @@ When generating the final prompt, strictly follow these formatting rules:
 **Step 2:** 生成临时文件路径并写入 `$finalPrompt`。
 
 ```bash
+$script_path = current skill directory + `scripts/companion.mjs`
 $tmpfile = $(node "$script_path" tmpfile)
 echo "$finalPrompt" > "$tmpfile"
 ```
 
 `companion.mjs tmpfile` 自动生成 `/tmp/companions/prompt-{adjective}-{noun}.md`，
-包含碰撞检测（最多重试 10 次）。`$script_path` 定义见下文。
+包含碰撞检测（最多重试 10 次）。
 
 ### Execution Capability Check (Mandatory)
 
@@ -100,8 +101,6 @@ Select the most appropriate tool and parameters.
    ```
 
 2. **Assemble the command**
-
-> $script_path = current skill directory + `scripts/companion.mjs`
 
 ```bash
 # node $script_path --help for usage instructions
