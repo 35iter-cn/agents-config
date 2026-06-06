@@ -173,12 +173,15 @@ function runSingleAttempt(config, agentType, prompt, options) {
   const args = config.buildArgs({ ...options, modelId });
   const logDir = '/tmp/companions';
   mkdirSync(logDir, { recursive: true });
-  const timestamp = new Intl.DateTimeFormat('sv-SE', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-    timeZone: 'UTC',
-  }).format(new Date()).replace(' ', '-');
-  const logPath = options.logPath ?? `${logDir}/${timestamp}-${randomUUID().slice(0, 8)}.jsonl`;
+  const now = new Date();
+  const timestamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+  ].join('-');
+  const logPath = options.logPath ?? `${logDir}/raw-${timestamp}-${randomUUID().slice(0, 8)}.jsonl`;
   const writeLine = options.writeLine ?? ((line) => process.stdout.write(line + '\n'));
 
   if (!useStdin && prompt !== undefined) {
