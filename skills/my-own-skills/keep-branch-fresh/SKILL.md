@@ -7,74 +7,60 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Safely rebase a feature branch onto the latest main branch (LMB).
+Rebase feature branch onto latest main (LMB) safely: dry-run → resolve conflicts → rebase → verify → push.
 
-## Quick Reference
+**LMB** — remote tracking branch after fetch (e.g. `origin/main`). Always fetch first.
 
-**LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
+**FEATURE_BRANCH** — branch to rebase (default: `HEAD`)
 
-**FEATURE_BRANCH** — branch to rebase (default: current `HEAD`)
+**$dry_run_script_path** — current skill dir + `scripts/dry-run-conflicts.mjs`
+**$verify_script_path** — current skill dir + `scripts/verify-no-conflicts.mjs`
+**$push_script_path** — current skill dir + `scripts/push-branch.mjs`
 
-### Dry-run
+## Steps
 
-`skill://keep-branch-fresh/scripts/dry-run-conflicts.mjs [LMB] [FEATURE_BRANCH]`
+### 1. Dry-run
 
-Fetches latest LMB and detects conflicts in one step. The actual rebase only proceeds after dry-run confirms safety or the user approves a resolution plan.
+`node "$dry_run_script_path" [LMB] [FEATURE_BRANCH]`
+
+Fetches LMB and detects conflicts. Pass local branch name (e.g. `main`) — auto-resolves to `origin/main`. If omitted, auto-detects `origin/master` or `origin/main`.
 
 - Clean → proceed to rebase.
-- Conflicts found → categorize and present resolution plan (see [Resolve conflicts](#resolve-conflicts)).
+- Conflicts → categorize and resolve (below), get user confirmation, then rebase.
 
-### Resolve conflicts
+### 2. Resolve conflicts
 
-Only needed when dry-run detects conflicts.
+| Category | Strategy |
+|----------|----------|
+| Machine-generated (lockfiles, build artifacts) | Delete and regenerate. Never hand-edit. |
+| Source code & docs | Transplant each commit's intent onto LMB's structure. Read commit message for intent. Defer to user only when preservation is infeasible. |
 
-| Category                                                           | Strategy                                                                                                                                                                                 |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Machine-generated** (lockfiles, build artifacts, generated code) | Delete and regenerate. Never hand-edit.                                                                                                                                                  |
-| **Source code & docs**                                             | Preserve each feature commit's intent by transplanting onto LMB's refactored structure. Read the commit message to determine intent. Defer to user only when preservation is infeasible. |
+### 3. Rebase
 
-Present plan to user, get confirmation, then proceed to rebase.
+Execute rebase onto LMB. Continue with `GIT_EDITOR=true git rebase --continue` (prevents editor hang in non-interactive terminal).
 
-### Rebase
+### 4. Verify
 
-Execute the rebase onto LMB. Each commit's intent is preserved.
+`node "$verify_script_path"`
 
-If `git rebase --continue` opens an editor and hangs in non-interactive terminal: `GIT_EDITOR=true git rebase --continue` or `git rebase --continue --no-edit`.
+Exits 0 if clean; exits 1 if conflict markers remain or rebase is still in progress.
 
-### Verify
+### 5. Push
 
-`skill://keep-branch-fresh/scripts/verify-no-conflicts.mjs`
+`node "$push_script_path"`
 
-检查 rebase 是否干净完成。Exits 0 if clean, exits 1 with details if conflict markers remain or rebase is still in progress.
+Pushes with `--set-upstream --force-with-lease`:
+- Remote branch absent → creates and sets upstream
+- Remote branch exists → checks remote hasn't changed since last fetch; rejects (exit 2) if it has
 
-### Push
+**Exit codes:** 1 = general error (retry or abort); 2 = remote has new commits → return to dry-run.
 
-`skill://keep-branch-fresh/scripts/push-branch.mjs`
-
-将当前分支安全推送到远程。脚本自动检测 upstream 状态并选择推送策略：
-
-- **已有 upstream**：使用安全的 force-push 方式（如 `--force-with-lease`）
-- **首次推送**：建立 upstream 追踪关系后推送
-
-**失败处理：**
-- exit 1：通用错误（网络、权限等），阅读错误输出后重试或中止
-- exit 2：远程分支已有新提交，需要回到 Dry-run 阶段重新评估
-
-## Common Mistakes
-
-- Rebasing before dry-run — unexpected conflicts waste time and risk data loss.
-- Assuming "conflicts are small" — small conflicts hide semantic issues.
-- Overconfidence about known conflicts — trust the process, not memory.
-- Hand-editing lockfiles — introduces inconsistent dependency states. Always delete and regenerate.
-- Using stale LMB reference — rebasing onto outdated main is pointless. Dry-run script fetches automatically.
-- Using local branch name instead of LMB — local branch may be behind remote. Use `git remote show origin | grep "HEAD branch"` to detect LMB.
-- Skipping verification — silent merge conflicts or build breaks.
-- `git rebase --continue` hangs in non-interactive terminal — use `GIT_EDITOR=true git rebase --continue`.
-- Push 脚本返回 exit 2 时未回到 dry-run，而是直接重试 push → 会反复失败，浪费 CI 资源。
-
-## Red Flags
+## Anti-patterns
 
 - Rebasing before dry-run.
-- Force-pushing without verifying.
-- Hand-editing lockfiles.
+- Assuming conflicts are "small" — small conflicts hide semantic issues.
+- Hand-editing lockfiles — always delete and regenerate.
+- Using stale LMB — dry-run script fetches automatically, but verify you're not using a stale local branch name.
 - Skipping verification after rebase.
+- Force-pushing without verifying.
+- Push exit 2 → retrying push instead of returning to dry-run (wastes CI resources).

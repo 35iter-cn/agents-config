@@ -23,7 +23,7 @@ Keep branch fresh, run pre-push checks, analyze diff, then create or update PR w
 
 ## Quick Reference
 
-**LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
+**LMB** (Latest Main Branch) — remote tracking branch ref, e.g. `origin/main`. This is the remote's default branch after fetch. **Always fetch before computing.**
 
 ### keep-branch-fresh
 

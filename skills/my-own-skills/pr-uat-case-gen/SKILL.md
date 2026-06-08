@@ -11,7 +11,7 @@ Sync branch, analyze diff, generate UAT test cases for frontend feature branches
 
 ## Quick Reference
 
-**LMB** (Latest Main Branch) — remote HEAD branch ref. Detect: `git remote show origin | grep "HEAD branch" | awk '{print $NF}'`. **Always fetch before computing.**
+**LMB** (Latest Main Branch) — remote tracking branch ref, e.g. `origin/main`. This is the remote's default branch after fetch. **Always fetch before computing.**
 
 ### keep-branch-fresh
 

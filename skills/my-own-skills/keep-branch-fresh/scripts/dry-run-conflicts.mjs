@@ -39,12 +39,23 @@ try { git(['fetch', 'origin', '--prune']); } catch {
   console.log('(no remote origin, skipping fetch)');
 }
 // --- Resolve LMB ---
-// --- Resolve LMB (remote first, then local) ---
 let LMB = LMB_ARG;
+
+// Validate: if user passed a local branch name, prefer the remote tracking branch
+if (LMB && !LMB.startsWith('origin/')) {
+  const remoteRef = `origin/${LMB}`;
+  try {
+    gitCapture(['rev-parse', '--verify', remoteRef]);
+    console.log(`WARNING: '${LMB}' is a local branch. LMB must be a remote branch. Using '${remoteRef}' instead.`);
+    LMB = remoteRef;
+  } catch {
+    console.log(`WARNING: '${LMB}' does not appear to be a remote branch. LMB should be a remote ref (e.g., origin/main).`);
+  }
+}
+
 if (!LMB) {
   const remoteCandidates = ['origin/master', 'origin/main'];
-  const localCandidates = ['main', 'master'];
-  for (const ref of [...remoteCandidates, ...localCandidates]) {
+  for (const ref of remoteCandidates) {
     try {
       gitCapture(['rev-parse', '--verify', ref]);
       LMB = ref;
@@ -52,7 +63,7 @@ if (!LMB) {
     } catch { /* try next */ }
   }
   if (!LMB) {
-    error('Could not infer main branch. Tried remote (origin/master, origin/main) and local (main, master).');
+    error('Could not infer main branch. Tried origin/master and origin/main. Ensure you have a remote named "origin" with a default branch.');
   }
 }
 

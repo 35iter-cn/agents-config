@@ -31,28 +31,14 @@ if (REMOTE !== 'origin') {
   console.log(`WARNING: No origin remote, using ${REMOTE}`);
 }
 
-// --- Detect upstream ---
-let hasUpstream = false;
-try {
-  gitCapture(['rev-parse', '--abbrev-ref', `${BRANCH}@{upstream}`]);
-  hasUpstream = true;
-} catch {
-  hasUpstream = false;
-}
-
 console.log(`=== Push ===`);
 console.log(`Branch: ${BRANCH}`);
 console.log(`Remote: ${REMOTE}`);
 
-// --- Push ---
+// --- Push: always use --set-upstream --force-with-lease ---
 try {
-  if (hasUpstream) {
-    console.log('Strategy: force-with-lease');
-    gitCapture(['push', '--force-with-lease', REMOTE, BRANCH]);
-  } else {
-    console.log('Strategy: set-upstream');
-    gitCapture(['push', '--set-upstream', REMOTE, BRANCH]);
-  }
+  console.log('Strategy: set-upstream + force-with-lease');
+  gitCapture(['push', '--set-upstream', '--force-with-lease', REMOTE, BRANCH]);
   console.log('RESULT: pushed');
   process.exit(0);
 } catch (e) {
