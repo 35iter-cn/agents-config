@@ -1,0 +1,55 @@
+---
+description: Query MagicDoor backend service configs, analyze swagger specs, and generate swagger types via the @magicdoor/env CLI.
+---
+
+# MagicDoor Backend Swagger
+
+## Overview
+
+Use `npm exec -- @magicdoor/env` to query backend service configs, analyze swagger specs, and generate project swagger types.
+
+> Full CLI reference: `npm exec -- @magicdoor/env --help`
+
+## Capabilities
+
+### Query Service Config
+
+```bash
+npm exec -- @magicdoor/env -e <env> -s <service> -a
+```
+
+Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
+
+### Analyze a Swagger Spec
+
+1. **Determine `$service`** and `$env`** from the conversation context. Ask if unclear.
+2. **Determine `$specName`**:
+   - Check `.magicdoorc`:
+     ```bash
+     jq -r --arg s "$service" '.swagger[$s].spec // empty' .magicdoorc
+     ```
+   - If empty, query available specs and infer from context:
+     ```bash
+     npm exec -- @magicdoor/env -e $env -s $service -a -j
+     ```
+     Optionally persist the mapping to `.magicdoorc`.
+3. **Refresh cache** (force — 15 min TTL):
+   ```bash
+   npm exec -- @magicdoor/env cache query --service $service --env $env --spec-name $specName
+   ```
+   Returns `{ ok, cache_file, refreshed }`.
+4. **Analyze the cache file** with `jq` or `rg` — **never read the full file**.
+
+### Generate Swagger Types
+
+```bash
+npm exec -- @magicdoor/env gen -e <env>   # defaults to test
+```
+
+Add `--no-cache` to force fresh downloads.
+
+## Red Flags
+
+- **Always run `cache query` before analysis** — cache TTL is 15 minutes.
+- **Never read full spec files directly** — use `jq`/`rg` on the cache file.
+- **No `.magicdoorc`?** Alert the user — required for `gen` and recommended for spec resolution.
