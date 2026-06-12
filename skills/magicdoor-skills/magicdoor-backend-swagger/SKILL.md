@@ -10,6 +10,12 @@ Use `npm exec -- @magicdoorinc/env` to query backend service configs, analyze sw
 
 > Full CLI reference: `npm exec -- @magicdoorinc/env --help`
 
+## SOT Principle
+
+The **cache query result** is the single source of truth for spec analysis.
+Project-local swagger types and stale cache files may be outdated — always
+query fresh cache before any analysis or type generation.
+
 ## Capabilities
 
 ### Query Service Config
@@ -33,11 +39,13 @@ Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
      npm exec -- @magicdoorinc/env -e $env -s $service -a -j
      ```
      Optionally persist the mapping to `.magicdoorc`.
-3. **Refresh cache** (force — 15 min TTL):
+3. **Query the SOT cache** (force — 15 min TTL):
    ```bash
    npm exec -- @magicdoorinc/env cache query --service $service --env $env --spec-name $specName
    ```
-   Returns `{ ok, cache_file, refreshed }`.
+   Returns `{ ok, cache_file, refreshed }`. Treat `cache_file` as the single
+   source of truth — do not rely on project-local swagger types or previously
+   downloaded specs.
 4. **Analyze the cache file** with `jq` or `rg` — **never read the full file**.
 
 ### Generate Swagger Types
@@ -51,5 +59,7 @@ Add `--no-cache` to force fresh downloads.
 ## Red Flags
 
 - **Always run `cache query` before analysis** — cache TTL is 15 minutes.
+- **Never trust project-local swagger types or stale cache files** — always
+  treat a fresh `cache query` result as the single source of truth.
 - **Never read full spec files directly** — use `jq`/`rg` on the cache file.
 - **No `.magicdoorc`?** Alert the user — required for `gen` and recommended for spec resolution.

@@ -7,9 +7,6 @@ description: |
 
 Dispatch user requests to another companion via `companion.mjs` script.
 
-> `$script_path` = current skill directory + `scripts/companion.mjs`  
-> Run `node "$script_path" --help` for usage instructions.
-
 ## Process flow
 
 You MUST create a task for each of these items and complete them in order.
@@ -72,7 +69,7 @@ When generating the final prompt, strictly follow these formatting rules:
 **Step 2:** Generate a temporary file path and write `$finalPrompt` to it.
 
 ```bash
-$tmpfile = $(node "$script_path" tmpfile)
+$tmpfile = $(node skills/runx/scripts/companion.mjs tmpfile)
 echo "$finalPrompt" > "$tmpfile"
 ```
 
@@ -105,8 +102,8 @@ Select the most appropriate tool and parameters.
 2. **Assemble the command**
 
 ```bash
-# node $script_path --help for usage instructions
-node "$script_path" launch --companion $companion --modelTier $modelTier --prompt-path $tmpfile
+# node skills/runx/scripts/companion.mjs --help for usage instructions
+node skills/runx/scripts/companion.mjs launch --companion $companion --modelTier $modelTier --prompt-path $tmpfile
 ```
 
 If in RESUME mode, add `--session "$sessionID"`
@@ -141,3 +138,4 @@ When the companion returns `[NEEDS_DECISION: ...]`:
 ## Common Mistakes
 
 - **Checking companion CLI availability before execution.** The command will fail with a clear error if the CLI is missing; an explicit pre-check wastes an LLM call.
+- **Polling companion output repeatedly.** The companion only emits output at key milestones (start, retry, completion). No output for minutes at a time is normal — the companion is working. Do not `tail` the output file repeatedly, do not run `sleep && tail` loops, and do not assume the companion is stuck just because there is no new output. Wait for the background task completion notification or the final `{"type":"done"}` marker.
