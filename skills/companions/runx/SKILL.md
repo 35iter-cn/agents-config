@@ -76,30 +76,24 @@ echo "$finalPrompt" > "$tmpfile"
 `companion.mjs tmpfile` automatically generates `/tmp/companions/prompt-{adjective}-{noun}.md`
 with collision detection (up to 10 retries).
 
-### Execution Capability Check (Mandatory)
+### Select & Declare Execution Method
 
-Companion execution is open-ended. Even questions that appear simple often require exploration, retries, or multi-step work. **Assume the task will exceed 1 hour** when selecting execution parameters.
+The companion communicates via stdout (event stream) and a final summary file. Choose an execution method along these three criteria:
 
-Before executing `companion.mjs`, verify the execution method satisfies these requirements:
+| Criteria | Target |
+|----------|--------|
+| **Background execution** | Runs detached, survives beyond a single response turn. |
+| **Event-driven stdout** | Each stdout line arrives in the conversation as a notification — no separate retrieval step. |
+| **Timeout** | No timeout, or large enough to accommodate open-ended companion execution (>1h). |
 
-1. Supports processes that run longer than one hour without timing out.
-2. Captures stdout/stderr output as it streams, line by line.
-3. Pushes each output line to you automatically — no polling or periodic checking.
-4. Persists across conversation turns until the companion emits its final JSON line.
+You **must** declare the selected tool and its parameters to the user before proceeding:
 
-Select the most appropriate tool and parameters.
+```
+[EXECUTION_SELECTION] Tool: [tool name] with params [key parameters]
+[EXECUTION_SELECTION] Reason: [one-sentence explanation]
+```
 
-### Execute with Declaration
-
-1. **Declare execution method selection.** Before invoking the execution method, explicitly output the following in your reasoning:
-
-   ```
-   [EXECUTION_SELECTION] Verified requirements: [requirement1], [requirement2], [requirement3], [requirement4]
-   [EXECUTION_SELECTION] Selected method: [method] with params [params]
-   [EXECUTION_SELECTION] Reason: [one-sentence explanation]
-   ```
-
-2. **Assemble the command**
+**Assemble and run:**
 
 ```bash
 # node skills/runx/scripts/companion.mjs --help for usage instructions
@@ -107,8 +101,6 @@ node skills/runx/scripts/companion.mjs launch --companion $companion --modelTier
 ```
 
 If in RESUME mode, add `--session "$sessionID"`
-
-3. **Run it.** Execute command using the selected method.
 
 ### Handle Response
 
