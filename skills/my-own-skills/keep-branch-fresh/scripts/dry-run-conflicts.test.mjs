@@ -92,14 +92,13 @@ test('dry-run-conflicts with HEAD defaults to current branch', () => {
   }
 });
 
-test('dry-run-conflicts without LMB auto-detects local main branch', () => {
+test('dry-run-conflicts without LMB exits with error', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'dryrun-test-'));
   try {
     setupRepo(tmp);
-    const out = execFileSync(SCRIPT, [], {
+    assert.throws(() => execFileSync(SCRIPT, [], {
       cwd: tmp, encoding: 'utf8', stdio: 'pipe',
-    }).trim();
-    assert.match(out, /RESULT: clean/);
+    }), (err) => err.status === 1);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

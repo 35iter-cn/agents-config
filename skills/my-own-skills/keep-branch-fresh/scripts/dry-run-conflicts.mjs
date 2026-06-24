@@ -54,17 +54,7 @@ if (LMB && !LMB.startsWith('origin/')) {
 }
 
 if (!LMB) {
-  const remoteCandidates = ['origin/master', 'origin/main'];
-  for (const ref of remoteCandidates) {
-    try {
-      gitCapture(['rev-parse', '--verify', ref]);
-      LMB = ref;
-      break;
-    } catch { /* try next */ }
-  }
-  if (!LMB) {
-    error('Could not infer main branch. Tried origin/master and origin/main. Ensure you have a remote named "origin" with a default branch.');
-  }
+  error('LMB argument is required. Usage: node dry-run-conflicts.mjs <lmb> [feature-branch]');
 }
 
 const HEAD_SHA = gitCapture(['rev-parse', FEATURE_BRANCH]);
