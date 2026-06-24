@@ -32,22 +32,28 @@ try {
   process.stderr.write(`WARNING: fetch from '${remote}' failed, using cached refs.\n`);
 }
 
+let match = null;
 try {
   const output = gitCapture(['ls-remote', '--symref', remote, 'HEAD']);
-  const match = output.match(/^ref: refs\/heads\/(\S+)\tHEAD$/m);
-  if (!match) {
-    error(`Could not determine HEAD ref for remote '${remote}'.`);
-  }
-  const branch = match[1];
-  process.stdout.write(`${remote}/${branch}\n`);
+  match = output.match(/^ref: refs\/heads\/(\S+)\tHEAD$/m);
 } catch {
+  // ls-remote failed — fall through to fallback
+}
+
+if (match) {
+  process.stdout.write(`${remote}/${match[1]}\n`);
+} else {
   const candidates = [`${remote}/main`, `${remote}/master`];
+  let found = false;
   for (const ref of candidates) {
     try {
       gitCapture(['rev-parse', '--verify', ref]);
       process.stdout.write(`${ref}\n`);
-      process.exit(0);
+      found = true;
+      break;
     } catch { /* try next */ }
   }
-  error(`Could not determine default branch for remote '${remote}'. Tried ${candidates.join(', ')}.`);
+  if (!found) {
+    error(`Could not determine default branch for remote '${remote}'. Tried ${candidates.join(', ')}.`);
+  }
 }

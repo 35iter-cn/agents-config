@@ -72,6 +72,84 @@ test('detect-lmb exits 1 when no remote exists', () => {
   }
 });
 
+test('fallback to main works when ls-remote succeeds but no symref HEAD match', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'detect-lmb-test-'));
+  try {
+    const { remote, local } = setupRepoWithRemote(tmp);
+    // Detach HEAD on the bare remote so ls-remote --symref won't output a ref: line
+    const hash = git(['rev-parse', 'HEAD'], local);
+    writeFileSync(join(remote, 'HEAD'), `${hash}\n`);
+
+    const out = execFileSync(SCRIPT, [], { cwd: local, encoding: 'utf8', stdio: 'pipe' }).trim();
+    assert.strictEqual(out, 'origin/main');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('fallback to master works when ls-remote succeeds but no symref HEAD match', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'detect-lmb-test-'));
+  try {
+    const remote = join(tmp, 'remote.git');
+    git(['init', '--bare', remote], tmp);
+
+    const local = join(tmp, 'local');
+    mkdirSync(local, { recursive: true });
+    git(['init'], local);
+    git(['config', 'user.email', 'test@test.com'], local);
+    git(['config', 'user.name', 'Test'], local);
+    git(['checkout', '-b', 'master'], local);
+    writeFileSync(join(local, 'README.md'), '# init\n');
+    git(['add', '-A'], local);
+    git(['commit', '-m', 'initial'], local);
+    git(['remote', 'add', 'origin', remote], local);
+    git(['push', '-u', 'origin', 'master'], local);
+
+    // Detach HEAD on the bare remote
+    const hash = git(['rev-parse', 'HEAD'], local);
+    writeFileSync(join(remote, 'HEAD'), `${hash}\n`);
+
+    const out = execFileSync(SCRIPT, [], { cwd: local, encoding: 'utf8', stdio: 'pipe' }).trim();
+    assert.strictEqual(out, 'origin/master');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('all fallbacks fail exits 1', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'detect-lmb-test-'));
+  try {
+    const remote = join(tmp, 'remote.git');
+    git(['init', '--bare', remote], tmp);
+
+    const local = join(tmp, 'local');
+    mkdirSync(local, { recursive: true });
+    git(['init'], local);
+    git(['config', 'user.email', 'test@test.com'], local);
+    git(['config', 'user.name', 'Test'], local);
+    git(['checkout', '-b', 'develop'], local);
+    writeFileSync(join(local, 'README.md'), '# init\n');
+    git(['add', '-A'], local);
+    git(['commit', '-m', 'initial'], local);
+    git(['remote', 'add', 'origin', remote], local);
+    git(['push', '-u', 'origin', 'develop'], local);
+
+    // Detach HEAD on the bare remote
+    const hash = git(['rev-parse', 'HEAD'], local);
+    writeFileSync(join(remote, 'HEAD'), `${hash}\n`);
+
+    let exitCode = 0;
+    try {
+      execFileSync(SCRIPT, [], { cwd: local, encoding: 'utf8', stdio: 'pipe' });
+    } catch (e) {
+      exitCode = e.status;
+    }
+    assert.strictEqual(exitCode, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('detect-lmb exits 1 when multiple remotes exist', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'detect-lmb-test-'));
   try {
