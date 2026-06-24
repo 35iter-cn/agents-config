@@ -16,14 +16,21 @@ Rebase feature branch onto latest main (LMB) safely: dry-run → resolve conflic
 **$dry_run_script_path** — current skill dir + `scripts/dry-run-conflicts.mjs`
 **$verify_script_path** — current skill dir + `scripts/verify-no-conflicts.mjs`
 **$push_script_path** — current skill dir + `scripts/push-branch.mjs`
+**$detect_lmb_script_path** — current skill dir + `scripts/detect-lmb.mjs`
 
 ## Steps
 
+### 0. 确定 LMB
+
+`node "$detect_lmb_script_path"`
+
+Prints `<remote>/<branch>` (e.g. `origin/main`). Exit 0 on success, 1 on failure. Pass the output as LMB to Step 1.
+
 ### 1. Dry-run
 
-`node "$dry_run_script_path" [LMB] [FEATURE_BRANCH]`
+`node "$dry_run_script_path" "$LMB" [FEATURE_BRANCH]`
 
-Fetches LMB and detects conflicts. Pass local branch name (e.g. `main`) — auto-resolves to `origin/main`. If omitted, auto-detects `origin/master` or `origin/main`.
+Fetches LMB and detects conflicts. LMB comes from Step 0.
 
 - Clean → proceed to rebase.
 - Conflicts → categorize and resolve (below), get user confirmation, then rebase.
