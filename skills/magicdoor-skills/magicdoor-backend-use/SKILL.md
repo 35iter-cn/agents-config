@@ -68,7 +68,7 @@ End-to-end backend API verification workflow:
 - userId: `1480743304903122944` (Lei Wang)
 
 **Test MagicDoor Account:** (valid in **test** environment only)
-- userId: `1478272156196851700`
+- userId: `1476492890174410752` (Hao Ruan)
 
 ## Core Flow
 
@@ -185,7 +185,7 @@ Present to user: "Endpoint `{endpoint}` requires `{user_type}` token."
 **If required user_type is `MagicDoor`:**
 - Use hardcoded MagicDoor account
 - Dev: `1480743304903122944`
-- Test: `1478272156196851700`
+- Test: `1476492890174410752`
 
 **If required user_type is NOT `MagicDoor`:**
 

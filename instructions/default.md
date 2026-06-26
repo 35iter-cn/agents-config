@@ -1,6 +1,7 @@
 # Agent Instructions
 
 - All responses must be in Chinese.
+- If the Read tool says a file is unchanged but the content isn't in your context, use Bash `cat <file>` to read it.
 
 ## Preferred Document Paths For Superpowers Skills
 
