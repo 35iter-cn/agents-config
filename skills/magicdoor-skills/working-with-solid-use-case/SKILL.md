@@ -66,7 +66,7 @@ Do not hardcode assumptions such as `state.user`, `src/gateways`, or a specific 
 
 | Layer | Allowed to know | Must not do |
 | --- | --- | --- |
-| Gateway | transport details, DTOs, URLs, headers, auth, request and response mapping | mutate shared app state, format UI labels, decide UI behavior |
+| Gateway | transport details, DTOs, URLs, headers, auth, request and response mapping | mutate shared app state, format UI labels, decide UI behavior; let Swagger types leak out of this layer |
 | Use case | business flow, state reads and writes, navigation, coordination across gateways | return JSX, shape view models, depend on presenter code |
 | Presenter | current app-state snapshot and pure derived display data | call gateways, mutate shared state, trigger navigation, own browser side effects |
 | Component or route | local UI state, event wiring, calling `execute()`, reading `model()` | call gateways directly, duplicate shared business rules, depend on transport DTOs |
@@ -79,6 +79,13 @@ Do not hardcode assumptions such as `state.user`, `src/gateways`, or a specific 
 - it knows DTO field names or transport-only enums
 - it maps backend payloads into domain data
 - it translates transport errors into app-level errors
+
+### Gateway Swagger type rules
+
+- Use Swagger-generated types to declare and validate API request bodies and response shapes inside the gateway.
+- Gateway method signatures must return internal domain types, never a Swagger type.
+- Map every Swagger response to a domain object explicitly before returning it.
+- No other layer may import or depend on Swagger types.
 
 ### Put logic in the use case when
 
@@ -132,6 +139,7 @@ Do not start with a component patch unless you have already proved the lower lay
 ## Non-Negotiable Rules
 
 - Only gateway code may know transport-specific DTO shapes.
+- Swagger types may be used inside gateways to declare request bodies and API response shapes, but they must never leak out of the gateway layer.
 - Never call a gateway directly from a route or component.
 - Never mutate shared app state from a presenter.
 - Never import presenter logic into a use case.
@@ -145,6 +153,7 @@ Do not start with a component patch unless you have already proved the lower lay
 Any of these means the logic is in the wrong place until proven otherwise:
 
 - a component imports a gateway
+- Swagger types appear outside the gateway layer
 - a presenter performs I/O or navigation
 - a use case imports from a presenter module
 - a component contains shared eligibility, status, or selection rules

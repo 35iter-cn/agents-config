@@ -55,6 +55,7 @@ Or use the most recently modified user profile directory.
 - **Check file existence** before reading/writing; multiple install variants may exist
 - **Line endings**: Windows files use CRLF. The Edit/Read tools handle this transparently
 - **Permissions**: WSL has full access to `/mnt/c/`; no elevation needed for user-scoped configs
+- **Admin operations**: For actions requiring elevation (e.g. `powercfg`, registry changes under `HKLM`, system-wide installs), trigger UAC via `Start-Process -Verb RunAs`. The user must approve the UAC prompt; the agent cannot bypass it. Have the elevated process write results to a file under `/mnt/c/` so WSL can read them back.
 
 ## Common Operations
 
