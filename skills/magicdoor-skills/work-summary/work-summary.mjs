@@ -94,7 +94,6 @@ export function resolveAuthor(cwd) {
 // 3. Resolve GitHub username from gh CLI
 // ---------------------------------------------------------------------------
 export function resolveGitHubUsername() {
-  if (!checkGhAuth()) return null;
   try {
     const raw = execFileSync('gh', ['api', 'user', '--jq', '.login'], {
       encoding: 'utf8',
@@ -274,30 +273,16 @@ export function checkGhAuth() {
 // ---------------------------------------------------------------------------
 // 7. Query PRs
 // ---------------------------------------------------------------------------
-export function queryPRs(dir, authorEmail, startDate, endDate, prState) {
-  if (!checkGhAuth()) return [];
+export function queryPRs(dir, authorEmail, startDate, endDate, prState, ghUser) {
+  if (!ghUser) return [];
 
   const stateArg = prState === 'all' ? 'all' : prState;
   const args = [
     'pr', 'list',
     '--state', stateArg,
-    '--json', 'number,title,state,url,createdAt,mergedAt',
+    '--json', 'number,title,state,url,createdAt,mergedAt,author',
     '--limit', '100',
   ];
-
-  // Try to filter by author; gh --author accepts GitHub username.
-  // If the email looks like a GitHub username (no @), use --author.
-  // Otherwise resolve the current gh user's login and use that.
-  const isUsername = !authorEmail.includes('@');
-  if (isUsername) {
-    args.push('--author', authorEmail);
-  } else {
-    const ghUser = resolveGitHubUsername();
-    if (ghUser) {
-      args.push('--author', ghUser);
-    }
-    // If ghUser is null, we fall back to listing all PRs (legacy behaviour)
-  }
 
   let raw;
   try {
@@ -317,6 +302,8 @@ export function queryPRs(dir, authorEmail, startDate, endDate, prState) {
 
   const result = [];
   for (const pr of prs) {
+    if (pr.author?.login !== ghUser) continue;
+
     const dateField = pr.mergedAt || pr.createdAt;
     if (!dateField) continue;
     const dateStr = dateField.slice(0, 10); // YYYY-MM-DD
@@ -368,9 +355,9 @@ function main() {
 
   const projects = discoverProjects(cwd);
   const warnings = [];
-  const ghAvailable = checkGhAuth();
-  if (!ghAvailable) {
-    warnings.push('gh CLI not authenticated; PR section skipped');
+  const ghUser = resolveGitHubUsername();
+  if (!ghUser) {
+    warnings.push('could not resolve GitHub username via gh api user; PR section skipped');
   }
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ||
@@ -405,7 +392,7 @@ function main() {
     }
 
     try {
-      projectOut.prs = queryPRs(project.dir, authorInfo.email, startDate, endDate, prState);
+      projectOut.prs = queryPRs(project.dir, authorInfo.email, startDate, endDate, prState, ghUser);
     } catch (err) {
       projectOut.errors.push(`queryPRs failed: ${err.message}`);
     }
