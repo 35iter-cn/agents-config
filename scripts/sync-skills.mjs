@@ -2,13 +2,12 @@
 // Sync leaf skill dirs from canonical tree into configured targets as flat symlinks.
 import { readdirSync, lstatSync, symlinkSync, mkdirSync, existsSync, realpathSync, unlinkSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { expandTilde, readLines, targetUnderSrc, warn, error } from './lib/helpers.mjs';
 
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_ROOT, '..');
-const DEFAULT_ROOT = resolve(homedir(), 'agents-for-myself/skills');
+const DEFAULT_ROOT = resolve(REPO_ROOT, 'skills');
 const DEFAULT_TARGETS = resolve(REPO_ROOT, 'scripts/skills-symlinks.targets');
 
 let SKILLS_ROOT = resolve(process.env.SKILLS_CANONICAL_ROOT || DEFAULT_ROOT);
@@ -25,7 +24,7 @@ Commands:
   unlink  Remove symlinks under target dirs that point into the canonical tree
 
 Options:
-  -s, --source PATH     Canonical skills root (default: ~/agents-for-myself/skills)
+  -s, --source PATH     Canonical skills root (default: <repo>/skills)
   --no-prune            With link: do not remove stale managed symlinks
   --dry-run             Print actions only
   -h, --help            Show this help
