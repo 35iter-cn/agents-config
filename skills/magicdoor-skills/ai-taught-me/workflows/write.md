@@ -1,82 +1,86 @@
 # Write Workflow
 
-**Purpose:** Document new knowledge into the AI-taught-me repository.
+`REPO=~/code/AI-taught-me` (shared rules: see SKILL.md).
 
 ## Steps
 
-### Step 1: Determine Category and Topic
+1. `ls "$REPO"` → pick `<category>/<topic>` (kebab-case, reuse an existing category when one fits — never ask the user)
+2. `mkdir -p "$REPO/<category>/<topic>"`
+3. Write `report.md` from the template below — full narrative with context, commands, verification, recovery, lessons. Include searchable keywords (technologies, actions, symptoms, tools) and `date` in frontmatter.
+4. Write `cheat-sheet.md` — commands and checklists only, no narrative.
+5. Commit and push — **mandatory, do not ask permission**:
+   ```bash
+   cd "$REPO" && git add . && git commit -m "Add <topic> guide" && git push origin master
+   ```
+6. In your summary, state where the doc landed (e.g. `git-workflow/rebase-cleanup/`) so the user can correct the placement.
 
-Based on the content being documented, choose:
-- **Category:** High-level grouping (`git-workflow`, `debugging`, `tools`, `architecture`, `rush-monorepo`, etc.)
-- **Topic:** Specific descriptive name (use kebab-case, e.g., `rebase-cleanup`, `merge-conflict-resolution`)
+## report.md Template
 
-If unsure, ask user to confirm before creating directories.
+````markdown
+---
+date: YYYY-MM-DD
+project: [project-name or "general"]
+tags: [tag1, tag2, tag3]
+---
 
-### Step 2: Create Directory
+# [Title]
 
+## Context
+[When does this apply, what situation triggered it, why it matters]
+
+## Problem / Goal
+[What was wrong or what needed to be achieved]
+
+## Solution Comparison (optional)
+| Approach | Pros | Cons | Chosen? |
+|----------|------|------|---------|
+| A | ... | ... | No |
+| B | ... | ... | Yes |
+
+## Implementation
 ```bash
-mkdir -p /root/code/AI-taught-me/{category}/{topic}/
+# Commands here, copy-paste ready
 ```
 
-### Step 3: Write Full Report (`report.md`)
+## Verification
+[How to confirm success]
 
-Use the template from `@./common.md`. Include:
-- **Date** in frontmatter
-- **Context** — what project, what situation triggered this
-- **Complete commands** — copy-paste ready, with expected output
-- **Verification steps** — how to confirm it worked
-- **Recovery method** — how to undo if needed
-- **Key lessons** — what to remember for next time
+## Recovery
+[How to undo if needed]
 
-### Step 4: Extract Cheat Sheet (`cheat-sheet.md`)
+## Key Lessons
+[What to remember for next time]
 
-From the report, pull out:
-- Quick command reference (no narrative)
-- Essential checklists
-- Common error fixes
-- Recovery commands
+## Related
+- [Other doc](../path/to/doc.md)
+````
 
-### Step 5: Verify Both Files
+## cheat-sheet.md Template
 
-- [ ] `report.md` has full context and narrative
-- [ ] `cheat-sheet.md` has commands only, no story
-- [ ] Both files include searchable keywords (see `@./common.md`)
-- [ ] Date is present in report frontmatter
-- [ ] Recovery/undo method is documented
+````markdown
+# [Topic] Quick Reference
 
-### Step 6: Commit and Push (MANDATORY)
+## Standard Workflow
+1. Step one
+2. Step two
 
-**This step is NOT optional. Do NOT ask user for permission.**
-
+## Common Commands
 ```bash
-cd /root/code/AI-taught-me
-git add .
-git commit -m "Add {topic} guide"
-git push origin master
+command --option
+command --verbose --output=file
 ```
 
-- Do NOT leave documents uncommitted
-- Do NOT ask user for permission to commit/push
+## Checklist
+- [ ] Item 1
+- [ ] Item 2
 
-## Quality Checklist
+## Common Errors
+| Error | Fix |
+|-------|-----|
+| ... | ... |
 
-Before finishing:
-
-- [ ] Directory follows `category/topic/` two-level structure
-- [ ] `report.md` has full context and narrative
-- [ ] `cheat-sheet.md` has commands only, no story
-- [ ] Both files include searchable keywords
-- [ ] Date is present
-- [ ] Recovery/undo method is documented
-- [ ] Files committed and pushed to AI-taught-me repo
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Only writing narrative | Always include cheat sheet |
-| Missing date/context | Add frontmatter with date |
-| Too project-specific | Extract generalizable patterns |
-| No verification steps | Add "how to confirm it worked" |
-| No recovery method | Add "how to undo" section |
-| Not committing | Step 6 is MANDATORY |
+## Recovery
+```bash
+# How to undo
+```
+````
