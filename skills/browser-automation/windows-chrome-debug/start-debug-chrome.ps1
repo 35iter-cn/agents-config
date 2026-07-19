@@ -1,9 +1,20 @@
 #Requires -Version 5.1
 
-$DebugPort = 9221
-$PublicPort = 9222
-$ChromePath = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+$DebugPort = 9222
 $ProfileDir = "$env:LOCALAPPDATA\DebugChrome"
+
+$ChromePath = @(
+    'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+    'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+    'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $ChromePath) {
+    Write-Host "ERROR: No Chrome or Edge browser found."
+    exit 1
+}
 
 function Test-DebugChromeRunning {
     $listeners = Get-NetTCPConnection -LocalPort $DebugPort -State Listen -ErrorAction SilentlyContinue
@@ -141,4 +152,3 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Started debug Chrome (minimized) at http://127.0.0.1:$DebugPort/json/version"
-Write-Host "WSL should connect via http://<windows-host-ip>:$PublicPort/json/version"
