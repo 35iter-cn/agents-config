@@ -3,102 +3,90 @@ name: superpowers-implement-specs
 description: Implement an existing spec end-to-end using the superpowers pipeline. Use when the user has a written spec or requirements document and wants it implemented with worktree isolation, planning, review, and execution in this session. Requires superpowers skills to be installed.
 ---
 
-## Overview
+# superpowers-implement-specs
 
-Orchestrate the full pipeline from spec to working implementation inside the current session: isolate the workspace, write a plan, review it against the spec, then execute it task by task.
+Take a spec from document to working code using the superpowers workflow.
 
-This skill is a thin wrapper around the superpowers skills. It assumes they are already installed and available.
+## Dependencies
 
-## Core Flow
+Requires these skills to be available:
 
-You MUST create a task for each stage and complete them in order.
+- `superpowers:using-git-worktrees`
+- `superpowers:writing-plans`
+- `superpowers:executing-plans`
+- `superpowers:requesting-code-review`
+- `superpowers:finishing-a-development-branch`
+- `superpowers:test-driven-development`
+- `karpathy-guidelines`
 
-```mermaid
-flowchart TD
-    A([Start]) --> B[Isolated workspace]
-    B --> C[Write plan]
-    C --> D[Review plan]
-    D --> E[Execute plan]
-    E --> F([Done])
-```
+## Process
 
-## Quick Reference
+Each stage is a hard gate. Do not proceed until it is complete.
 
-### Isolated workspace
+### Stage 0 — Isolated workspace
 
-**REQUIRED SUB-SKILL:** `superpowers:using-git-worktrees`
+Run `superpowers:using-git-worktrees`. If not already in a linked worktree, create one. All planning and implementation happen inside the worktree; never touch the main checkout.
 
-Run its Step 0 detection first. If already inside a linked worktree, continue there. If not, create one before doing anything else. Never write a plan or code in the main checkout.
+### Stage 1 — Write plan
 
-### Write plan
+Run `superpowers:writing-plans` with the spec. Save the plan to disk before continuing. Surface assumptions explicitly; ask before guessing.
 
-**REQUIRED SUB-SKILL:** `superpowers:writing-plans`
+### Stage 2 — Review plan
 
-Pass the spec as input. Surface assumptions explicitly and ask before guessing. Save the plan to disk. Do not proceed until the plan file exists.
+Check the plan against the original spec. Fix inline if any check fails.
 
-### Review plan
+- [ ] Every requirement maps to a task
+- [ ] No TBD, TODO, or vague steps
+- [ ] Names and types are consistent across tasks
+- [ ] Each task is verifiable and self-contained
+- [ ] Test commands are explicit with expected output
+- [ ] Later tasks correctly reference earlier outputs
+- [ ] All file paths are exact and consistent
+- [ ] No tasks for unrequested features or premature abstractions
+- [ ] Ambiguities were surfaced and resolved, not silently guessed
+- [ ] Each task has explicit verification steps
 
-Review the written plan against the original spec. Fix inline if any check fails. All checks must pass:
+### Stage 3 — Execute plan
 
-- Every requirement maps to a task
-- No TBD, TODO, or vague steps
-- Names and types are consistent across tasks
-- Each task is verifiable and self-contained
-- Test commands are explicit with expected output
-- Later tasks correctly reference earlier outputs
-- All file paths are exact and consistent
-- No tasks for unrequested features or premature abstractions
-- Ambiguities were surfaced and resolved, not silently guessed
-- Each task has explicit verification steps
-
-### Execute plan
-
-**REQUIRED SUB-SKILLS:** `superpowers:executing-plans`, `superpowers:requesting-code-review`, `superpowers:finishing-a-development-branch`
-
-Also apply `superpowers:test-driven-development` and `karpathy-guidelines` throughout.
+Run `superpowers:executing-plans` in this session.
 
 For each task:
 
-1. Mark it `in_progress`.
+1. Mark `in_progress`.
 2. Follow the steps exactly and run the verification command.
 3. Commit the task's changes.
-4. Run the review gate. Self-review only if **all** of the following are true:
-   - Touches ≤ 3 files
-   - Net diff ≤ 30 lines
-   - No API / signature changes
-   - No state, concurrency, permissions, or error-handling changes
-   - One clear verification command covers the change
-5. If self-reviewing, run this checklist:
-   - The diff fully covers the task
-   - No changes outside the plan
-   - No TBD/TODO comments, hard-coded values, or magic numbers
-   - Verification tests behavior, not just existence
-   - Obvious edge cases are handled
+4. Decide the review path:
+   - **Self-review** only if **all** of the following are true:
+     - ≤ 3 files touched
+     - Net diff ≤ 30 lines
+     - No API / signature changes
+     - No state, concurrency, permissions, or error-handling changes
+     - One clear verification command covers the change
+   - **Reviewer subagent** for everything else, or whenever you are unsure.
+5. Self-review checklist:
+   - [ ] The diff fully covers the task
+   - [ ] No changes outside the plan
+   - [ ] No TBD/TODO comments, hard-coded values, or magic numbers
+   - [ ] Verification tests behavior, not just existence
+   - [ ] Obvious edge cases are handled
 6. If any gate fails or you are unsure, use `superpowers:requesting-code-review` with a task brief and review package.
-7. Mark the task complete only after review passes.
+7. Mark complete only after review passes.
 
 After all tasks:
 
-- Generate a whole-branch review package.
-- Dispatch the final reviewer.
+- Generate whole-branch review package.
+- Dispatch final reviewer.
 - Address any findings.
-- Use `superpowers:finishing-a-development-branch` to complete the work.
+- Use `superpowers:finishing-a-development-branch`.
 
-## Common Mistakes
+## Anti-patterns
 
-- Planning or coding in the main checkout instead of an isolated worktree
-- Writing code before the plan exists on disk
-- Treating mental review as sufficient for Stage 2
-- Skipping review because the user seems impatient
-- Adding features, abstractions, or "nice-to-haves" not in the spec
-- Refactoring or reformatting code the changes did not touch
-- Marking a task complete without running its verification step
-
-## Red Flags
-
-- Working in the main checkout
-- Placeholders in the plan
-- Ambiguous requirements resolved by guessing
-- Tasks with no explicit verification command
-- Skipping the review complexity gate
-- Committing unverified code
+- Writing plan/code in main checkout
+- Skipping worktree because "change is small"
+- Writing code before plan exists
+- Starting execution before review passes
+- Accepting placeholders in plan
+- Adding features not in spec
+- Refactoring or reformatting code changes didn't touch
+- Marking task complete without running verification
+- Skipping review because user seems impatient

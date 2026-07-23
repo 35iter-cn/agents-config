@@ -33,7 +33,7 @@ skill-name/
 └── shared/         # Optional: shared references
 ```
 
-SKILL.md structure: see `docs/skill-template.md`.
+SKILL.md must include frontmatter with `name` and `description`, and a clear workflow body.
 
 ## Available Skills
 
@@ -53,7 +53,6 @@ scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 
 - **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
 - **English only:** All SKILL.md files must be written entirely in English
-- **Strict template compliance:** see `docs/skill-template.md`
 - **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs`
 - **Knowledge docs:** Design specs go in `.knowledge/notes/specs/`
 - **No build system:** Pure Markdown with occasional scripts — no package.json, no CI
