@@ -7,7 +7,11 @@ description: Write a work-summary (day/week/custom range) into a Google Sheets m
 
 Write a `work-summary` output into the user's monthly Google Sheets timesheet (`Hao-YYYY/MM`).
 
-## Prerequisite
+## 依赖
+
+- `chrome-devtools` MCP — 已配置 `~/.claude.json`，自动拉起带 GUI 的 Chrome。不需要手动启动 Chrome 或调用 `chrome-debug` skill。
+
+## 前置步骤
 
 Invoke `work-summary` with the target date range (day/week/custom) to generate the work summary, then write its output into the report. If the user's prompt only mentions filling/updating the report (e.g. "完善昨天的日报"), still invoke `work-summary` first — the summary is the data source.
 
