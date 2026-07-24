@@ -5,7 +5,7 @@ description: Checkout the latest remote default branch HEAD with dynamic remote/
 
 # Git Checkout Latest
 
-1. Run `scripts/git-checkout-latest.sh "$PWD"`.
+1. Run `${CLAUDE_SKILL_DIR}/scripts/git-checkout-latest.sh "$PWD"`.
 2. Report the output to the user — both success and failure.
 
 Do not ask for confirmation or read the script contents to the user.
