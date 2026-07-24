@@ -19,6 +19,7 @@ google-chrome-stable --remote-debugging-port=9222 \
   --remote-allow-origins=* \
   --no-first-run --no-default-browser-check \
   --window-size=2560,1440 \
+  --disable-gpu \
   --user-data-dir=$HOME/.config/chrome-debug
 ```
 

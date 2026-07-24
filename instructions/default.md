@@ -23,3 +23,4 @@ All session-level documents go under `~/.config/agent-sessions-doc/<repo-name>/`
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
+- All worktrees must be created under `~/.config/worktrees/<repo>-<feature>`.
