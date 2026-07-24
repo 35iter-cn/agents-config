@@ -24,3 +24,4 @@ All session-level documents go under `~/.config/agent-sessions-doc/<repo-name>/`
 
 - No comments of any kind. Write self-explanatory code instead.
 - All worktrees must be created under `~/.config/worktrees/<repo>-<feature>`.
+- Never use `isolatedContext` on any MCP chrome-devtools method — it creates a separate browser partition that doesn't share login state. Use the same default context for all tabs.
