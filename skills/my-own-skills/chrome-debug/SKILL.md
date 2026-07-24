@@ -16,7 +16,7 @@ reconnect.
 
 ```bash
 google-chrome-stable --remote-debugging-port=9222 \
-  --headless=new \
+  --disable-gpu \
   --remote-allow-origins=* \
   --no-first-run --no-default-browser-check \
   --window-size=2560,1440 \
