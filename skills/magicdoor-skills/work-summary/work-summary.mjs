@@ -16,6 +16,7 @@ export function parseArgs(argv) {
     startDate: null,
     endDate: null,
     author: null,
+    cwd: process.cwd(),
     prState: 'all',
   };
 
@@ -37,6 +38,10 @@ export function parseArgs(argv) {
       result.prState = args[++i];
     } else if (arg.startsWith('--pr-state=')) {
       result.prState = arg.slice(11);
+    } else if (arg === '--cwd') {
+      result.cwd = args[++i];
+    } else if (arg.startsWith('--cwd=')) {
+      result.cwd = arg.slice(6);
     } else if (arg === '--help' || arg === '-h') {
       throw new CliError('HELP');
     } else {
@@ -61,7 +66,7 @@ export function parseArgs(argv) {
 }
 
 function getUsage() {
-  return 'Usage: node work-summary.mjs --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--author email] [--pr-state all|open|merged|closed]';
+  return 'Usage: node work-summary.mjs --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--cwd path] [--author email] [--pr-state all|open|merged|closed]';
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +348,7 @@ function main() {
 
   const { startDate, endDate, author, prState } = args;
 
-  const cwd = process.cwd();
+  const cwd = args.cwd;
   const authorInfo = author
     ? { email: author, name: '' }
     : resolveAuthor(cwd);
