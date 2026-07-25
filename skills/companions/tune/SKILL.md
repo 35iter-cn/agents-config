@@ -37,31 +37,31 @@ Parse the natural-language prompt and classify into one of these intents:
 ### 2. Execute action
 
 **show:**
-- Run `companion.mjs --get` for the relevant adaptor.
+- Run `node $CLAUDE_SKILL_DIR/scripts/companion.mjs models --get [adaptor]` for the relevant adaptor.
 - Format output as a tier-column table (left-align with fixed spacing, `—` for unconfigured tiers).
 - If only one adaptor is configured, show that. Both empty → report "No configuration found" and offer to recommend.
 
 **set:**
 - Parse which adaptor (`opencode`/`cursor`/`omp`/`codex`) and tier (`low`/`medium`/`high`/`maximum`). Default adaptor: `opencode`.
 - If tier missing, show current config and ask.
-- Run `companion.mjs --set --adaptor <name> --tier <tier>`.
+- Pipe a JSON config to stdin: `echo '{"<adaptor>": {"<tier>": "<model>"}}' | node $CLAUDE_SKILL_DIR/scripts/companion.mjs models --set`.
 - Before executing, confirm with the user unless the exact model was uniquely resolved and the user already implicitly confirmed.
 - Report success or error.
 
 **reset:**
 - Determine which adaptor to reset. If unspecified, ask.
 - Show current config for that adaptor, ask confirmation.
-- Run `companion.mjs --reset --adaptor <name>`.
+- Run `node $CLAUDE_SKILL_DIR/scripts/companion.mjs models --reset <adaptor>`.
 - Report success or error.
 
 **recommend:**
-- Run `companion.mjs --list-models` to see available models.
+- Run `node $CLAUDE_SKILL_DIR/scripts/companion.mjs models --list` to see available models.
 - Classify available models by capability tier based on model ID heuristics.
 - Present recommendations alongside current config.
 - Ask if user wants to apply. If yes, present proposed config, confirm, execute as in `set`.
 
 **unclear:**
-- Show current config via `--get`.
+- Show current config via `node $CLAUDE_SKILL_DIR/scripts/companion.mjs models --get`.
 - Ask the user what they'd like to do (show something else, set a tier, reset, recommend).
 
 ### 3. Display result

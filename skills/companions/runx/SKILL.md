@@ -69,11 +69,11 @@ When generating the final prompt, strictly follow these formatting rules:
 **Step 2:** Generate a temporary file path and write `$finalPrompt` to it.
 
 ```bash
-$tmpfile = $(node skills/runx/scripts/companion.mjs tmpfile)
+$tmpfile = $(node $CLAUDE_SKILL_DIR/scripts/companion.mjs tmpfile)
 echo "$finalPrompt" > "$tmpfile"
 ```
 
-`companion.mjs tmpfile` automatically generates `/tmp/companions/prompt-{adjective}-{noun}.md`
+`$CLAUDE_SKILL_DIR/scripts/companion.mjs tmpfile` automatically generates `/tmp/companions/prompt-{adjective}-{noun}.md`
 with collision detection (up to 10 retries).
 
 ### Select & Declare Execution Method
@@ -96,8 +96,8 @@ You **must** declare the selected tool and its parameters to the user before pro
 **Assemble and run:**
 
 ```bash
-# node skills/runx/scripts/companion.mjs --help for usage instructions
-node skills/runx/scripts/companion.mjs launch --companion $companion --modelTier $modelTier --prompt-path $tmpfile
+# $CLAUDE_SKILL_DIR/scripts/companion.mjs --help for usage instructions
+node $CLAUDE_SKILL_DIR/scripts/companion.mjs launch --companion $companion --modelTier $modelTier --prompt-path $tmpfile
 ```
 
 If in RESUME mode, add `--session "$sessionID"`
