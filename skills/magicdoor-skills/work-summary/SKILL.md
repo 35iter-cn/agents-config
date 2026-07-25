@@ -30,6 +30,7 @@ Produce a concise, emoji-prefixed, project-grouped Markdown work summary from gi
 | `$timeRange` | Time range intent | Natural language: "today" → today, "this week" → week, "last week" → last-week, custom dates → custom |
 | `$startDate` | Start date (YYYY-MM-DD) | Derived from `$timeRange` |
 | `$endDate` | End date (YYYY-MM-DD) | Derived from `$timeRange` |
+| `$cwd` | Project directory to scan | Default: current directory; optional override via `--cwd` |
 | `$author` | Git author email | Default: current user (`git config user.email`); optional override |
 | `$prState` | PR state filter | Default: `all`; optional: `open`, `merged`, `closed` |
 
@@ -50,10 +51,33 @@ The script is located in the same directory as this SKILL.md (symlinked into `~/
 
 ```bash
 script="$(dirname "$0")/work-summary.mjs"
-node "$script" --start-date "$startDate" --end-date "$endDate" [--author "$email"] [--pr-state "$prState"]
+node "$script" --start-date "$startDate" --end-date "$endDate" [--cwd "$cwd"] [--author "$email"] [--pr-state "$prState"]
 ```
 
 On platforms that expose `SKILL_DIR` or `skill_dir`, prefer those over `dirname "$0"`.
+
+Use `--cwd` to scan a project directory other than the current one:
+
+```bash
+node "$script" --start-date "$startDate" --end-date "$endDate" --cwd ~/code/magicdoor
+```
+
+### As a data source for other skills
+
+Other skills invoke `work-summary` with these parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--start-date` | yes | Start date in YYYY-MM-DD |
+| `--end-date` | yes | End date in YYYY-MM-DD |
+| `--cwd` | no | Project directory to scan. Defaults to current directory. |
+| `--author` | no | Author email override |
+| `--pr-state` | no | `all` (default), `open`, `merged`, `closed` |
+
+It returns Markdown with two sections:
+
+1. Project summaries (suitable for TASK / NOTES cells)
+2. `# PRs` section (suitable for PR LINK cells)
 
 ### Step 3: Render the Summary from JSON
 
