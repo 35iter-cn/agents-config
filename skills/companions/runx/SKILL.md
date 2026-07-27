@@ -14,12 +14,13 @@ You MUST create a task for each of these items and complete them in order.
 ### 1. Classify Intent and Extract Parameters
 
 - `$mode` — Defaults to `NEW`. Set to `RESUME` only when continuing an existing companion session.
-- `$companion` — Defaults to `opencode` unless the user explicitly specifies otherwise.
+- `$companion` — Valid companions are `opencode`, `cursor`, `omp`, and `codex`. If the user names any of these, use that name verbatim as `--companion`. Only default to `opencode` when the user does not specify a companion.
 - `$modelTier` — Infer from task complexity (see table below) or use the user's explicit request.
 - `$files` — File paths relevant to the user's intent and the task.
 - `$context` — Background information from the current conversation that helps the companion understand the task. Include relevant decisions, constraints, or findings already discussed. Omit if the task is self-contained.
 - `$task` — The user's original intent after stripping extracted parameters. May be expanded, but preserve the user's key terms.
 - `$sessionID` — Required only for `RESUME` mode. The session ID returned by the companion after a `NEW` run.
+- **Companion selection rule:** Do not pre-check CLI availability, and do not lecture the user about whether a companion is a "headless CLI" or an IDE. If the user names a valid companion, launch with it; if the CLI is missing, the command will fail with a clear error that you can report concisely.
 
 **Model Tier Inference:**
 
@@ -76,15 +77,20 @@ echo "$finalPrompt" > "$tmpfile"
 `$CLAUDE_SKILL_DIR/scripts/companion.mjs tmpfile` automatically generates `/tmp/companions/prompt-{adjective}-{noun}.md`
 with collision detection (up to 10 retries).
 
-### Select & Declare Execution Method
+### Launch the Companion
 
-The companion communicates via stdout (event stream) and a final summary file. Choose an execution method along these three criteria:
+The companion is a long-running background process. It writes progress events to stdout and produces a final summary file. You MUST launch it through a tool/mechanism in the current harness that satisfies all of the following:
 
-| Criteria | Target |
-|----------|--------|
-| **Background execution** | Runs detached, survives beyond a single response turn. |
-| **Event-driven stdout** | Each stdout line arrives in the conversation as a notification — no separate retrieval step. |
-| **Timeout** | No timeout, or large enough to accommodate open-ended companion execution (>1h). |
+1. **Runs detached from the current response turn** — the companion can outlive a single exchange.
+2. **Streams each stdout line as a discrete event/notification** — every line the companion prints must be surfaced to the conversation in real time, not batched and delivered only at completion.
+3. **Supports an open-ended or long timeout** — at least one hour.
+
+**Do NOT:**
+- Output or run the `companion.mjs launch` command directly in your response text.
+- Use a tool that only reports the final result after the process exits.
+- Use a tool that buffers all output and delivers it as a single block.
+
+In harnesses where multiple tools appear to satisfy these criteria, prefer the one whose primary purpose is real-time event streaming from a long-running shell command.
 
 You **must** declare the selected tool and its parameters to the user before proceeding:
 
