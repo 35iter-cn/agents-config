@@ -1,14 +1,22 @@
 ---
-description: Query MagicDoor backend service configs, analyze swagger specs, and generate swagger types via the @magicdoorinc/env CLI.
+description: >
+  Query MagicDoor backend service configs, analyze swagger specs, and generate
+  swagger types via the @magicdoorinc/env package (binary: magicdoor-env).
 ---
 
 # MagicDoor Backend Swagger
 
-## Overview
+## Ensure CLI
 
-Use `npm exec -- @magicdoorinc/env` to query backend service configs, analyze swagger specs, and generate project swagger types.
+```bash
+if ! command -v magicdoor-env >/dev/null 2>&1; then
+  pnpm add -g @magicdoorinc/env
+fi
+```
 
-> Full CLI reference: `npm exec -- @magicdoorinc/env --help`
+Optional smoke check: `magicdoor-env -h` (do not use `-v` — unsupported).
+
+> Full CLI reference: `magicdoor-env -h`
 
 ## SOT Principle
 
@@ -16,7 +24,7 @@ The **cache query result** is the single source of truth for spec analysis.
 Project-local swagger types and stale cache files may be outdated — always
 query fresh cache before any analysis or type generation.
 
-Service names and spec names are authoritative from the `@magicdoorinc/env` CLI,
+Service names and spec names are authoritative from `magicdoor-env`,
 not from memory or local project config.
 
 ## Capabilities
@@ -24,14 +32,14 @@ not from memory or local project config.
 ### Query Service Config
 
 ```bash
-npm exec -- @magicdoorinc/env -e <env> -s <service> -a
+magicdoor-env -e <env> -s <service> -a
 ```
 
 Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
 
 ### Analyze a Swagger Spec
 
-1. **Determine `$service`** and `$env`** from the conversation context. Ask if unclear.
+1. **Determine `$service` and `$env`** from the conversation context. Ask if unclear.
 
 2. **Determine whether the user explicitly specified `$specName`**. Treat the
    user as having named a spec when their request contains patterns like:
@@ -41,9 +49,9 @@ Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
    - "`Debug` spec of `files`"
 
 3. **If the user explicitly specified `$specName`**:
-   1. Query the live spec list from `@magicdoorinc/env`:
+   1. Query the live spec list:
       ```bash
-      npm exec -- @magicdoorinc/env -e $env -s $service -a -j
+      magicdoor-env -e $env -s $service -a -j
       ```
    2. Match the user's `$specName` against the returned `specs[].name` in this order:
       - **Exact match** → use it.
@@ -56,15 +64,15 @@ Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
       ```bash
       jq -r --arg s "$service" '.swagger[$s].spec // empty' .magicdoorc
       ```
-   2. If empty, query available specs from `@magicdoorinc/env` and infer from
-      context (or ask the user), then optionally persist the mapping to `.magicdoorc`:
+   2. If empty, query available specs and infer from context (or ask the user),
+      then optionally persist the mapping to `.magicdoorc`:
       ```bash
-      npm exec -- @magicdoorinc/env -e $env -s $service -a -j
+      magicdoor-env -e $env -s $service -a -j
       ```
 
 5. **Query the SOT cache** (force — 15 min TTL):
    ```bash
-   npm exec -- @magicdoorinc/env cache query --service $service --env $env --spec-name $specName
+   magicdoor-env cache query --service $service --env $env --spec-name $specName
    ```
    Returns `{ ok, cache_file, refreshed }`. Treat `cache_file` as the single
    source of truth — do not rely on project-local swagger types or previously
@@ -75,7 +83,7 @@ Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
 ### Generate Swagger Types
 
 ```bash
-npm exec -- @magicdoorinc/env gen -e <env>   # defaults to test
+magicdoor-env gen -e <env>   # defaults to test
 ```
 
 Add `--no-cache` to force fresh downloads.
@@ -89,4 +97,4 @@ Add `--no-cache` to force fresh downloads.
 - **No `.magicdoorc`?** Alert the user — required for `gen` and recommended for
   default spec resolution.
 - **When the user names a spec explicitly, prefer that name over `.magicdoorc`** —
-  but validate it against the live spec list from `@magicdoorinc/env` first.
+  but validate it against the live spec list from `magicdoor-env` first.

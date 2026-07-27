@@ -9,6 +9,8 @@ date_added: "2026-05-29"
 
 When invoked, automatically investigates backend API errors from the conversation context, determines root cause by cross-referencing the API spec and frontend code, and files a structured GitHub issue in the correct backend repository. Returns only the issue URL and a one-line summary.
 
+Spec lookup uses `magicdoor-backend-swagger`. Identity/role checks use `magicdoor-backend-identity`. Live HTTP verification (if needed) uses `magicdoor-backend-api`.
+
 ## When to Use
 
 - User explicitly invokes this skill to file a backend issue
@@ -26,7 +28,7 @@ When invoked, automatically investigates backend API errors from the conversatio
 
 ### Step 1 — Query API spec
 
-Use `magicdoor-backend-specs` skill to query the relevant endpoint:
+Use `magicdoor-backend-swagger` skill to query the relevant endpoint:
 
 - Expected DTO schema (request body fields, types, constraints)
 - Available alternate endpoints (e.g., upload-sessions)
@@ -121,7 +123,7 @@ flowchart TD
 
 ## Common Mistakes
 
-- Filing an issue without first querying the API spec via `magicdoor-backend-specs`
+- Filing an issue without first querying the API spec via `magicdoor-backend-swagger`
 - Not searching the frontend codebase before concluding it is a backend bug
 - Targeting the archived `MagicDoorInc/portal-backend` repository
 - Omitting the full JSON error response and stack trace from the issue body
@@ -130,7 +132,7 @@ flowchart TD
 
 ## Red Flags
 
-- `magicdoor-backend-specs` cannot find the relevant endpoint spec
+- `magicdoor-backend-swagger` cannot find the relevant endpoint spec
 - Error response is incomplete or missing from conversation context
 - Frontend codebase search yields no relevant usage patterns
 - Unable to determine which backend repository owns the endpoint
