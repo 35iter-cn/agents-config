@@ -14,13 +14,44 @@ if ! command -v magicdoor-env >/dev/null 2>&1; then
 fi
 ```
 
-Optional smoke check: `magicdoor-env -h` (do not use `-v` — unsupported).
+### Mandatory CLI SOT (`-h`)
 
-> Full CLI reference: `magicdoor-env -h`
+**Once per agent session / each time this skill is loaded**, before any
+`magicdoor-env` call that needs `-s`, `-e`, or other flags:
+
+```bash
+magicdoor-env -h
+```
+
+- Do **not** use `-v` (unsupported) or invent flags.
+- There is no `-H`; help is `-h` / `--help`.
+- Keep the help output as the session **CLI SOT**: allowed services (`-s`
+  choices), envs (`-e` choices), portals, and flags.
+- Reuse that output for the rest of the session; do not re-guess from memory.
+- Optional shorthand after `-h` if you only need names:
+  `magicdoor-env --list-services` / `--list-envs` / `--list-portals`.
+
+### Pick `$service` / `$env`
+
+1. **Determine `$service` and `$env`** from conversation context, then
+   **map onto names that appear in this session's `-h` output**.
+   - Conversational words (`company`, `business`, `hoa service` slang, etc.)
+     are **not** valid `-s` values unless they exactly match a listed choice
+     (e.g. `companies`, `portal`, `hoa`).
+   - If the intent does not clearly match one listed service → ask the user,
+     or narrow using `--list-services` + context. **Do not invent a `-s` string.**
+   - If a `-s` / `-e` value is rejected by the CLI → re-read the session `-h`
+     (or re-run `-h`) and pick a listed name. **Never retry with another guess.**
 
 ## SOT Principle
 
-The **cache query result** is the single source of truth for spec analysis.
+Two complementary sources of truth:
+
+| Concern | SOT |
+|---------|-----|
+| CLI usage, service/env/flag names | This session's `magicdoor-env -h` output |
+| Spec contents for analysis / codegen | Fresh `cache query` result (`cache_file`) |
+
 Project-local swagger types and stale cache files may be outdated — always
 query fresh cache before any analysis or type generation.
 
@@ -35,11 +66,14 @@ not from memory or local project config.
 magicdoor-env -e <env> -s <service> -a
 ```
 
-Add `-j` for JSON output. Use `--list-services`, `--list-envs` for discovery.
+Add `-j` for JSON output. `$service` / `$env` must be taken from the session
+`-h` SOT (see Ensure CLI).
 
 ### Analyze a Swagger Spec
 
-1. **Determine `$service` and `$env`** from the conversation context. Ask if unclear.
+1. **Pick `$service` / `$env`** — map conversation intent onto names from this
+   session's `-h` SOT (see Ensure CLI → Pick `$service` / `$env`). Do not invent
+   `-s` values.
 
 2. **Determine whether the user explicitly specified `$specName`**. Treat the
    user as having named a spec when their request contains patterns like:
@@ -90,9 +124,15 @@ Add `--no-cache` to force fresh downloads.
 
 ## Red Flags
 
+- **Always run `magicdoor-env -h` once per session before selecting `-s`/`-e`** —
+  CLI help is the SOT for usage and allowed names.
+- **Never invent `-s` (or `-e`) values** — only use names from this session's
+  `-h` output. Never retry with another guessed service name after a failure.
+- **Never pass conversational synonyms as `-s`** (e.g. `company` / `business`)
+  unless they appear verbatim in `-h` choices.
 - **Always run `cache query` before analysis** — cache TTL is 15 minutes.
 - **Never trust project-local swagger types or stale cache files** — always
-  treat a fresh `cache query` result as the single source of truth.
+  treat a fresh `cache query` result as the single source of truth for specs.
 - **Never read full spec files directly** — use `jq`/`rg` on the cache file.
 - **No `.magicdoorc`?** Alert the user — required for `gen` and recommended for
   default spec resolution.
