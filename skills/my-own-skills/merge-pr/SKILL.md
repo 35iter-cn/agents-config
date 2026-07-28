@@ -28,8 +28,8 @@ Merge one or more GitHub pull requests with `gh`, then clean up linked worktrees
 
 | Decision | Rule |
 |----------|------|
-| Merge method | Always `gh pr merge <n> --repo <owner/name> --squash --delete-branch` |
-| `--admin` | Never by default |
+| Merge method | Always `gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin` |
+| `--admin` | Enabled by default |
 | Target PR(s) | Derive from conversation + current checkout; **confirm list with user before merging** |
 | Local uncommitted or unpushed | **Hard stop** — do not merge |
 | CI failed | Self-fix + push, max **2** rounds; still red → hard stop (no `--admin`) |
@@ -109,10 +109,10 @@ Do not ask the user. When watch completes, return to step 4.
 ### 6. Merge
 
 ```bash
-gh pr merge <n> --repo <owner/name> --squash --delete-branch
+gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin
 ```
 
-Never pass `--merge`, `--rebase`, or `--admin` unless the user later adds an explicit override outside this skill's defaults.
+Never pass `--merge` or `--rebase`. `--admin` is the default for this skill.
 
 If the command fails because squash is disallowed, hard stop and report repo merge settings — do not silently switch methods.
 
@@ -140,11 +140,11 @@ For each PR report:
 
 - Merging without an explicit user request to merge
 - Merging without confirming the derived PR list
-- Using `--merge`, `--rebase`, or `--admin` by default
+- Using `--merge` or `--rebase`
 - Deleting local branches
 - `git worktree remove --force`
 - Auto-merging paired Owner/Company (or other) PRs without confirmation
 - Ignoring local dirty/unpushed state because GitHub looks green
 - Treating missing approval as a blocker
 - Asking the user to wait on CI instead of `--watch`
-- Bypassing conflicts with `--admin` or force merge
+- Bypassing conflicts with force merge
