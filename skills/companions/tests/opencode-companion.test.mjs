@@ -91,6 +91,7 @@ test('main dispatches launch subcommand and exits zero on success', async () => 
         modelTier: undefined,
         dryRun: false,
         session: undefined,
+        sessionName: 'prompt.txt',
       },
     },
   ]);
@@ -172,6 +173,7 @@ test('main passes requested agent type to runCompanion', async () => {
         modelTier: undefined,
         dryRun: false,
         session: undefined,
+        sessionName: 'work.txt',
       },
     },
   ]);
@@ -198,6 +200,7 @@ test('main passes modelTier to runCompanion when --model is set', async () => {
         modelTier: 'high',
         dryRun: false,
         session: undefined,
+        sessionName: 'work.txt',
       },
     },
   ]);
@@ -361,6 +364,7 @@ test('main passes session option to runCompanion', async () => {
       modelTier: undefined,
       dryRun: false,
       session: 'sid-123',
+      sessionName: 'task.txt',
     },
   }]);
 });

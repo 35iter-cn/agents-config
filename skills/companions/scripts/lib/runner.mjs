@@ -69,7 +69,7 @@ const AGENTS = {
     createAdaptor: createOpencodeAdaptor,
   },
   cursor: {
-    command: 'agent',
+    command: 'cursor-agent',
     buildArgs: (options) => {
       const args = ['--print', '--output-format', 'stream-json', '--trust', '--force'];
       if (options.modelId) {

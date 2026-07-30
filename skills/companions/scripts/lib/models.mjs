@@ -173,7 +173,7 @@ export async function listModels() {
   }
 
   try {
-    available.cursor = parseCursorModels(await execFileText('agent', ['--list-models']));
+    available.cursor = parseCursorModels(await execFileText('cursor-agent', ['--list-models']));
   } catch (error) {
     process.stderr.write(`Warning: failed to list cursor models: ${error.message}\n`);
   }

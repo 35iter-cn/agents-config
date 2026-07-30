@@ -196,9 +196,9 @@ test('runCompanion dryRun omits --model in cursor command when tier is unconfigu
     assert.equal(result.success, true);
     assert.equal(
       result.commandsExecuted[0].command,
-      'agent --print --output-format stream-json --trust --force',
+      'cursor-agent --print --output-format stream-json --trust --force',
     );
-    const commandLine = writes.find((line) => line.startsWith('agent '));
+    const commandLine = writes.find((line) => line.startsWith('cursor-agent '));
     assert.doesNotMatch(commandLine, /--model/);
   } finally {
     process.stdout.write = originalWrite;
@@ -215,7 +215,7 @@ test('runCompanion dryRun omits maximum model in cursor command when unconfigure
 
   assert.equal(
     result.commandsExecuted[0].command,
-    'agent --print --output-format stream-json --trust --force',
+    'cursor-agent --print --output-format stream-json --trust --force',
   );
 });
 
@@ -236,7 +236,7 @@ test('runCompanion dryRun prints cursor command and returns unified done marker'
 
     assert.equal(result.success, true);
     assert.equal(result.exitCode, 0);
-    assert.equal(result.commandsExecuted[0].command, 'agent --print --output-format stream-json --trust --force');
+    assert.equal(result.commandsExecuted[0].command, 'cursor-agent --print --output-format stream-json --trust --force');
     assert.equal(typeof result.logPath, 'string');
 
     const doneLines = writes.filter((line) => line.includes('"type":"done"'));
@@ -271,7 +271,7 @@ test('runCompanion uses cursor agent config and writes prompt to stdin', async (
 
   const result = await resultPromise;
   assert.deepEqual(spawns[0], {
-    command: 'agent',
+    command: 'cursor-agent',
     args: ['--print', '--output-format', 'stream-json', '--trust', '--force'],
     options: { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
   });
