@@ -26,7 +26,7 @@ Fill or sync daily TASK/PR LINK and weekly NOTES in the `Hao-YYYY/MM` Google She
 4. Open or create the target monthly sheet.
 5. Detect the sheet layout.
 6. Invoke `work-summary` with `--cwd`, `--start-date`, `--end-date`.
-7. Split the Markdown output and write to the correct cells via clipboard paste.
+7. Split the Markdown output and write cells via **formula-bar clipboard paste** (never paste onto the grid).
 
 ## Prerequisites
 
@@ -96,18 +96,30 @@ Take its Markdown output and split it for the sheet:
 
 If `work-summary` returns no PRs, PR LINK stays empty.
 
-### 7. Write
+### 7. Write — **必须用公式栏粘贴**
 
-Multi-line cells via clipboard paste:
+Multiline Markdown **MUST** be pasted into the **formula bar** (公式栏), never onto a selected cell.
+
+**Why:** Pasting onto a selected cell treats newlines as row breaks and scatters content across cells below (and can corrupt DATE/header rows). Pasting into the formula bar keeps all lines in one cell.
+
+**Required sequence (per cell):**
 
 1. `select_page(pageId, bringToFront: true)`.
-2. In page JS: `window.focus(); document.body.focus();`.
-3. `await navigator.clipboard.writeText(text)`.
-4. Navigate to target cell (`#range=C25`).
-5. Enter, Ctrl+V, Enter.
-6. Verify by reading the formula bar or taking a screenshot.
+2. `await navigator.clipboard.writeText(text)`.
+3. Navigate to the target cell (name box or `#range=C25`).
+4. **Click the formula bar** (the multiline input above the grid, first `.cell-input`).
+5. Ctrl+A (optional if replacing), then **Ctrl+V into the formula bar**.
+6. Press Enter to commit.
+7. Verify: formula bar shows full multiline text; the cell **directly below** must still be empty/unrelated (not a spilled `- ` bullet).
 
-Never use `type_text` for multi-line content.
+**Pilot rule:** Write one cell first and confirm no pollution below before batching the rest.
+
+**Never:**
+
+- Paste onto a selected cell (grid focus) with multiline text.
+- Use Enter→Ctrl+V→Enter on the grid as the primary path — easy to miss edit mode and scatter.
+- Use `type_text` for multiline content.
+- Use `document.execCommand('insertText')` for multiline (strips newlines).
 
 ### 8. Weekly sync
 
@@ -117,6 +129,7 @@ After daily fills, regenerate weekly NOTES for any week where a day was filled o
 
 If content scattered below a target cell:
 
-1. Navigate to cells directly below (`#range=C12`, `#range=C13`, …).
-2. Read the formula bar for each.
-3. If unexpected task-like text appears, select the range and press Delete.
+1. Stop writing immediately.
+2. Prefer **File → Version history → Restore** to the last clean revision (fastest full fix).
+3. Or navigate cells below (`C12`, `C13`, …), read the formula bar, and Delete unexpected task-like text.
+4. Re-write only via the formula-bar paste sequence above.
