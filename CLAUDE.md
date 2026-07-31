@@ -14,6 +14,7 @@ agents-for-myself/
 ├── scripts/            # Sync and maintenance scripts
 ├── skills/             # Canonical skill tree (single source of truth)
 │   ├── magicdoor-skills/   # MagicDoor-specific skills
+│   ├── private/            # Local-only skills (gitignored)
 │   └── ...                 # General skills
 └── .knowledge/         # Project knowledge (plans, specs)
     ├── plans/
@@ -39,6 +40,7 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 
 - **`skills/`** — General skills: frontend-design, karpathy-guidelines, mermaid-diagrams, productivity (grill-me, handoff)
 - **`skills/magicdoor-skills/`** — MagicDoor-specific: backend API, PR workflows, Rush monorepo, rebase, work summary, etc.
+- **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
 
 Each skill directory contains `SKILL.md` with full documentation.
 
@@ -54,6 +56,7 @@ scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 - **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
 - **English only:** All SKILL.md files must be written entirely in English
 - **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs`
+- **Private skills:** Put personal/sensitive skills under `skills/private/` (gitignored). Do not commit them.
 - **Knowledge docs:** Design specs go in `.knowledge/notes/specs/`
 - **No build system:** Pure Markdown with occasional scripts — no package.json, no CI
 - **Bash scripts:** Use `set -euo pipefail`, consistent CLI conventions (`--dry-run`, `--help`)
