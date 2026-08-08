@@ -193,7 +193,6 @@ If the script is unavailable, use Node + WebSocket against `ws://127.0.0.1:9222/
 ## Related skills
 
 - **`chrome-debug`** — start/verify shared Chrome.
-- **`windows-from-wsl`** — read/copy images from Windows Desktop (`/mnt/c/Users/...`).
 
 ## Example
 

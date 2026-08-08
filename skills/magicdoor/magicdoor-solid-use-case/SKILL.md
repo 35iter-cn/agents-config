@@ -1,5 +1,5 @@
 ---
-name: working-with-solid-use-case
+name: magicdoor-solid-use-case
 description: Use when working in a project that uses @magicdoor/solid-use-case and the task may add, modify, debug, or refactor gateway, use case, presenter, AppState, or component boundaries.
 category: framework
 risk: medium

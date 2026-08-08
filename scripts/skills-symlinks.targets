@@ -1,5 +1,3 @@
 # Targets for sync-skills: flat symlinks are created in each target directory.
 # One target per line; '#' lines and blank lines are ignored.
 ~/.claude/skills
-~/.codex/skills
-~/.omp/agent/skills

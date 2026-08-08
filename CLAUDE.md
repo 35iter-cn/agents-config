@@ -12,10 +12,14 @@ This is a personal AI agent configuration repository (`agents-for-myself`). It m
 agents-for-myself/
 ├── instructions/       # Canonical agent instructions
 ├── scripts/            # Sync and maintenance scripts
+├── cli/                # User CLI scripts (synced to ~/.local/bin)
 ├── skills/             # Canonical skill tree (single source of truth)
-│   ├── magicdoor-skills/   # MagicDoor-specific skills
+│   ├── browser-automation/
+│   ├── companions/
+│   ├── magicdoor/
 │   ├── private/            # Local-only skills (gitignored)
-│   └── ...                 # General skills
+│   ├── tools/
+│   └── workflow/
 └── .knowledge/         # Project knowledge (plans, specs)
     ├── plans/
     └── notes/specs/
@@ -38,8 +42,11 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 
 ## Available Skills
 
-- **`skills/`** — General skills: frontend-design, karpathy-guidelines, mermaid-diagrams, productivity (grill-me, handoff)
-- **`skills/magicdoor-skills/`** — MagicDoor-specific: backend API, PR workflows, Rush monorepo, rebase, work summary, etc.
+- **`skills/browser-automation/`** — Chrome automation (timesheet, Xiaohongshu)
+- **`skills/companions/`** — Companion runners (`runx`, `tune`)
+- **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary
+- **`skills/workflow/`** — Spec shipping, PR handoff/UAT, grilling, handoff, ai-taught-me
+- **`skills/tools/`** — chrome-debug, frontend-design, update-claude
 - **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
 
 Each skill directory contains `SKILL.md` with full documentation.
@@ -48,6 +55,7 @@ Each skill directory contains `SKILL.md` with full documentation.
 
 ```bash
 scripts/sync-skills.mjs -h                      # Sync skills to target dirs
+scripts/sync-cli.mjs -h                         # Sync cli/ scripts to ~/.local/bin
 scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 ```
 
@@ -56,6 +64,7 @@ scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 - **Skill naming:** kebab-case, prefixed with `magicdoor-` for MagicDoor-specific skills
 - **English only:** All SKILL.md files must be written entirely in English
 - **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs`
+- **Sync CLI on change:** After adding or removing a file under `cli/`, run `scripts/sync-cli.mjs`
 - **Private skills:** Put personal/sensitive skills under `skills/private/` (gitignored). Do not commit them.
 - **Knowledge docs:** Design specs go in `.knowledge/notes/specs/`
 - **No build system:** Pure Markdown with occasional scripts — no package.json, no CI
@@ -73,5 +82,10 @@ scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 ### Skills Sync Architecture
 
 - Skills are organized hierarchically in `skills/` but flattened into each target directory via symlinks
-- `skills/` is the **single source of truth** for Codex and Claude Code skill sources
-- Targets are declared in `scripts/skills-symlinks.targets` (currently `~/.claude/skills` and `~/.codex/skills`)
+- `skills/` is the **single source of truth** for Claude Code skill sources (other tools that read `~/.claude/skills` share this tree)
+- Targets are declared in `scripts/skills-symlinks.targets` (currently `~/.claude/skills`)
+
+### CLI Sync Architecture
+
+- User-facing command scripts live in `cli/` (source basename === PATH command name)
+- `scripts/sync-cli.mjs` flattens them into targets declared in `scripts/cli-symlinks.targets` (currently `~/.local/bin`)

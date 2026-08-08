@@ -1,9 +1,9 @@
 ---
-name: superpowers-implement-specs
+name: implement-specs
 description: Implement an existing spec end-to-end using the superpowers pipeline. Use when the user has a written spec or requirements document and wants it implemented with worktree isolation, planning, review, and execution in this session. Requires superpowers skills to be installed.
 ---
 
-# superpowers-implement-specs
+# implement-specs
 
 Take a spec from document to working code using the superpowers workflow.
 

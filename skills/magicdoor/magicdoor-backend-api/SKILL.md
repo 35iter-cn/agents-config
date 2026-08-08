@@ -28,7 +28,6 @@ Core job: **query swagger → derive token → call the API**.
 - Production or staging (no debug tokens)
 - Pure frontend/UI questions
 - Load or performance testing
-- Local feature-branch diff testing → use `magicdoor-test-from-diff`
 
 ## Flow
 
@@ -127,7 +126,6 @@ When the request spans multiple endpoints:
 | Scenario | Skill |
 |----------|-------|
 | Remote/local call, inspect response | **api** (this skill) |
-| Feature-branch local diff testing | `magicdoor-test-from-diff` |
 | Query swagger / generate types | `magicdoor-backend-swagger` |
 | Lookup role / userId | `magicdoor-backend-identity` |
 | File a backend GitHub issue | `magicdoor-backend-issuer` |
