@@ -14,10 +14,6 @@
 
 All session artifacts are managed by the `session-topic` skill. Invoke it before creating, reading, or updating any session artifact. It derives a topic from context, manages `~/.config/sessions/<topic>/`, and maintains `STATE.md`.
 
-```bash
-node $CLAUDE_SKILL_DIR/session-topic.mjs --help
-```
-
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.

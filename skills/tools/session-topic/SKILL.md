@@ -25,6 +25,8 @@ Whenever you need to create, read, or update a session artifact. This includes:
 
 ## Quick Reference
 
+Run `node $CLAUDE_SKILL_DIR/session-topic.mjs --help` to list all commands.
+
 ### Topic naming
 
 A topic directory name has the form:
