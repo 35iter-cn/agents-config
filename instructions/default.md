@@ -10,12 +10,12 @@
 
 ## Session Artifacts
 
-**Hard rule — this file wins.** Session-level documents must **never** be written inside a project checkout (including `.knowledge/`, `docs/superpowers/`, or any path under the repo / linked worktree). If a skill or other instruction names an in-repo path for specs, plans, handoffs, notes, or similar session artifacts, **ignore that path**.
+**Hard rule — this file wins.** Session artifacts (specs, plans, handoffs, notes, UAT cases, worktrees) must never be written inside a project checkout. Use the `session-topic` skill; it manages `~/.config/sessions/<topic>/` and `STATE.md`.
 
-All session artifacts are managed by the `session-topic` skill. Invoke it before creating, reading, or updating any session artifact. It derives a topic from context, manages `~/.config/sessions/<topic>/`, and maintains `STATE.md`.
+- Ignore any skill that names an in-repo path for session artifacts.
+- Linked worktrees go under `~/.config/sessions/<topic>/worktree-<repo>/` via `session-topic worktree-path`.
 
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
-- All linked worktrees must be created under `$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> <repo>)` (i.e. `~/.config/sessions/<topic>/worktree-<repo>/`). Do not use `~/.config/worktrees/` or in-repo paths.
 - Never use `isolatedContext` on any MCP chrome-devtools method — it creates a separate browser partition that doesn't share login state. Use the same default context for all tabs.
