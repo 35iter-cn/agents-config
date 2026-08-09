@@ -10,32 +10,16 @@
 
 ## Session Artifacts
 
-**Hard rule — this file wins.** Session-level documents must **never** be written inside a project checkout (including `.knowledge/`, `docs/superpowers/`, or any path under the repo / linked worktree). If a skill or other instruction names an in-repo path for specs, plans, handoffs, notes, or similar session artifacts, **ignore that path** and use the layout below.
+**Hard rule — this file wins.** Session-level documents must **never** be written inside a project checkout (including `.knowledge/`, `docs/superpowers/`, or any path under the repo / linked worktree). If a skill or other instruction names an in-repo path for specs, plans, handoffs, notes, or similar session artifacts, **ignore that path**.
 
-Resolve paths with the `session-path` CLI (do not hand-roll the root):
+All session artifacts are managed by the `session-topic` skill. Invoke it before creating, reading, or updating any session artifact. It derives a topic from context, manages `~/.config/sessions/<topic>/`, and maintains `STATE.md`.
 
 ```bash
-session-path specs          # ~/.config/sessions/<repo>/specs
-session-path plans
-session-path handoff
-session-path notes
-session-path worktree <feature>
+node $CLAUDE_SKILL_DIR/session-topic.mjs --help
 ```
-
-| Kind | Command | Typical files |
-|---|---|---|
-| brainstorming / design specs | `session-path specs` | `YYYY-MM-DD-<topic>.md` |
-| writing-plans | `session-path plans` | `YYYY-MM-DD-<topic>.md` |
-| handoff | `session-path handoff` | `handoff-YYYY-MM-DD-HHMM.md` |
-| other session notes (e.g. UAT) | `session-path notes` | e.g. `uat-cases.md` |
-| linked worktree checkout dir | `session-path worktree <feature>` | empty dir for `git worktree add` |
-
-- `<repo>` is resolved by `session-path`: git → **main worktree directory basename**; non-git → basename of the given/cwd directory. Never use a linked worktree directory name as `<repo>`.
-- `session-path` creates the directory by default (`--no-create` to skip).
-- These files are **not** committed to the project git repo.
 
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
-- All linked worktrees must be created under `$(session-path worktree <feature>)` (i.e. `~/.config/sessions/<repo>/worktree/<feature>/`). Do not use `~/.config/worktrees/` or in-repo paths.
+- All linked worktrees must be created under `$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> <repo>)` (i.e. `~/.config/sessions/<topic>/worktree-<repo>/`). Do not use `~/.config/worktrees/` or in-repo paths.
 - Never use `isolatedContext` on any MCP chrome-devtools method — it creates a separate browser partition that doesn't share login state. Use the same default context for all tabs.

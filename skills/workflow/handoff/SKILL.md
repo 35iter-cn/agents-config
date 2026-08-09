@@ -4,7 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Resolve the save directory with `session-path handoff` (creates `~/.config/sessions/<repo>/handoff/`). Do **not** write under the project `.knowledge/` or any in-repo path. Use a timestamped filename like `handoff-YYYY-MM-DD-HHMM.md`.
+Write a handoff document summarising the current conversation so a fresh agent can continue the work. Determine the current topic from context, resolve its directory with `node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>`, and save the handoff as `<topic-dir>/<prefix>.handoff.md`. Do **not** write under the project `.knowledge/` or any in-repo path. Use a timestamped filename like `handoff-YYYY-MM-DD-HHMM.handoff.md`.
 
 Include a "suggested skills" section in the document, which suggests skills that the agent should invoke.
 

@@ -56,7 +56,7 @@ Run only when the session already produced UI screenshots (walkthrough/dev captu
 
 **Goal: publish UAT cases to the PR as a comment.**
 
-1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Writes `$(session-path notes)/uat-cases.md`.
+1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Writes `<topic-dir>/uat-cases.uat-case.md` (resolve `<topic-dir>` via `node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>`).
 2. **Post/Patch** — Read the generated file. If non-empty, search PR comments for `<!-- uat-cases -->`; POST if new, PATCH if exists. If empty/missing, skip.
 
 **Must publish.** Do not stop at file generation; `pr-uat-case-gen` alone only writes the file, this step must also publish it.
