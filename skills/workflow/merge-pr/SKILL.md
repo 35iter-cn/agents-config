@@ -54,7 +54,7 @@ For each confirmed PR, locate the local git directory:
 
 - Current cwd if it matches the PR head branch
 - `git worktree list` for a worktree on `headRef`
-- Common layout: `~/.config/worktrees/<repo>-<branch>/`
+- Common layout: `~/.config/sessions/<repo>/worktree/<feature>/` (via `session-path worktree <feature>`)
 
 Record the path for gates and cleanup.
 

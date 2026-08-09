@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  session-path [--no-create] <type> [dir]
+  session-path [--no-create] worktree <feature> [dir]
+  session-path -h | --help
+
+Resolve (and by default create) a session path:
+
+  ~/.config/sessions/<repo>/<type>
+  ~/.config/sessions/<repo>/worktree/<feature>
+
+<repo>:
+  git repo     → basename of the main worktree directory
+                 (via git rev-parse --git-common-dir)
+  non-git dir  → basename of [dir] (default: $PWD)
+
+<type>:
+  specs | plans | handoff | notes | worktree
+
+Options:
+  --no-create   Print the path only; do not mkdir -p
+  -h, --help    Show this help
+
+Stdout: absolute path only (one line). Does not run git worktree add.
+EOF
+}
+
+CREATE=1
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --no-create)
+      CREATE=0
+      ;;
+    -*)
+      echo "error: unknown option: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      ARGS+=("$arg")
+      ;;
+  esac
+done
+
+if [[ ${#ARGS[@]} -lt 1 ]]; then
+  echo "error: missing <type>" >&2
+  usage >&2
+  exit 2
+fi
+
+TYPE="${ARGS[0]}"
+case "$TYPE" in
+  specs|plans|handoff|notes|worktree) ;;
+  *)
+    echo "error: invalid type: $TYPE (expected specs|plans|handoff|notes|worktree)" >&2
+    exit 2
+    ;;
+esac
+
+resolve_repo() {
+  local dir="$1"
+  if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local common
+    common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)"
+    basename "$(dirname "$common")"
+  else
+    basename "$(cd "$dir" && pwd)"
+  fi
+}
+
+FEATURE=""
+DIR=""
+
+if [[ "$TYPE" == "worktree" ]]; then
+  if [[ ${#ARGS[@]} -lt 2 ]]; then
+    echo "error: worktree requires <feature>" >&2
+    usage >&2
+    exit 2
+  fi
+  FEATURE="${ARGS[1]}"
+  if [[ -z "$FEATURE" || "$FEATURE" == */* ]]; then
+    echo "error: invalid feature: $FEATURE" >&2
+    exit 2
+  fi
+  DIR="${ARGS[2]:-$PWD}"
+  if [[ ${#ARGS[@]} -gt 3 ]]; then
+    echo "error: too many arguments" >&2
+    usage >&2
+    exit 2
+  fi
+else
+  DIR="${ARGS[1]:-$PWD}"
+  if [[ ${#ARGS[@]} -gt 2 ]]; then
+    echo "error: too many arguments" >&2
+    usage >&2
+    exit 2
+  fi
+fi
+
+if [[ ! -d "$DIR" ]]; then
+  echo "error: directory does not exist: $DIR" >&2
+  exit 1
+fi
+
+REPO="$(resolve_repo "$DIR")"
+ROOT="${HOME}/.config/sessions/${REPO}"
+
+if [[ "$TYPE" == "worktree" ]]; then
+  TARGET="${ROOT}/worktree/${FEATURE}"
+else
+  TARGET="${ROOT}/${TYPE}"
+fi
+
+if [[ "$CREATE" -eq 1 ]]; then
+  mkdir -p "$TARGET"
+fi
+
+printf '%s\n' "$TARGET"

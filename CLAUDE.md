@@ -57,6 +57,7 @@ Each skill directory contains `SKILL.md` with full documentation.
 scripts/sync-skills.mjs -h                      # Sync skills to target dirs
 scripts/sync-cli.mjs -h                         # Sync cli/ scripts to ~/.local/bin
 scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
+session-path -h                                 # Resolve ~/.config/sessions/<repo>/<type>
 ```
 
 ## Key Conventions
