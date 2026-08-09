@@ -125,8 +125,6 @@ git worktree add "$worktree" -b <branch>
 
 A topic may span multiple repositories, but each repository has at most one worktree within a topic.
 
-`worktree-path` derives `<repo>` from the git repository at `$PWD` (or the optional `[dir]` argument): it uses the basename of the main worktree directory via `git rev-parse --show-toplevel`, matching the old `session-path` behavior. If the directory is not a git repository, it falls back to the directory basename.
-
 ## Common Mistakes
 
 - Creating a new topic when the current context already has one.
