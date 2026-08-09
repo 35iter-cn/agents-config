@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
+import { execSync } from 'node:child_process';
 import { ADJECTIVES } from '../../companions/scripts/lib/words/adjectives.mjs';
 import { NOUNS } from '../../companions/scripts/lib/words/nouns.mjs';
 
@@ -19,6 +20,19 @@ function topicDir(topic) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function resolveRepo(dir = process.cwd()) {
+  try {
+    const toplevel = execSync('git rev-parse --show-toplevel', {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    return basename(toplevel);
+  } catch {
+    return basename(dir);
+  }
 }
 
 function pick(array) {
@@ -259,9 +273,10 @@ function specStatus(args) {
 }
 
 function worktreePath(args) {
-  if (args.length < 2) throw new Error('usage: session-topic worktree-path <topic> <repo>');
-  const [topic, repo] = args;
+  if (args.length < 1) throw new Error('usage: session-topic worktree-path <topic> [dir]');
+  const [topic, dir] = args;
   validateTopicName(topic);
+  const repo = resolveRepo(dir || process.cwd());
   console.log(join(topicDir(topic), `worktree-${repo}`));
 }
 
@@ -274,7 +289,7 @@ Commands:
   spec-create <topic> <spec-name>   Create a numbered spec file and update STATE.md
   plan-create <topic> <spec-id>     Create a plan file for an existing spec
   spec-status <topic> <spec-id> <status>  Update spec status (open|merged|closed)
-  worktree-path <topic> <repo>      Print the worktree path for a repo
+  worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
 `);
 }
 

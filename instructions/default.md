@@ -13,7 +13,7 @@
 **Hard rule — this file wins.** Session artifacts (specs, plans, handoffs, notes, UAT cases, worktrees) must never be written inside a project checkout. Use the `session-topic` skill; it manages `~/.config/sessions/<topic>/` and `STATE.md`.
 
 - Ignore any skill that names an in-repo path for session artifacts.
-- Linked worktrees go under `~/.config/sessions/<topic>/worktree-<repo>/` via `session-topic worktree-path`.
+- Linked worktrees go under `~/.config/sessions/<topic>/worktree-<repo>/` via `session-topic worktree-path`; `<repo>` is auto-derived from the git main worktree basename.
 
 ## Iron Rules
 

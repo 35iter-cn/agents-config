@@ -55,8 +55,8 @@ Under the topic directory:
 
 | Kind | Pattern |
 |---|---|
-| Spec | `NN-<name>.spec.md` |
-| Plan | `NN-<name>.plan.md` |
+| Spec | `NN-<name>.spec.md` — placed directly in the topic root, never under `specs/` |
+| Plan | `NN-<name>.plan.md` — placed directly in the topic root, never under `plans/` |
 | Handoff | `<prefix>.handoff.md` |
 | UAT case | `<prefix>.uat-case.md` |
 | Worktree | `worktree-<repo>/` |
@@ -70,7 +70,7 @@ node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>
 node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> <spec-name>
 node $CLAUDE_SKILL_DIR/session-topic.mjs plan-create <topic> <spec-id>
 node $CLAUDE_SKILL_DIR/session-topic.mjs spec-status <topic> <spec-id> <status>
-node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> <repo>
+node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> [dir]
 ```
 
 ### STATE.md
@@ -119,11 +119,13 @@ node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> "fix-login-redirect
 For each repository that needs code changes under this topic:
 
 ```bash
-worktree=$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> <repo>)
+worktree=$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic>)
 git worktree add "$worktree" -b <branch>
 ```
 
 A topic may span multiple repositories, but each repository has at most one worktree within a topic.
+
+`worktree-path` derives `<repo>` from the git repository at `$PWD` (or the optional `[dir]` argument): it uses the basename of the main worktree directory via `git rev-parse --show-toplevel`, matching the old `session-path` behavior. If the directory is not a git repository, it falls back to the directory basename.
 
 ## Common Mistakes
 
