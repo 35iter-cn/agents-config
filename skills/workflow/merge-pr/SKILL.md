@@ -26,15 +26,20 @@ Merge one or more GitHub pull requests with `gh`, then clean up linked worktrees
 
 ## Locked Defaults
 
+**MagicDoor repo** = `--repo <owner/name>` where owner is `MagicDoorInc`.
+
 | Decision | Rule |
 |----------|------|
-| Merge method | Always `gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin` |
-| `--admin` | Enabled by default |
+| Scope | MagicDoor repos: **review-gated** (see `--admin` + Review gate rows). Other repos: unchanged behavior |
+| Merge method (MagicDoor) | `gh pr merge <n> --repo <owner/name> --squash --delete-branch` — **never `--admin`** |
+| Merge method (other repos) | `gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin` |
+| `--admin` | **MagicDoor: never** — it bypasses the review gate. Other repos: enabled by default |
+| Review gate (MagicDoor) | **Hard stop** unless `reviewDecision == APPROVED`; `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` → do not merge, no override |
 | Target PR(s) | Derive from conversation + current checkout; **confirm list with user before merging** |
 | Local uncommitted or unpushed | **Hard stop** — do not merge |
 | CI failed | Self-fix + push, max **2** rounds; still red → hard stop (no `--admin`) |
 | CI pending | Wait until checks finish, then re-check — do not ask |
-| Missing approval | Ignore |
+| Missing approval | MagicDoor: **hard stop** (see Review gate). Other repos: ignore |
 | Conflicts / `mergeable=false` | Hard stop (not a CI-fix path) |
 | After merge | Remove **linked** worktree only (no `--force`); **never delete local branch**; leave main worktree in place |
 
@@ -75,10 +80,19 @@ Do not merge remote tip while local work is dirty or unpushed.
 ### 4. Remote gate
 
 ```bash
-gh pr view <n> --repo <owner/name> --json state,mergeable,mergeStateStatus,statusCheckRollup,url,headRefName
+gh pr view <n> --repo <owner/name> --json state,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,url,headRefName
 ```
 
-Ignore `reviewDecision` / approval state.
+**MagicDoor repos only:** gate on `reviewDecision` before any other condition.
+
+| `reviewDecision` | Action |
+|------------------|--------|
+| `APPROVED` | Continue |
+| `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` | **Hard stop** — report the PR is not approved; do **not** merge, do **not** use `--admin`, no override |
+
+For **non-MagicDoor** repos: ignore `reviewDecision` / approval state (unchanged).
+
+Then apply the state/check matrix:
 
 | Condition | Action |
 |-----------|--------|
@@ -107,11 +121,19 @@ Do not ask the user. When watch completes, return to step 4.
 
 ### 6. Merge
 
+MagicDoor repo:
+
+```bash
+gh pr merge <n> --repo <owner/name> --squash --delete-branch
+```
+
+Other repos (unchanged):
+
 ```bash
 gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin
 ```
 
-Never pass `--merge` or `--rebase`. `--admin` is the default for this skill.
+Never pass `--merge` or `--rebase`. `--admin` is **never** used for MagicDoor repos; it is the default for other repos.
 
 If the command fails because squash is disallowed, hard stop and report repo merge settings — do not silently switch methods.
 
@@ -140,10 +162,11 @@ For each PR report:
 - Merging without an explicit user request to merge
 - Merging without confirming the derived PR list
 - Using `--merge` or `--rebase`
+- **Merging a MagicDoor PR with `--admin`, or when `reviewDecision != APPROVED`** (hard stop; no override)
 - Deleting local branches
 - `git worktree remove --force`
 - Auto-merging paired Owner/Company (or other) PRs without confirmation
 - Ignoring local dirty/unpushed state because GitHub looks green
-- Treating missing approval as a blocker
+- Treating missing approval as a blocker — **except MagicDoor repos, where it is a hard stop**
 - Asking the user to wait on CI instead of `--watch`
 - Bypassing conflicts with force merge
