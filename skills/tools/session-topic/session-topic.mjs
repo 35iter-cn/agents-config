@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { basename, join, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { ADJECTIVES } from '../../companions/scripts/lib/words/adjectives.mjs';
 import { NOUNS } from '../../companions/scripts/lib/words/nouns.mjs';
 
-const COMMANDS = ['init', 'resolve', 'spec-create', 'plan-create', 'spec-status', 'worktree-path'];
-const STATUSES = ['open', 'merged', 'closed'];
+const COMMANDS = ['init', 'resolve', 'spec-create', 'plan-create', 'plan-status', 'worktree-path', 'guard'];
+const PLAN_STATUSES = ['open', 'implemented'];
 
 function sessionsRoot() {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -29,9 +29,9 @@ function resolveRepo(dir = process.cwd()) {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'ignore'],
     }).trim();
-    return basename(toplevel);
+    return basename(toplevel).replace(/^worktree-/, '');
   } catch {
-    return basename(dir);
+    return basename(dir).replace(/^worktree-/, '');
   }
 }
 
@@ -91,7 +91,7 @@ function parseState(content) {
     if (inSpecs) {
       const listMatch = trimmed.match(/^- id:\s*(.+)$/);
       if (listMatch) {
-        currentSpec = { id: listMatch[1].trim(), name: '', status: 'open' };
+        currentSpec = { id: listMatch[1].trim(), name: '', plan: null };
         state.specs.push(currentSpec);
         continue;
       }
@@ -101,7 +101,8 @@ function parseState(content) {
         if (colonIndex !== -1) {
           const key = trimmed.slice(0, colonIndex).trim();
           const value = trimmed.slice(colonIndex + 1).trim();
-          if (key === 'name' || key === 'status') currentSpec[key] = value;
+          if (key === 'name') currentSpec[key] = value;
+          if (key === 'plan') currentSpec.plan = value === 'true' ? 'implemented' : value;
         }
         continue;
       }
@@ -123,7 +124,11 @@ function parseState(content) {
 }
 
 function formatSpec(spec) {
-  return `  - id: ${spec.id}\n    name: ${spec.name}\n    status: ${spec.status}`;
+  let lines = `  - id: ${spec.id}\n    name: ${spec.name}`;
+  if (spec.plan) {
+    lines += `\n    plan: ${spec.plan}`;
+  }
+  return lines;
 }
 
 function formatState(state) {
@@ -236,7 +241,7 @@ function specCreate(args) {
   writeFileSync(file, '');
 
   const state = readState(topic);
-  state.specs.push({ id, name, status: 'open' });
+  state.specs.push({ id, name, plan: null });
   state.current_spec = id;
   writeState(topic, state);
 
@@ -254,19 +259,26 @@ function planCreate(args) {
   mkdirSync(dir, { recursive: true });
   if (!existsSync(file)) writeFileSync(file, '');
 
+  const state = readState(topic);
+  const spec = state.specs.find((s) => s.id === id);
+  if (!spec) throw new Error(`spec ${id} not found; create the spec before creating its plan`);
+  spec.plan = 'open';
+  writeState(topic, state);
+
   console.log(file);
 }
 
-function specStatus(args) {
-  if (args.length < 3) throw new Error('usage: session-topic spec-status <topic> <spec-id> <status>');
+function planStatus(args) {
+  if (args.length < 3) throw new Error('usage: session-topic plan-status <topic> <spec-id> <status>');
   const [topic, id, status] = args;
   validateTopicName(topic);
-  if (!STATUSES.includes(status)) throw new Error(`invalid status: ${status}`);
+  if (!PLAN_STATUSES.includes(status)) throw new Error(`invalid plan status: ${status}`);
 
   const state = readState(topic);
   const spec = state.specs.find((s) => s.id === id);
   if (!spec) throw new Error(`spec ${id} not found`);
-  spec.status = status;
+  if (!spec.plan) throw new Error(`spec ${id} has no plan; run plan-create first`);
+  spec.plan = status;
   writeState(topic, state);
 
   console.log(status);
@@ -280,6 +292,31 @@ function worktreePath(args) {
   console.log(join(topicDir(topic), `worktree-${repo}`));
 }
 
+function guardTopic(args) {
+  if (args.length < 1) throw new Error('usage: session-topic guard <topic> [dir]');
+  const [topic, dir] = args;
+  validateTopicName(topic);
+  const repo = resolveRepo(dir || process.cwd());
+  const expected = join(topicDir(topic), `worktree-${repo}`);
+  let expectedResolved;
+  try {
+    expectedResolved = realpathSync(expected);
+  } catch {
+    expectedResolved = expected;
+  }
+  const cwd = realpathSync(process.cwd());
+  if (cwd === expectedResolved || cwd.startsWith(expectedResolved + sep)) {
+    console.log(`ok: cwd is inside topic worktree ${expectedResolved}`);
+    return 0;
+  }
+  console.error(
+    `guard failed: topic-mode code changes must happen inside the topic worktree.\n` +
+      `topic: ${topic}\nrepo: ${repo}\nworktree: ${expected}\ncurrent dir: ${cwd}\n` +
+      `Create it first (e.g.): git worktree add "${expected}" -b <branch>`
+  );
+  return 1;
+}
+
 function help() {
   console.log(`Usage: session-topic <command> [args]
 
@@ -287,9 +324,10 @@ Commands:
   init <semantic-hint>              Create a new topic and print its name
   resolve <topic>                   Print the absolute path of a topic directory
   spec-create <topic> <spec-name>   Create a numbered spec file and update STATE.md
-  plan-create <topic> <spec-id>     Create a plan file for an existing spec
-  spec-status <topic> <spec-id> <status>  Update spec status (open|merged|closed)
+  plan-create <topic> <spec-id>     Create a plan file for an existing spec (same number/name)
+  plan-status <topic> <spec-id> <status>  Update plan status (open|implemented)
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
+  guard <topic> [dir]           Assert $PWD is inside the topic worktree for the repo; exit 1 if not
 `);
 }
 
@@ -303,16 +341,18 @@ function main(argv) {
 
   if (!COMMANDS.includes(command)) throw new Error(`unknown command: ${command}`);
 
+  let code = 0;
   switch (command) {
     case 'init': init(args); break;
     case 'resolve': resolveTopic(args); break;
     case 'spec-create': specCreate(args); break;
     case 'plan-create': planCreate(args); break;
-    case 'spec-status': specStatus(args); break;
+    case 'plan-status': planStatus(args); break;
     case 'worktree-path': worktreePath(args); break;
+    case 'guard': code = guardTopic(args); break;
   }
 
-  return 0;
+  return code;
 }
 
 try {

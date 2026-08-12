@@ -1,6 +1,6 @@
 ---
 name: session-topic
-description: Manage session artifacts under topic-centric directories
+description: Use when creating, reading, or updating session-level artifacts (specs, plans, handoffs, UAT cases, linked worktrees) to keep them out of project checkouts, or before writing code in a topic-mode session so changes land in the topic worktree, never the main checkout
 ---
 
 ## Overview
@@ -62,24 +62,38 @@ Under the topic directory:
 | Worktree | `worktree-<repo>/` |
 | State | `STATE.md` |
 
+### Spec-Plan pairing
+
+A plan is always tied to a spec and **must share the same number and name**:
+
+- Spec `01-auth-refactor.spec.md` → Plan `01-auth-refactor.plan.md`
+- Spec `02-fix-login-redirect.spec.md` → Plan `02-fix-login-redirect.plan.md`
+
+Use `plan-create <topic> <spec-id>` with the **existing spec id**, not a new number. It initializes the plan status as `open`.
+
+Use `plan-status <topic> <spec-id> implemented` when the plan has been executed.
+
+Do not create a new spec just to hold an implementation plan; the plan belongs to the original spec.
+
 ### CLI commands
 
 ```bash
 node $CLAUDE_SKILL_DIR/session-topic.mjs init <semantic-hint>
 node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>
 node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> <spec-name>
-node $CLAUDE_SKILL_DIR/session-topic.mjs plan-create <topic> <spec-id>
-node $CLAUDE_SKILL_DIR/session-topic.mjs spec-status <topic> <spec-id> <status>
+node $CLAUDE_SKILL_DIR/session-topic.mjs plan-create <topic> <spec-id>   # creates NN-<name>.plan.md with plan: open
+node $CLAUDE_SKILL_DIR/session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
 node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> [dir]
+node $CLAUDE_SKILL_DIR/session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
 ```
 
 ### STATE.md
 
-Maintained automatically by the CLI. Spec statuses:
+Maintained automatically by the CLI. Each spec entry may include:
 
-- `open`
-- `merged`
-- `closed`
+- `id`: the spec number
+- `name`: the spec slug
+- `plan`: `open` | `implemented` | omitted when no plan exists
 
 ## Core Flow
 
@@ -108,32 +122,73 @@ Maintained automatically by the CLI. Spec statuses:
 
 ### Bug fixes and follow-up work
 
-When a spec is already merged and additional work is needed, do not edit the merged spec. Create a new numbered spec instead:
+When a spec is already finalized and additional work is needed, do not edit the spec. Create a new numbered spec instead:
 
 ```bash
 node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> "fix-login-redirect"
 ```
 
-### Worktrees
+Then create its plan with `plan-create <topic> <new-spec-id>`.
 
-For each repository that needs code changes under this topic:
+### Worktrees (MANDATORY for code changes)
+
+**Topic-mode code changes happen ONLY inside the topic worktree. The main checkout is never modified for topic work.** This is a hard rule, not a preference.
 
 ```bash
 worktree=$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic>)
 git worktree add "$worktree" -b <branch>
 ```
 
+Before writing ANY code, run guard to verify you are inside the worktree:
+
+```bash
+node $CLAUDE_SKILL_DIR/session-topic.mjs guard <topic>   # exit 1 unless $PWD is the topic worktree
+```
+
+`guard` fails (exit 1) when you are in the main checkout or any other location. If it fails, stop, create the worktree, re-run `guard`, then code.
+
 A topic may span multiple repositories, but each repository has at most one worktree within a topic.
 
 ## Common Mistakes
 
+- Editing the main checkout during topic work instead of the topic worktree.
+  - **Anti-pattern:** implementing a spec in `/home/manooog/code/.../<repo>` because the main checkout already has node_modules/rush installed.
+  - **Correct:** `guard` first — if it exits 1, create the topic worktree and work there. Main-checkout state (installed deps, running dev server) is not a reason to modify it.
 - Creating a new topic when the current context already has one.
-- Editing an already-merged spec instead of creating a new numbered spec for follow-up work.
-- Forgetting to update `spec-status` after merging or abandoning a spec.
+- Editing an already-finalized spec instead of creating a new numbered spec for follow-up work.
+- Forgetting to update `plan-status` after a plan has been executed.
 - Writing session artifacts inside the project checkout.
+  - **Anti-pattern:** Putting helper scripts, seed SQL, or e2e flow files in the worktree.
+    ```
+    # ❌ Wrong
+    worktree-backend/start-payments-e2e.sh
+    worktree-backend/prepare-e2e-refund-data.sql
+    worktree-backend/run-local-e2e-refund-flow.sh
+
+    # ✅ Correct
+    ~/.config/sessions/2026-08-09-app-fee-online-refund-curious-temple/start-payments-e2e.sh
+    ~/.config/sessions/2026-08-09-app-fee-online-refund-curious-temple/prepare-e2e-refund-data.sql
+    ~/.config/sessions/2026-08-09-app-fee-online-refund-curious-temple/run-local-e2e-refund-flow.sh
+    ```
+    These files support a specific session, not the repository. Keeping them in the checkout risks accidental commits and loses them when the worktree is removed.
+- Creating a plan with a new number instead of reusing the spec's id.
+  - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `spec-create` to produce `03-fix-login-redirect-plan`.
+  - **Correct:** Run `plan-create <topic> 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
 
 ## Red Flags
 
 - A topic name that does not match `YYYY-MM-DD-<semantic>-<adj>-<noun>` is invalid.
 - Handoff or UAT files without the correct suffix will not be recognized by convention.
 - If `STATE.md` and the actual files disagree, trust the files and update `STATE.md`.
+- Writing topic code anywhere other than the topic worktree.
+
+## Code Location Rationalizations — STOP and Use the Worktree
+
+| Excuse | Reality |
+|--------|---------|
+| "The main checkout already has node_modules/rush installed; a worktree needs a full reinstall" | Setup cost is not a reason to violate isolation. Create the worktree, re-run guard, then code. |
+| "The change is small / additive / low-risk" | Size does not decide location. The rule is unconditional inside topic mode. |
+| "I didn't commit, so the main checkout is safe" | Uncommitted edits on a detached or shared main checkout are exactly how work gets lost. "No commit" is not safety. |
+| "I'll move it to a worktree after" | The worktree must exist BEFORE the first edit, not after. |
+
+**All of these mean: stop, create the topic worktree, re-run guard, then code.**
