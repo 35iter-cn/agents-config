@@ -43,6 +43,7 @@ One step that handles PR state check to body creation:
 2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
 3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
 4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely).
+5. **Assign reviewer (create only)** — Only on new PR; never modify reviewers on update. Map the project to a reviewer: frontend → `keshao728`, backend → `zce`. If it maps to neither, skip and note "assign reviewer manually" in the final summary.
 
 ### Attach screenshots
 
@@ -87,6 +88,7 @@ flowchart TD
 - Using wrong LMB when origin HEAD differs from local main.
 - Stopping at file generation after `pr-uat-case-gen` without publishing the UAT comment to the PR.
 - Creating duplicate UAT comments on the same PR instead of patching the existing one.
+- Resetting reviewers on an existing PR — assignment is create-only; update never touches reviewers.
 - Attaching screenshots before the body step — a full body replace wipes the embeds; attach after.
 
 ## Red Flags
