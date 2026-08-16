@@ -31,15 +31,15 @@ Merge one or more GitHub pull requests with `gh`, then clean up linked worktrees
 | Decision | Rule |
 |----------|------|
 | Scope | MagicDoor repos: **review-gated** (see `--admin` + Review gate rows). Other repos: unchanged behavior |
-| Merge method (MagicDoor) | `gh pr merge <n> --repo <owner/name> --squash --delete-branch` — **never `--admin`** |
+| Merge method (MagicDoor) | `gh pr merge <n> --repo <owner/name> --squash --delete-branch` — `--admin` only on an explicit force-merge request (see Review gate row) |
 | Merge method (other repos) | `gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin` |
-| `--admin` | **MagicDoor: never** — it bypasses the review gate. Other repos: enabled by default |
-| Review gate (MagicDoor) | **Hard stop** unless `reviewDecision == APPROVED`; `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` → do not merge, no override |
+| `--admin` | MagicDoor: **only** on an explicit force-merge request — the user's words combine merge intent (merge/合并/合) with force intent (force/强制), e.g. `merge pr force`, `force merge PR`, `强制合并`. Otherwise **never**. Other repos: enabled by default |
+| Review gate (MagicDoor) | **Hard stop** unless `reviewDecision == APPROVED`; `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` → do not merge, no override. **Sole exception:** explicit force-merge request — user's words combine merge intent (merge/合并/合) with force intent (force/强制), e.g. `merge pr force`, `force merge PR`, `强制合并` → bypass review gate with `--admin` |
 | Target PR(s) | Derive from conversation + current checkout; **confirm list with user before merging** |
 | Local uncommitted or unpushed | **Hard stop** — do not merge |
 | CI failed | Self-fix + push, max **2** rounds; still red → hard stop (no `--admin`) |
 | CI pending | Wait until checks finish, then re-check — do not ask |
-| Missing approval | MagicDoor: **hard stop** (see Review gate). Other repos: ignore |
+| Missing approval | MagicDoor: **hard stop** unless explicit force-merge request (see Review gate). Other repos: ignore |
 | Conflicts / `mergeable=false` | Hard stop (not a CI-fix path) |
 | After merge | Remove **linked** worktree only (no `--force`); **never delete local branch**; leave main worktree in place |
 
@@ -88,7 +88,7 @@ gh pr view <n> --repo <owner/name> --json state,mergeable,mergeStateStatus,revie
 | `reviewDecision` | Action |
 |------------------|--------|
 | `APPROVED` | Continue |
-| `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` | **Hard stop** — report the PR is not approved; do **not** merge, do **not** use `--admin`, no override |
+| `CHANGES_REQUESTED` / `REVIEW_REQUIRED` / `null` | **Hard stop** — report the PR is not approved; do **not** merge, do **not** use `--admin`, no override. **Sole exception:** explicit force-merge request in this conversation (merge intent + force/强制 intent, e.g. `merge pr force`, `force merge PR`, `强制合并`) → skip this gate, proceed with `--admin` |
 
 For **non-MagicDoor** repos: ignore `reviewDecision` / approval state (unchanged).
 
@@ -121,10 +121,16 @@ Do not ask the user. When watch completes, return to step 4.
 
 ### 6. Merge
 
-MagicDoor repo:
+MagicDoor repo — normal path:
 
 ```bash
 gh pr merge <n> --repo <owner/name> --squash --delete-branch
+```
+
+MagicDoor repo — explicit force-merge request (merge + force/强制 intent, e.g. `merge pr force`, `force merge PR`, `强制合并`): add `--admin` to bypass the review gate:
+
+```bash
+gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin
 ```
 
 Other repos (unchanged):
@@ -133,7 +139,7 @@ Other repos (unchanged):
 gh pr merge <n> --repo <owner/name> --squash --delete-branch --admin
 ```
 
-Never pass `--merge` or `--rebase`. `--admin` is **never** used for MagicDoor repos; it is the default for other repos.
+Never pass `--merge` or `--rebase`. For MagicDoor repos `--admin` is used **only** on an explicit force-merge request (merge + force/强制 intent); otherwise it is never used. For other repos `--admin` is the default.
 
 If the command fails because squash is disallowed, hard stop and report repo merge settings — do not silently switch methods.
 
@@ -162,11 +168,11 @@ For each PR report:
 - Merging without an explicit user request to merge
 - Merging without confirming the derived PR list
 - Using `--merge` or `--rebase`
-- **Merging a MagicDoor PR with `--admin`, or when `reviewDecision != APPROVED`** (hard stop; no override)
+- **Merging a MagicDoor PR with `--admin` without an explicit force-merge request** (hard stop; no override) — merge + force/强制 intent is the sole trigger
 - Deleting local branches
 - `git worktree remove --force`
 - Auto-merging paired Owner/Company (or other) PRs without confirmation
 - Ignoring local dirty/unpushed state because GitHub looks green
-- Treating missing approval as a blocker — **except MagicDoor repos, where it is a hard stop**
+- Treating missing approval as a blocker — **except MagicDoor repos, where it is a hard stop unless the user made an explicit force-merge request**
 - Asking the user to wait on CI instead of `--watch`
 - Bypassing conflicts with force merge

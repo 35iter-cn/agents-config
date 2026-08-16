@@ -7,7 +7,7 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Sync branch, analyze diff, generate UAT test cases for frontend feature branches. Each case traces to actual code changes. Output: `<topic-dir>/uat-cases.uat-case.md` (never under project `.knowledge/`). Resolve `<topic-dir>` via `node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>`.
+Sync branch, analyze diff, generate UAT test cases for frontend feature branches. Each case traces to actual code changes. Output: `<topic-dir>/uat-cases.uat-case.md` (never under project `.knowledge/`). Resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`.
 
 ## Quick Reference
 

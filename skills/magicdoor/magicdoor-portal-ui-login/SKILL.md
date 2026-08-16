@@ -13,13 +13,17 @@ description: >
 
 Token TTL is ~1 minute. Construct and navigate to the URL immediately after minting — no intermediate steps.
 
+## Path resolution
+
+Command paths (e.g. `scripts/mint-magic-link-url.sh`) are relative to this skill's directory, not the shell cwd. Resolve the script's absolute path before running.
+
 ## Quick start
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/mint-magic-link-url.sh test hoa 1531544776654970880
-${CLAUDE_SKILL_DIR}/scripts/mint-magic-link-url.sh test company 1531544776654970880
-${CLAUDE_SKILL_DIR}/scripts/mint-magic-link-url.sh test owner 1531552188509036544 1531544776063574016
-${CLAUDE_SKILL_DIR}/scripts/mint-magic-link-url.sh test tenant 1531551749789032448 1531544776063574016
+scripts/mint-magic-link-url.sh test hoa 1531544776654970880
+scripts/mint-magic-link-url.sh test company 1531544776654970880
+scripts/mint-magic-link-url.sh test owner 1531552188509036544 1531544776063574016
+scripts/mint-magic-link-url.sh test tenant 1531551749789032448 1531544776063574016
 ```
 
 The script prints a URL. Extract the `token=` query param and construct the final URL using the tables below.
@@ -33,7 +37,7 @@ The script prints a URL. Extract the `token=` query param and construct the fina
 ## Workflow
 
 1. Resolve `userId` and, for owner/tenant, `companyId` (needs `subUrl`).
-2. Run `${CLAUDE_SKILL_DIR}/scripts/mint-magic-link-url.sh <env> <company|hoa|owner|tenant> <userId> [companyId]`
+2. Run `scripts/mint-magic-link-url.sh <env> <company|hoa|owner|tenant> <userId> [companyId]`
 3. Extract the `token` value from the printed URL.
 4. Determine the target host (see **Host resolution** below).
 5. Construct the full URL using the **Magic-link paths** table.
@@ -94,7 +98,6 @@ For local dev, prepend `http://localhost:{port}` and keep the path segment:
 ## Anti-patterns
 
 - Hardcoding `*.magicdoor-*.com` hosts — use `magicdoor-env portals`
-- Using `./scripts/...` relative path — use `${CLAUDE_SKILL_DIR}/scripts/...`
 - Navigating to the line-output URL directly for local dev — extract token, reconstruct with `localhost:{port}`
 - Any delay between minting and navigating — token TTL ~1 min
 - `generate-password` — overwrites hash

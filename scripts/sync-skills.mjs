@@ -9,9 +9,11 @@ const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_ROOT, '..');
 const DEFAULT_ROOT = resolve(REPO_ROOT, 'skills');
 const DEFAULT_TARGETS = resolve(REPO_ROOT, 'scripts/skills-symlinks.targets');
+const DEFAULT_IGNORE = resolve(REPO_ROOT, 'scripts/skills-ignore');
 
 let SKILLS_ROOT = resolve(process.env.SKILLS_CANONICAL_ROOT || DEFAULT_ROOT);
 let TARGETS_FILE = process.env.SKILLS_SYMLINKS_TARGETS || DEFAULT_TARGETS;
+let IGNORE_FILE = process.env.SKILLS_IGNORE_FILE || DEFAULT_IGNORE;
 let MODE = 'link';
 let DRY_RUN = false;
 let PRUNE = true;
@@ -29,7 +31,7 @@ Options:
   --dry-run             Print actions only
   -h, --help            Show this help
 
-Env: SKILLS_CANONICAL_ROOT, SKILLS_SYMLINKS_TARGETS`);
+Env: SKILLS_CANONICAL_ROOT, SKILLS_SYMLINKS_TARGETS, SKILLS_IGNORE_FILE`);
 }
 
 const args = process.argv.slice(2);
@@ -80,7 +82,11 @@ function scanSkills(root) {
     error(`canonical root does not exist: ${root}`);
   }
 
+  let ignored = new Set();
+  try { ignored = new Set(readLines(IGNORE_FILE)); } catch { /* no ignore file */ }
+
   for (const base of entries) {
+    if (ignored.has(base)) continue;
     const top = resolve(root, base);
     let st;
     try { st = lstatSync(top); } catch { continue; }

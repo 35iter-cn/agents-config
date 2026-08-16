@@ -9,6 +9,10 @@ Manage all session artifacts (specs, plans, handoffs, UAT cases, worktrees) unde
 
 Session artifacts must **never** be written inside a project checkout. Use the topic directory for all session-level documents.
 
+## Path resolution
+
+Command paths (e.g. `session-topic.mjs`) are relative to this skill's directory, not the shell cwd. Resolve the script's absolute path before running. This also applies when another skill references this script.
+
 ## When to Use
 
 Whenever you need to create, read, or update a session artifact. This includes:
@@ -25,7 +29,7 @@ Whenever you need to create, read, or update a session artifact. This includes:
 
 ## Quick Reference
 
-Run `node $CLAUDE_SKILL_DIR/session-topic.mjs --help` to list all commands.
+Run `node session-topic.mjs --help` to list all commands.
 
 ### Topic naming
 
@@ -44,7 +48,7 @@ YYYY-MM-DD-<semantic>-<adjective>-<noun>
 1. If the conversation context already has a topic, reuse it.
 2. If not, derive a semantic hint from the user's request and run:
    ```bash
-   node $CLAUDE_SKILL_DIR/session-topic.mjs init <semantic-hint>
+   node session-topic.mjs init <semantic-hint>
    ```
    This prints the full topic name.
 3. Remember the topic in the conversation context for reuse.
@@ -78,22 +82,24 @@ Do not create a new spec just to hold an implementation plan; the plan belongs t
 ### CLI commands
 
 ```bash
-node $CLAUDE_SKILL_DIR/session-topic.mjs init <semantic-hint>
-node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>
-node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> <spec-name>
-node $CLAUDE_SKILL_DIR/session-topic.mjs plan-create <topic> <spec-id>   # creates NN-<name>.plan.md with plan: open
-node $CLAUDE_SKILL_DIR/session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
-node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic> [dir]
-node $CLAUDE_SKILL_DIR/session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
+node session-topic.mjs init <semantic-hint>
+node session-topic.mjs resolve <topic>
+node session-topic.mjs spec-create <topic> <spec-name>
+node session-topic.mjs plan-create <topic> <spec-id>   # creates NN-<name>.plan.md with plan: open
+node session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
+node session-topic.mjs verify <topic>                  # exit 1 if STATE.md drifts from spec/plan files
+node session-topic.mjs worktree-path <topic> [dir]
+node session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
 ```
 
 ### STATE.md
 
-Maintained automatically by the CLI. Each spec entry may include:
+Two responsibilities, two owners:
 
-- `id`: the spec number
-- `name`: the spec slug
-- `plan`: `open` | `implemented` | omitted when no plan exists
+- **Frontmatter (spec registration, plan status) is owned by the CLI.** `specs:` entries are added only via `spec-create` / `plan-create` / `plan-status`. Never hand-edit registrations; never create spec/plan files with `write` — that is exactly the drift `verify` exists to catch.
+- **Body is owned by the LLM and SHOULD be actively maintained.** Keep a `# Session State` summary (spec progress table, worktree status, artifacts) plus durable conclusions (decisions, milestone progress, architecture notes) worth carrying across sessions — see mature topics like `2026-08-09-app-fee-online-curious-temple` for the pattern. The CLI preserves the body when it rewrites STATE.md.
+
+Update STATE.md in the same turn progress happens (spec finalized, milestone done, `plan-status` changed) — not at session end.
 
 ## Core Flow
 
@@ -102,11 +108,11 @@ Maintained automatically by the CLI. Each spec entry may include:
 1. Derive a semantic hint from the user's request (e.g., `auth refactor`).
 2. Create the topic:
    ```bash
-   topic=$(node $CLAUDE_SKILL_DIR/session-topic.mjs init "auth refactor")
+   topic=$(node session-topic.mjs init "auth refactor")
    ```
-3. Create the first spec:
+3. Create the first spec via the CLI — never with `write`:
    ```bash
-   node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create "$topic" "auth-refactor"
+   node session-topic.mjs spec-create "$topic" "auth-refactor"
    ```
 4. Write the spec content to the printed path.
 
@@ -115,17 +121,20 @@ Maintained automatically by the CLI. Each spec entry may include:
 1. Read the current topic from conversation context.
 2. Resolve the topic directory:
    ```bash
-   node $CLAUDE_SKILL_DIR/session-topic.mjs resolve <topic>
+   node session-topic.mjs resolve <topic>
    ```
 3. Read `STATE.md` to understand current progress.
-4. Create or update files as needed.
+4. Run `session-topic verify <topic>` — MUST pass before any further work. If it exits 1, fix the listed drift and re-run. A failing verify means the topic state is untrustworthy; do not create specs, plans, worktrees, or code until it passes.
+5. Create or update files as needed.
+
+`verify` is not skippable. If the user says to skip it ("don't bother", "just write the file", "I'm in a hurry"), that is the exact failure scenario it exists for — run it anyway. Same rule applies to STATE.md body updates: they happen in the same turn as the progress, even if the user says to defer them.
 
 ### Bug fixes and follow-up work
 
 When a spec is already finalized and additional work is needed, do not edit the spec. Create a new numbered spec instead:
 
 ```bash
-node $CLAUDE_SKILL_DIR/session-topic.mjs spec-create <topic> "fix-login-redirect"
+node session-topic.mjs spec-create <topic> "fix-login-redirect"
 ```
 
 Then create its plan with `plan-create <topic> <new-spec-id>`.
@@ -135,14 +144,14 @@ Then create its plan with `plan-create <topic> <new-spec-id>`.
 **Topic-mode code changes happen ONLY inside the topic worktree. The main checkout is never modified for topic work.** This is a hard rule, not a preference.
 
 ```bash
-worktree=$(node $CLAUDE_SKILL_DIR/session-topic.mjs worktree-path <topic>)
+worktree=$(node session-topic.mjs worktree-path <topic>)
 git worktree add "$worktree" -b <branch>
 ```
 
 Before writing ANY code, run guard to verify you are inside the worktree:
 
 ```bash
-node $CLAUDE_SKILL_DIR/session-topic.mjs guard <topic>   # exit 1 unless $PWD is the topic worktree
+node session-topic.mjs guard <topic>   # exit 1 unless $PWD is the topic worktree
 ```
 
 `guard` fails (exit 1) when you are in the main checkout or any other location. If it fails, stop, create the worktree, re-run `guard`, then code.
@@ -151,6 +160,12 @@ A topic may span multiple repositories, but each repository has at most one work
 
 ## Common Mistakes
 
+- Creating spec/plan files by hand instead of via the CLI.
+  - **Anti-pattern:** `write 02-auth.spec.md`, or hand-editing STATE.md `specs:` registrations.
+  - **Correct:** `spec-create` registers + creates the file; fill in content afterwards. A hand-created file is exactly what `verify` fails on — stop and redo via the CLI.
+- Letting STATE.md drift: skipping the update when a spec is finalized or a milestone completes.
+  - **Anti-pattern:** finishing work and leaving STATE.md stale until "later".
+  - **Correct:** update STATE.md (body) or run `plan-status` in the same turn the progress happens. `verify` at session start exposes any drift.
 - Editing the main checkout during topic work instead of the topic worktree.
   - **Anti-pattern:** implementing a spec in `/home/manooog/code/.../<repo>` because the main checkout already has node_modules/rush installed.
   - **Correct:** `guard` first — if it exits 1, create the topic worktree and work there. Main-checkout state (installed deps, running dev server) is not a reason to modify it.
@@ -175,9 +190,20 @@ A topic may span multiple repositories, but each repository has at most one work
   - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `spec-create` to produce `03-fix-login-redirect-plan`.
   - **Correct:** Run `plan-create <topic> 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
 
+### Rationalizations — no exceptions
+
+| Excuse | Reality |
+|---|---|
+| "The user said skip verify, they're in a hurry" | The user asking to skip the check is the failure scenario it exists for. `verify` is one command; run it regardless. |
+| "STATE.md can wait until the end" | "Later" means never. Update body/plan-status in the same turn progress happens. |
+| "spec-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
+| "The file exists, just edit it directly" | A hand-created spec/plan file is the exact drift `verify` fails on. Recreate via the CLI. |
+
 ## Red Flags
 
 - A topic name that does not match `YYYY-MM-DD-<semantic>-<adj>-<noun>` is invalid.
+- `session-topic verify <topic>` exits 1 — fix drift before any further topic work.
+- A spec/plan file exists that was not created via `spec-create` / `plan-create`.
 - Handoff or UAT files without the correct suffix will not be recognized by convention.
 - If `STATE.md` and the actual files disagree, trust the files and update `STATE.md`.
 - Writing topic code anywhere other than the topic worktree.

@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, realpa
 import { basename, join, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
-import { ADJECTIVES } from '../../companions/scripts/lib/words/adjectives.mjs';
-import { NOUNS } from '../../companions/scripts/lib/words/nouns.mjs';
+import { ADJECTIVES } from './words/adjectives.mjs';
+import { NOUNS } from './words/nouns.mjs';
 
-const COMMANDS = ['init', 'resolve', 'spec-create', 'plan-create', 'plan-status', 'worktree-path', 'guard'];
+const COMMANDS = ['init', 'resolve', 'spec-create', 'plan-create', 'plan-status', 'verify', 'worktree-path', 'guard'];
 const PLAN_STATUSES = ['open', 'implemented'];
 
 function sessionsRoot() {
@@ -60,15 +60,20 @@ function validateTopicName(name) {
   if (!pattern.test(name)) throw new Error(`invalid topic name: ${name}`);
 }
 
-function parseState(content) {
+function stateFileError(topic, content) {
+  const preview = JSON.stringify(content.slice(0, 80).replace(/\n/g, '\\n'));
+  return new Error(`STATE.md frontmatter 缺失或损坏: ${topic}/STATE.md 前80字符: ${preview}`);
+}
+
+function parseState(content, topic = '') {
   const lines = content.split('\n');
   if (lines[0] !== '---') {
-    return { topic: '', title: '', created: today(), current_spec: '', specs: [], body: content };
+    throw stateFileError(topic, content);
   }
 
   const endIndex = lines.indexOf('---', 1);
   if (endIndex === -1) {
-    return { topic: '', title: '', created: today(), current_spec: '', specs: [], body: content };
+    throw stateFileError(topic, content);
   }
 
   const frontmatter = lines.slice(1, endIndex).join('\n');
@@ -120,6 +125,10 @@ function parseState(content) {
     }
   }
 
+  if (!state.topic || !state.title) {
+    throw stateFileError(topic, content);
+  }
+
   return { ...state, body };
 }
 
@@ -151,7 +160,7 @@ function readState(topic) {
   if (!existsSync(path)) {
     return { topic, title: '', created: today(), current_spec: '', specs: [], body: '' };
   }
-  return parseState(readFileSync(path, 'utf-8'));
+  return parseState(readFileSync(path, 'utf-8'), topic);
 }
 
 function writeState(topic, state) {
@@ -238,6 +247,7 @@ function specCreate(args) {
   const file = join(dir, `${id}-${name}.spec.md`);
 
   mkdirSync(dir, { recursive: true });
+  if (existsSync(file)) throw new Error(`spec file already exists: ${file}; 如需重建请先手动删除`);
   writeFileSync(file, '');
 
   const state = readState(topic);
@@ -317,6 +327,100 @@ function guardTopic(args) {
   return 1;
 }
 
+function verifyTopic(args) {
+  if (args.length < 1) throw new Error('usage: session-topic verify <topic>');
+  const [topic] = args;
+  validateTopicName(topic);
+  const dir = topicDir(topic);
+  if (!existsSync(dir)) {
+    console.error(`verify failed: topic directory not found: ${dir}`);
+    return 1;
+  }
+
+  const state = readState(topic);
+  const issues = [];
+
+  const specFiles = [];
+  const planFiles = [];
+  for (const file of readdirSync(dir)) {
+    const specMatch = file.match(/^(\d{2,})-(.+)\.spec\.md$/);
+    if (specMatch) {
+      specFiles.push({ file, id: specMatch[1], name: specMatch[2] });
+      continue;
+    }
+    const planMatch = file.match(/^(\d{2,})-(.+)\.plan\.md$/);
+    if (planMatch) {
+      planFiles.push({ file, id: planMatch[1], name: planMatch[2] });
+    }
+  }
+
+  const registered = state.specs.map((s) => ({ id: s.id, name: s.name }));
+
+  for (const spec of specFiles) {
+    const reg = registered.find((s) => s.id === spec.id);
+    if (!reg) {
+      issues.push(
+        `${spec.file} 未注册到 STATE.md(手动创建,未走 spec-create)。` +
+          `修复:内容需保留则先保存内容,再 session-topic spec-create ${topic} ${spec.name} 重建并写回;误建则删除该文件`,
+      );
+      continue;
+    }
+    if (reg.name !== spec.name) {
+      issues.push(
+        `${spec.file} 与 STATE.md 注册名不一致(注册名:${reg.name})。` +
+          `修复:对齐 STATE.md 注册名或重命名文件后重跑 verify`,
+      );
+    }
+  }
+
+  for (const plan of planFiles) {
+    const specFile = specFiles.find(
+      (s) => s.id === plan.id && s.name === plan.name,
+    );
+    if (!specFile) {
+      issues.push(
+        `${plan.file} 无对应 spec 文件(${plan.id}-${plan.name}.spec.md 缺失或未注册)。` +
+          `修复:session-topic spec-create ${topic} ${plan.name} 创建对应 spec,或删除该 plan 文件`,
+      );
+    }
+  }
+
+  for (const reg of registered) {
+    const specFile = specFiles.find((s) => s.id === reg.id);
+    if (!specFile) {
+      issues.push(
+        `spec ${reg.id} (${reg.name}) 已注册但 ${reg.id}-${reg.name}.spec.md 不存在。` +
+          `修复:session-topic spec-create ${topic} ${reg.name} 重建`,
+      );
+    }
+    const plan = state.specs.find((s) => s.id === reg.id)?.plan;
+    if (plan && !PLAN_STATUSES.includes(plan)) {
+      issues.push(
+        `spec ${reg.id} (${reg.name}) plan 状态非法:${plan}(仅允许 open/implemented)。` +
+          `修复:更新 STATE.md plan 字段`,
+      );
+    }
+  }
+
+  if (state.current_spec && !registered.some((s) => s.id === state.current_spec)) {
+    issues.push(
+      `current_spec 指向 ${state.current_spec},但 specs 列表无此 id。` +
+        `修复:更新 STATE.md current_spec 为有效 spec id`,
+    );
+  }
+
+  if (issues.length > 0) {
+    console.error(`verify failed for topic ${topic}:`);
+    for (const issue of issues) {
+      console.error(`  - ${issue}`);
+    }
+    return 1;
+  }
+
+  console.log(`ok: ${topic} STATE.md 与 spec/plan 文件一致`);
+  return 0;
+}
+
 function help() {
   console.log(`Usage: session-topic <command> [args]
 
@@ -326,6 +430,7 @@ Commands:
   spec-create <topic> <spec-name>   Create a numbered spec file and update STATE.md
   plan-create <topic> <spec-id>     Create a plan file for an existing spec (same number/name)
   plan-status <topic> <spec-id> <status>  Update plan status (open|implemented)
+  verify <topic>                  Verify STATE.md matches spec/plan files; exit 1 on drift
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
   guard <topic> [dir]           Assert $PWD is inside the topic worktree for the repo; exit 1 if not
 `);
@@ -348,6 +453,7 @@ function main(argv) {
     case 'spec-create': specCreate(args); break;
     case 'plan-create': planCreate(args); break;
     case 'plan-status': planStatus(args); break;
+    case 'verify': code = verifyTopic(args); break;
     case 'worktree-path': worktreePath(args); break;
     case 'guard': code = guardTopic(args); break;
   }
