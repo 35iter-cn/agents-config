@@ -1,13 +1,13 @@
 ---
 name: chrome-debug
-description: Start/verify the shared debug Chrome instance that MCP chrome-devtools connects to via --browser-url
+description: Start/verify the shared debug Chrome instance exposing CDP on 127.0.0.1:9222
 ---
 
 # Chrome Debug
 
-Shared debug Chrome for MCP chrome-devtools (`--browser-url=http://127.0.0.1:9222`).
+Shared debug Chrome (CDP endpoint `ws://127.0.0.1:9222`).
 
-**This is a shared resource across Claude sessions.** Do not close or restart the
+**This is a shared resource across sessions.** Do not close or restart the
 Chrome process unless connection is genuinely unrecoverable and the user has
 confirmed. If MCP tools return errors, just notify the user—they will
 reconnect.
@@ -26,6 +26,5 @@ google-chrome-stable --remote-debugging-port=9222 \
 ## Verify
 
 ```bash
-curl -s http://127.0.0.1:9222/json/version | \
-  python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Browser','?'))"
+curl -fsS http://127.0.0.1:9222/json/version || echo "chrome-debug not running"
 ```
