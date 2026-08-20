@@ -45,6 +45,12 @@ Path-prefix fallback when spec is `Default` or unknown:
 | dev | `1480743304903122944` | Lei Wang |
 | test | `1476492890174410752` | Hao Ruan |
 
+## System accounts vs portal users
+
+The userIds above are MagicDoor-internal accounts (`user_type=MagicDoor`) used to mint debug/shadow tokens and call internal/debug APIs. They are NOT equivalent to portal business users (PropertyManager/Owner/Tenant).
+
+Signing a portal in with one produces a `MagicDoor` session that the backend rejects on business endpoints — e.g. `/company-app/*` (CompanyWeb spec requires `PropertyManager`) returns 403. Portal UI testing must use a business account of the matching identity; do not reuse these userIds for that.
+
 ## Token
 
 ```bash

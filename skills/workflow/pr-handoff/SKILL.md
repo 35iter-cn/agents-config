@@ -43,7 +43,10 @@ One step that handles PR state check to body creation:
 2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
 3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
 4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely).
-5. **Assign reviewer (create only)** — Only on new PR; never modify reviewers on update. Map the project to a reviewer: frontend → `keshao728`, backend → `zce`. If it maps to neither, skip and note "assign reviewer manually" in the final summary.
+5. **Link backend dependency (frontend PRs)** — If context (diff, issue, conversation) suggests this frontend PR depends on a backend change (new fields/endpoints, companion backend PR), do BOTH:
+   - **Body**: add the backend PR link in clickable Markdown — `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)` — in a visible spot (Related Links / dependency note). Never bare text (`backend PR #NNN`), never backticked code style (`` `https://…` ``), never a relative path (`backend/pull/NNN`).
+   - **Label**: `gh pr edit <number> --repo <repo> --add-label "waiting for backend"` — on create AND update.
+6. **Assign reviewer (create only)** — Only on new PR; never modify reviewers on update. Map the project to a reviewer: frontend → `keshao728`, backend → `zce`. If it maps to neither, skip and note "assign reviewer manually" in the final summary.
 
 ### Attach screenshots
 
@@ -90,6 +93,8 @@ flowchart TD
 - Creating duplicate UAT comments on the same PR instead of patching the existing one.
 - Resetting reviewers on an existing PR — assignment is create-only; update never touches reviewers.
 - Attaching screenshots before the body step — a full body replace wipes the embeds; attach after.
+- Frontend PR depends on a backend change but ships without the `waiting for backend` label.
+- Writing the backend PR link as bare text (`backend PR #NNN`), backticked code (`` `https://…` ``), or a relative path — none are clickable; always `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)`.
 
 ## Red Flags
 
@@ -98,3 +103,4 @@ flowchart TD
 - Force-push without checking PR state.
 - Rebasing without fetching origin HEAD first.
 - Skipping UAT with "backend-only" excuse on repos with `.tsx`/`.jsx`.
+- Frontend PR touching a not-yet-deployed backend field/endpoint with no backend PR link in the body and no `waiting for backend` label.

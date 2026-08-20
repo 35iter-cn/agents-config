@@ -87,6 +87,16 @@ For local dev, prepend `http://localhost:{port}` and keep the path segment:
 | Tenant Portal | `http://localhost:{port}/tenants/auth/magic-link?token={token}` |
 | Company / HOA PM Portal | `http://localhost:{port}/auth/magic-link?token={token}` |
 
+## Portal identity requirements
+
+| Portal | Required account identity |
+|--------|---------------------------|
+| Company / HOA | `PropertyManager` |
+| Owner | `Owner` |
+| Tenant | `Tenant` |
+
+Each portal only works with a business account of the matching identity. System accounts (`user_type=MagicDoor` — see `magicdoor-backend-identity`) are fine for minting tokens, but signing a portal in with one yields a `MagicDoor` session the backend rejects on business endpoints (403). Use the Quick start example accounts for smoke tests, or business accounts of the matching type.
+
 ## What the script reads from env CLI
 
 | Source | Used for |
