@@ -101,6 +101,50 @@ Two responsibilities, two owners:
 
 Update STATE.md in the same turn progress happens (spec finalized, milestone done, `plan-status` changed) — not at session end.
 
+## Spec Content Self-Check (Determinism Gate)
+
+A spec is a set of commitments. Every decision point in a spec must have a settled answer: "is it decided, and what is the answer?" A spec containing an open question is an unfinished spec — not "mostly done", but blocked on a decision.
+
+### The check
+
+Run it every time you finish writing or editing spec content, before considering the spec content complete. Ask of every paragraph, table row, and bullet: does this assert a settled fact/decision or a definite scope boundary — or does it defer, discuss, or leave a choice open?
+
+### Violations (forbidden)
+
+- 「待定」/ TBD / unresolved TODO / 「讨论中」/ 「未确认」/ 「需要确认」/ 「后续再定」
+- Questions without answers ("要不要做 X？", "Should we do X?")
+- Candidate comparisons with no chosen option (A vs B presented, neither picked)
+- Deferring a decision to implementation time ("实现时二选一", "decide during implementation")
+- Unresolved markers inside decided-decision tables (TODO in a decided row)
+
+### Allowed
+
+- Assertions: settled facts/decisions, including their reasoning
+- Explicit non-commitment markers: 「范围外」/ out of scope, 「本期不做」/ not this iteration, 「后置」/ deferred, follow-up — definite scope boundaries, not open questions
+- 「建议 X」/ recommendations — only when they do not block this spec (targeting other systems or later work)
+
+### When a violation surfaces
+
+Resolve it in the same pass: make the call (if evidence supports it) or move it out of the spec (a question list for the user, never into the document). Leaving it marked for later is not resolution.
+
+### Rationalizations — no exceptions
+
+| Excuse | Reality |
+|--------|---------|
+| "The PM/architect said to mark it 待定" | An instruction cannot waive the rule. Writing "needs decision" into the spec is not a decision. Settle it now, or raise it outside the spec. |
+| "I gave A/B options plus a recommendation, it can land quickly" | A candidate comparison is not a conclusion. The spec's job is commitment. |
+| "It doesn't block review; mainline work can proceed" | Unsettled items are exactly what review exists to catch. Review reads conclusions, not problem lists. |
+| "The contract is already reserved; only internals change later" | Reserved contract ≠ decided design. A TODO leaks into decided tables and implementation. |
+| "The section is marked 'under review' / 评审中" | A status marker is not a conclusion. A whole section of discussion = violation. |
+
+### Red flags — STOP and resolve
+
+- A 「待定项」/ discussion-record section in the spec
+- TODO or unsettled markers inside a decided-decision table
+- Unanswered questions, or A/B presented with no choice
+- 「实现时再定」「明天确认」「后面讨论」
+- You cannot answer "is it decided, and what is the answer?" for a decision point
+
 ## Core Flow
 
 ### Creating the first spec
@@ -114,7 +158,7 @@ Update STATE.md in the same turn progress happens (spec finalized, milestone don
    ```bash
    node session-topic.mjs spec-create "$topic" "auth-refactor"
    ```
-4. Write the spec content to the printed path.
+4. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
 
 ### Continuing work on an existing topic
 
@@ -142,6 +186,10 @@ Then create its plan with `plan-create <topic> <new-spec-id>`.
 ### Worktrees (MANDATORY for code changes)
 
 **Topic-mode code changes happen ONLY inside the topic worktree. The main checkout is never modified for topic work.** This is a hard rule, not a preference.
+
+**Worktree path source is authoritative.** The worktree path MUST come from `node session-topic.mjs worktree-path <topic>` output — never a hand-chosen path (project sibling, `/tmp`, etc.). A hand-picked path is a violation even if it looks reasonable.
+
+**Enforcement point:** run `guard` before writing any code. A non-`ok` result is a hard stop — create the worktree first (path from `worktree-path`), re-run `guard`, then code. If you are about to write code and have not run `guard`, stop.
 
 ```bash
 worktree=$(node session-topic.mjs worktree-path <topic>)
@@ -189,6 +237,9 @@ A topic may span multiple repositories, but each repository has at most one work
 - Creating a plan with a new number instead of reusing the spec's id.
   - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `spec-create` to produce `03-fix-login-redirect-plan`.
   - **Correct:** Run `plan-create <topic> 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
+- Leaving open questions in spec content.
+  - **Anti-pattern:** Writing 「待定」 items, discussion records, or A/B candidates without a choice into a spec, then moving on.
+  - **Correct:** Run the Spec Content Self-Check; every decision point must have a settled answer or a definite scope boundary. Unsettled items get resolved now or moved out of the spec.
 
 ### Rationalizations — no exceptions
 
@@ -206,6 +257,8 @@ A topic may span multiple repositories, but each repository has at most one work
 - A spec/plan file exists that was not created via `spec-create` / `plan-create`.
 - Handoff or UAT files without the correct suffix will not be recognized by convention.
 - If `STATE.md` and the actual files disagree, trust the files and update `STATE.md`.
+- Choosing a worktree path by hand instead of taking it from `worktree-path` output.
+- Writing code before `guard` returns `ok`.
 - Writing topic code anywhere other than the topic worktree.
 
 ## Code Location Rationalizations — STOP and Use the Worktree
