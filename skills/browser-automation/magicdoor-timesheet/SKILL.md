@@ -72,13 +72,13 @@ If step 4 fails, stop and fix the row mapping.
 4. Open or create the target monthly sheet.
 5. Detect the sheet layout.
 6. Invoke `work-summary` with `--cwd`, `--start-date`, `--end-date`.
-7. Split the Markdown output and write cells via **formula-bar clipboard paste** (never paste onto the grid).
+7. Write cells via the driver-agnostic procedure in Workflow §7.
 
 ## Prerequisites
 
+- Any browser automation driver attached to the debug Chrome (CDP `127.0.0.1:9222`) that provides the capability contract in §7 — e.g. chrome-devtools MCP, a Puppeteer/Playwright-backed browser tool, or any raw CDP client. The skill is driver-agnostic: map each step to whatever primitive your driver offers; never invent steps from another tool's API names.
 - `chrome-debug` skill
 - `work-summary` skill with `--cwd` support
-- `chrome-devtools` MCP
 - `gh` CLI authenticated (for PR links)
 
 ## Workflow
@@ -136,6 +136,8 @@ Expected headers: DATE, TASK, HOURS, KANBAN LINK, PR LINK, NOTES.
 
 Row mapping: if seed date `C2` is the 1st and data starts at row `R0`, then calendar day `D` is at row `R0 + (D − month_1st)`.
 
+Navigation: prefer name-box jumps (focus `#t-name-box`, set value, Enter). `#range=` URL hashes can land as unexpected range selections.
+
 ### 6. Invoke work-summary
 
 Invoke the `work-summary` skill with the derived parameters:
@@ -152,30 +154,40 @@ Take its Markdown output and split it for the sheet:
 
 If `work-summary` returns no PRs, PR LINK stays empty. Skip a day's `C`/`F` when there are no commits and no PRs for that day (unless the user asked to write empty markers).
 
-### 7. Write — **必须用公式栏粘贴**
+### 7. Write cells — capability contract + verified edit loop
 
-Multiline Markdown **MUST** be pasted into the **formula bar** (公式栏), never onto a selected cell.
+Multiline Markdown must land inside ONE cell. Pasting multiline text onto a selected-but-not-editing cell scatters it row-by-row down the sheet (this has destroyed a month before). The safe path is the cell **editor**, reached by keyboard, with focus asserted before every destructive key.
 
-**Why:** Pasting onto a selected cell treats newlines as row breaks and scatters content across cells below (and can corrupt DATE/header rows). Pasting into the formula bar keeps all lines in one cell.
+**Capability contract** — whatever browser driver is in use MUST provide equivalents of:
 
-**Required sequence (per cell):**
+| Primitive | Purpose | Driver examples |
+|---|---|---|
+| Bring page to OS front | paste shortcuts are silently ignored when the tab lacks focus | MCP `select_page(bringToFront)`; puppeteer `page.bringToFront()` |
+| Trusted keyboard events incl. modifier combos | Enter / Ctrl+A / Ctrl+V | MCP `press_key`; raw `keyboard.down('Control') → press('KeyA') → up` (wrapper `press("Control+V")` may reject combo strings) |
+| In-page JS evaluation | name-box jumps, focus assertions, content readback | MCP `evaluate_script`; puppeteer-backed `evaluate` |
+| Clipboard write | put the cell text on the system clipboard | `navigator.clipboard.writeText` via evaluation; needs page focus |
+| ≥2 verification channels | screenshots / per-cell formula-bar reads / CSV export | CSV export can be rate-limited — never rely on it alone |
 
-1. `select_page(pageId, bringToFront: true)`.
-2. `await navigator.clipboard.writeText(text)`.
-3. Navigate to the target cell (name box or `#range=C25`).
-4. **Click the formula bar** (the multiline input above the grid, first `.cell-input`).
-5. Ctrl+A (optional if replacing), then **Ctrl+V into the formula bar**.
-6. Press Enter to commit.
-7. Verify: formula bar shows full multiline text; the cell **directly below** must still be empty/unrelated (not a spilled `- ` bullet).
+If any primitive is missing, stop and tell the user. Do not approximate with another tool's API names.
 
-**Pilot rule:** Write one cell first and confirm no pollution below before batching the rest.
+**Per-cell algorithm (REQUIRED, in order):**
 
-**Never:**
+1. Bring the page to the front.
+2. Jump to the target cell via the name box (`#t-name-box`: focus it, set its value to the ref, press Enter), then **read back the name-box value — must equal the target**, else abort.
+3. Press Enter to open the cell editor; **assert the focused element is the editor** (Sheets: `document.activeElement.id === 'waffle-rich-text-editor'`).
+4. Write the cell text to the clipboard.
+5. **Re-assert editor focus immediately before the keys**, then Ctrl+A and Ctrl+V inside the editor.
+6. **Strict-compare** the editor's text against the expected text. Mismatch → bring-to-front again and retry ONCE; still mismatched → STOP and report.
+7. Commit with Enter.
 
-- Paste onto a selected cell (grid focus) with multiline text.
-- Use Enter→Ctrl+V→Enter on the grid as the primary path — easy to miss edit mode and scatter.
-- Use `type_text` for multiline content.
-- Use `document.execCommand('insertText')` or `document.execCommand('paste')` for multiline (strips or mangling newlines).
+**Pilot rule:** write ONE cell first; read back the cell directly below (must be empty/unrelated) before batching.
+
+**Red flags — STOP and re-verify if any of these happened:**
+
+- A destructive key (Ctrl+A / Backspace / Ctrl+V) was sent without a fresh step-3/5 focus assertion. A stale check once selected all cells on the grid and deleted an entire month.
+- Batching writes without per-batch bring-to-front — pastes become silent no-ops or hit the grid.
+- Trusting one verification channel only.
+- Coordinate-clicking Sheets' top chrome (formula bar, toolbars): overlapping elements intercept clicks at some x positions. Prefer keyboard-driven paths; the formula bar is acceptable only when focus is asserted at click time.
 
 ### 8. After 日报 fills, refresh related 周报
 
@@ -188,6 +200,7 @@ For `sync-month`: every Saturday row in the month with blank `G` and at least on
 1. `G` on `S` has the NOTES.
 2. `G` on `S−7` is **not** where this NOTES landed (unless that cell is a different week's report).
 3. Cell directly below the written `G` is clean (no spill).
+4. Verify through two independent channels (screenshot + per-cell formula-bar reads, or CSV export) — export alone gets rate-limited.
 
 ## Recovery
 
@@ -195,5 +208,5 @@ If content scattered below a target cell:
 
 1. Stop writing immediately.
 2. Prefer **File → Version history → Restore** to the last clean revision (fastest full fix).
-3. Or navigate cells below (`C12`, `C13`, …), read the formula bar, and clear unexpected task-like text via formula-bar select-all + delete (grid Delete on multiline is unreliable).
-4. Re-write only via the formula-bar paste sequence above.
+3. Or navigate cells below (`C12`, `C13`, …), read each via the formula bar, and clear unexpected task-like text using the §7 editor path (select-all + delete inside a focus-asserted editor; grid Delete on multiline is unreliable).
+4. Re-write only via the §7 per-cell algorithm.

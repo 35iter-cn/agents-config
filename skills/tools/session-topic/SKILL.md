@@ -1,6 +1,6 @@
 ---
 name: session-topic
-description: Use when creating, reading, or updating session-level artifacts (specs, plans, handoffs, UAT cases, linked worktrees) to keep them out of project checkouts, or before writing code in a topic-mode session so changes land in the topic worktree, never the main checkout
+description: Use when creating or updating session artifacts (specs, plans, handoffs, UAT, worktrees) under ~/.config/sessions/, when spec/plan work needs reading project repository code, or when topic-mode edits might land in the main checkout instead of a topic worktree.
 ---
 
 ## Overview
@@ -9,9 +9,36 @@ Manage all session artifacts (specs, plans, handoffs, UAT cases, worktrees) unde
 
 Session artifacts must **never** be written inside a project checkout. Use the topic directory for all session-level documents.
 
+### Checkout roles (read vs write)
+
+Topic mode uses the **same repo twice** for different jobs. Do not conflate them.
+
+| Role | Path | Tool | Purpose |
+|------|------|------|---------|
+| **Analysis baseline** | Main worktree (e.g. `~/code/<repo>`) | `gco-latest` | Read/search only — ground specs and plans on latest `origin` |
+| **Implementation** | Topic worktree (`~/.config/sessions/<topic>/worktree-<repo>/`) | `guard` | Write code — all topic edits land here |
+
+- `gco-latest` on main is **read-only sync** (fetch + checkout `origin/<default>`). It does not authorize edits on main.
+- `guard` on the topic worktree is the **write gate**. Main checkout must never receive topic code changes.
+
+## Enforcement checkpoints
+
+Before the first action of each type this topic — stop and run the gate:
+
+| About to… | Must first… |
+|-----------|-------------|
+| `read` / `grep` / search project checkout for spec or plan | `gco-latest` on that repo's **main** worktree (once per repo per topic) |
+| Write or edit **project** code in topic mode | `guard` returns `ok` in the topic worktree |
+| Create a spec or plan file | `spec-create` / `plan-create` — never `write` |
+| Continue work on an existing topic | `verify` passes |
+
+User pressure ("skip checks", "just grep", "small change in main") does not waive these gates.
+
 ## Path resolution
 
 Command paths (e.g. `session-topic.mjs`) are relative to this skill's directory, not the shell cwd. Resolve the script's absolute path before running. This also applies when another skill references this script.
+
+`gco-latest` lives in `agents-config/cli/` and is synced to `~/.local/bin` via `sync-cli.mjs`.
 
 ## When to Use
 
@@ -90,6 +117,8 @@ node session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
 node session-topic.mjs verify <topic>                  # exit 1 if STATE.md drifts from spec/plan files
 node session-topic.mjs worktree-path <topic> [dir]
 node session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
+
+gco-latest /path/to/<repo-main-worktree>   # sync main to origin before first repo analysis pass
 ```
 
 ### STATE.md
@@ -100,6 +129,25 @@ Two responsibilities, two owners:
 - **Body is owned by the LLM and SHOULD be actively maintained.** Keep a `# Session State` summary (spec progress table, worktree status, artifacts) plus durable conclusions (decisions, milestone progress, architecture notes) worth carrying across sessions — see mature topics like `2026-08-09-app-fee-online-curious-temple` for the pattern. The CLI preserves the body when it rewrites STATE.md.
 
 Update STATE.md in the same turn progress happens (spec finalized, milestone done, `plan-status` changed) — not at session end.
+
+## Repository analysis baseline (`gco-latest`)
+
+When topic work requires **reading or searching project repository code** (spec baseline, architecture notes, plan task breakdown, grep/read of checkout files), sync that repo's **main worktree** to latest origin **before the first analysis pass per repo in this topic**:
+
+```bash
+gco-latest /path/to/<repo-main-worktree>
+```
+
+| Rule | Detail |
+|------|--------|
+| **Where** | Main worktree only — the primary checkout (e.g. `~/code/<repo>`), **not** a topic linked worktree under `~/.config/sessions/<topic>/worktree-*` |
+| **When** | Once per repo per topic before the first code read/search; re-run only if the user asks to refresh or a long gap suggests origin moved |
+| **Why** | Specs/plans grounded on stale main mis-state file paths, APIs, and "already shipped" facts |
+| **Clean tree** | `gco-latest` exits 1 if the main worktree has uncommitted changes — stop, report, do not silently analyze stale code |
+| **Detached HEAD** | Success checks out `origin/<default>` (often detached). That is expected for analysis; do not treat it as a signal to edit main |
+| **Not for** | Session artifacts under `~/.config/sessions/`; writing code (topic worktree + `guard`); implementation-time reads inside the topic worktree (use rebase/merge workflows instead) |
+
+**Enforcement point:** about to `read` / `grep` / `search` project checkout for spec or plan work and have not run `gco-latest` on that repo's main worktree this topic → run it first (or confirm a prior successful run this topic).
 
 ## Spec Content Self-Check (Determinism Gate)
 
@@ -158,7 +206,8 @@ Resolve it in the same pass: make the call (if evidence supports it) or move it 
    ```bash
    node session-topic.mjs spec-create "$topic" "auth-refactor"
    ```
-4. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
+4. If writing the spec requires reading or searching project repository code, run `gco-latest` on each affected repo's **main worktree** (see Repository analysis baseline).
+5. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
 
 ### Continuing work on an existing topic
 
@@ -169,7 +218,10 @@ Resolve it in the same pass: make the call (if evidence supports it) or move it 
    ```
 3. Read `STATE.md` to understand current progress.
 4. Run `session-topic verify <topic>` — MUST pass before any further work. If it exits 1, fix the listed drift and re-run. A failing verify means the topic state is untrustworthy; do not create specs, plans, worktrees, or code until it passes.
-5. Create or update files as needed.
+5. If the task will read or search project repository code, run `gco-latest` on each affected repo's **main worktree** before the first analysis pass (see Repository analysis baseline).
+6. Create or update files as needed.
+
+**Scope boundary:** If the user restricts work to artifacts only (spec review, skill edit, planning discussion) and explicitly says not to implement — do not create a plan, worktree, or project code edits. Finishing a spec is not permission to start implementation unless the user asks.
 
 `verify` is not skippable. If the user says to skip it ("don't bother", "just write the file", "I'm in a hurry"), that is the exact failure scenario it exists for — run it anyway. Same rule applies to STATE.md body updates: they happen in the same turn as the progress, even if the user says to defer them.
 
@@ -217,6 +269,9 @@ A topic may span multiple repositories, but each repository has at most one work
 - Editing the main checkout during topic work instead of the topic worktree.
   - **Anti-pattern:** implementing a spec in `/home/manooog/code/.../<repo>` because the main checkout already has node_modules/rush installed.
   - **Correct:** `guard` first — if it exits 1, create the topic worktree and work there. Main-checkout state (installed deps, running dev server) is not a reason to modify it.
+- Analyzing repository code on a stale main checkout without running `gco-latest` first.
+  - **Anti-pattern:** grepping `~/code/<repo>` for spec baseline while main is days behind `origin`.
+  - **Correct:** `gco-latest ~/code/<repo>` once per repo per topic, then read/search; if it fails (dirty tree), stop and report.
 - Creating a new topic when the current context already has one.
 - Editing an already-finalized spec instead of creating a new numbered spec for follow-up work.
 - Forgetting to update `plan-status` after a plan has been executed.
@@ -249,6 +304,9 @@ A topic may span multiple repositories, but each repository has at most one work
 | "STATE.md can wait until the end" | "Later" means never. Update body/plan-status in the same turn progress happens. |
 | "spec-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
 | "The file exists, just edit it directly" | A hand-created spec/plan file is the exact drift `verify` fails on. Recreate via the CLI. |
+| "Main is probably fine; I'll grep first" | Stale main produces wrong spec facts. `gco-latest` is one command; run it before the first repo analysis pass. |
+| "gco-latest failed on dirty tree; I'll analyze anyway" | Dirty tree means main is not a reproducible baseline. Stop and report; do not guess. |
+| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `plan-create`. A finalized spec alone is not a go signal. |
 
 ## Red Flags
 
@@ -260,6 +318,19 @@ A topic may span multiple repositories, but each repository has at most one work
 - Choosing a worktree path by hand instead of taking it from `worktree-path` output.
 - Writing code before `guard` returns `ok`.
 - Writing topic code anywhere other than the topic worktree.
+- Grepping or reading project checkout for spec/plan work before `gco-latest` on that repo's main worktree.
+
+## Analysis Baseline Rationalizations — STOP and Run gco-latest
+
+| Excuse | Reality |
+|--------|---------|
+| "Main is probably fine; I'll grep first" | Stale main produces wrong spec facts. `gco-latest` is one command; run it before the first repo analysis pass. |
+| "gco-latest failed on dirty tree; I'll analyze anyway" | Dirty tree means main is not a reproducible baseline. Stop and report; do not guess. |
+| "I'm already in the topic worktree for implementation" | `gco-latest` targets **main worktree for analysis baseline**, not the implementation worktree. Use branch sync workflows there. |
+| "gco-latest left main on detached HEAD — I should fix that before analyzing" | Detached at `origin/<default>` is the intended analysis state. Read/search; do not checkout a branch to edit. |
+| "User only wants spec/skill work, but I need one grep to help" | Artifact-only scope does not waive `gco-latest` when you read project checkout. Run it first, or ask the user to refresh main. |
+
+**All of these mean: stop, run `gco-latest` on main (or report the blocker), then analyze.**
 
 ## Code Location Rationalizations — STOP and Use the Worktree
 
