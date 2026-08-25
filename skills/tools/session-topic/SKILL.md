@@ -93,18 +93,30 @@ Under the topic directory:
 | Worktree | `worktree-<repo>/` |
 | State | `STATE.md` |
 
-### Spec-Plan pairing
+### Spec → Plan confirmation gate
 
-A plan is always tied to a spec and **must share the same number and name**:
+A plan is a commitment to execute a spec. **Never create a plan for a spec the user has not accepted.** After the spec content passes the Determinism Gate, **stop and confirm with the user before running `plan-create`** — do not auto-produce a plan in the same pass.
 
-- Spec `01-auth-refactor.spec.md` → Plan `01-auth-refactor.plan.md`
-- Spec `02-fix-login-redirect.spec.md` → Plan `02-fix-login-redirect.plan.md`
+- The spec is the decision document; the plan presumes the design is accepted. Auto-creating a plan commits to execution before the user has approved the design, and a plan built on an unconfirmed spec is throwaway if the spec is rejected or reworked.
+- The only exception: the user explicitly asked for spec and plan together in one pass (e.g. "写 spec 和 plan"). Then produce both, still pausing to confirm the spec before *implementing*.
+- When in doubt, finish the spec, present it, and wait. Confirming costs one round-trip; rebuilding a plan from a rejected spec costs more.
 
-Use `plan-create <topic> <spec-id>` with the **existing spec id**, not a new number. It initializes the plan status as `open`.
+### Core Flow
 
-Use `plan-status <topic> <spec-id> implemented` when the plan has been executed.
+### Creating the first spec
 
-Do not create a new spec just to hold an implementation plan; the plan belongs to the original spec.
+1. Derive a semantic hint from the user's request (e.g., `auth refactor`).
+2. Create the topic:
+   ```bash
+   topic=$(node session-topic.mjs init "auth refactor")
+   ```
+3. Create the first spec via the CLI — never with `write`:
+   ```bash
+   node session-topic.mjs spec-create "$topic" "auth-refactor"
+   ```
+4. If writing the spec requires reading or searching project repository code, run `gco-latest` on each affected repo's **main worktree** (see Repository analysis baseline).
+5. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
+6. **Stop and confirm the spec with the user.** Do not auto-create the plan in the same pass. Only after the user accepts the spec (or explicitly asked for spec+plan together) run `plan-create <topic> <spec-id>`. See the Spec → Plan confirmation gate.
 
 ### CLI commands
 
@@ -292,9 +304,22 @@ A topic may span multiple repositories, but each repository has at most one work
 - Creating a plan with a new number instead of reusing the spec's id.
   - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `spec-create` to produce `03-fix-login-redirect-plan`.
   - **Correct:** Run `plan-create <topic> 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
-- Leaving open questions in spec content.
-  - **Anti-pattern:** Writing 「待定」 items, discussion records, or A/B candidates without a choice into a spec, then moving on.
-  - **Correct:** Run the Spec Content Self-Check; every decision point must have a settled answer or a definite scope boundary. Unsettled items get resolved now or moved out of the spec.
+- Creating a plan for a spec the user has not accepted.
+  - **Anti-pattern:** Spec passes the Determinism Gate, and you run `plan-create` in the same pass without pausing for the user to confirm the spec.
+  - **Correct:** Finish and present the spec, wait for user acceptance (or an explicit "spec+plan together" ask), then run `plan-create`. See the Spec → Plan confirmation gate.
+
+### Rationalizations — no exceptions
+
+| Excuse | Reality |
+|---|---|
+| "The user said skip verify, they're in a hurry" | The user asking to skip the check is the failure scenario it exists for. `verify` is one command; run it regardless. |
+| "STATE.md can wait until the end" | "Later" means never. Update body/plan-status in the same turn progress happens. |
+| "spec-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
+| "The file exists, just edit it directly" | A hand-created spec/plan file is the exact drift `verify` fails on. Recreate via the CLI. |
+| "Main is probably fine; I'll grep first" | Stale main produces wrong spec facts. `gco-latest` is one command; run it before the first repo analysis pass. |
+| "gco-latest failed on dirty tree; I'll analyze anyway" | Dirty tree means main is not a reproducible baseline. Stop and report; do not guess. |
+| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `plan-create`. A finalized spec alone is not a go signal. |
+| "The spec passed the check, so I'll write the plan in the same pass" | The plan commits to executing the spec; the user must accept the spec first. Stop, present, and wait — unless they explicitly asked for spec+plan together. |
 
 ### Rationalizations — no exceptions
 
