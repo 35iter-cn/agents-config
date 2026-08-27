@@ -46,7 +46,7 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 - **`skills/companions/`** — Companion runners (`runx`, `tune`)
 - **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary
 - **`skills/workflow/`** — Spec shipping, PR handoff/UAT, grilling, handoff, ai-taught-me
-- **`skills/tools/`** — chrome-debug, frontend-design, update-claude
+- **`skills/tools/`** — shared-chrome, frontend-design, update-claude
 - **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
 
 Each skill directory contains `SKILL.md` with full documentation.

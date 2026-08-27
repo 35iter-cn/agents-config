@@ -34,7 +34,7 @@ Count Chinese characters, Latin letters, digits, and punctuation the same way th
 
 ## Prerequisites
 
-1. **`chrome-debug` skill** — debug Chrome on `http://127.0.0.1:9222`. WSL: start with `--dbus-stub` or Chrome crashes with `FATAL:dbus/bus.cc:1245`.
+1. **`shared-chrome` skill** — shared Chrome on `http://127.0.0.1:9222`. WSL: start with `--dbus-stub` or Chrome crashes with `FATAL:dbus/bus.cc:1245`.
 2. **`chrome-devtools` MCP** — `new_page`, `navigate_page`, `take_snapshot`, `fill`, `click`, `type_text`, `evaluate_script`.
 3. **Logged-in Xiaohongshu account** in that Chrome profile.
 4. **Images on disk** (only if the user provided them) — see [File upload](#file-upload).
@@ -213,7 +213,7 @@ If the script is unavailable, use Node + WebSocket against `ws://127.0.0.1:9222/
 
 ## Related skills
 
-- **`chrome-debug`** — start/verify shared Chrome.
+- **`shared-chrome`** — start/verify shared Chrome.
 - **`note-layout-rules.md`** — reusable layout recipe (paragraphs, icons, hashtags) abstracted from a real published note.
 
 ## Example

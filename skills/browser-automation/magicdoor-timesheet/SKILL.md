@@ -66,7 +66,7 @@ If step 4 fails, stop and fix the row mapping.
 
 ## Quick Start
 
-1. Ensure debug Chrome is running (`chrome-debug` skill).
+1. Ensure shared Chrome is running (`shared-chrome` skill).
 2. Resolve the work directory: explicit path → common locations → ask.
 3. Classify intent as **日报** and/or **周报**; derive dates from the rules above.
 4. Open or create the target monthly sheet.
@@ -76,8 +76,8 @@ If step 4 fails, stop and fix the row mapping.
 
 ## Prerequisites
 
-- Any browser automation driver attached to the debug Chrome (CDP `127.0.0.1:9222`) that provides the capability contract in §7 — e.g. chrome-devtools MCP, a Puppeteer/Playwright-backed browser tool, or any raw CDP client. The skill is driver-agnostic: map each step to whatever primitive your driver offers; never invent steps from another tool's API names.
-- `chrome-debug` skill
+- Any browser automation driver attached to the shared Chrome (CDP `127.0.0.1:9222`) that provides the capability contract in §7 — e.g. chrome-devtools MCP, a Puppeteer/Playwright-backed browser tool, or any raw CDP client. The skill is driver-agnostic: map each step to whatever primitive your driver offers; never invent steps from another tool's API names.
+- `shared-chrome` skill
 - `work-summary` skill with `--cwd` support
 - `gh` CLI authenticated (for PR links)
 
@@ -85,7 +85,7 @@ If step 4 fails, stop and fix the row mapping.
 
 ### 1. Ensure Chrome
 
-Check `http://127.0.0.1:9222/json/version`. If unreachable, invoke the `chrome-debug` skill.
+Check `http://127.0.0.1:9222/json/version`. If unreachable, invoke the `shared-chrome` skill.
 
 ### 2. Resolve work directory
 

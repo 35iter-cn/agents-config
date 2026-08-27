@@ -120,4 +120,4 @@ Each portal only works with a business account of the matching identity. System 
 |-------|------|
 | `magicdoor-backend-identity` | MagicDoor userIds |
 | `magicdoor-backend-api` | API debug tokens |
-| `chrome-debug` | Open the constructed URL |
+| `shared-chrome` | Open the constructed URL |
