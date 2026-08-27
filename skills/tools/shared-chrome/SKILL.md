@@ -1,26 +1,33 @@
 ---
 name: shared-chrome
-description: Use when operating a browser in the shared Chrome instance, using debug Chrome, or connecting to CDP on 127.0.0.1:9222
+description: Start/verify the shared Chrome instance exposing CDP on 127.0.0.1:9222, or operate a browser in it
 ---
 
 # Shared Chrome
 
-Use the shared Chrome instance for browser automation and UI verification. It exposes CDP at `ws://127.0.0.1:9222` and preserves shared login state across sessions.
+Shared Chrome instance (CDP endpoint `ws://127.0.0.1:9222`), preserves shared login state across sessions.
 
-## Prepare
+## Start
 
-1. Check whether CDP is available:
+If CDP is unavailable, launch the shared instance:
+
+```bash
+google-chrome-stable --remote-debugging-port=9222 \
+  --disable-gpu \
+  --remote-allow-origins=* \
+  --no-first-run --no-default-browser-check \
+  --window-size=2560,1440 \
+  --user-data-dir=$HOME/.config/shared-chrome
+```
+
+## Verify
 
 ```bash
 curl -fsS http://127.0.0.1:9222/json/version || echo "shared Chrome not running"
 ```
 
-2. If CDP is unavailable, report that the shared Chrome needs to be reconnected. Do not create a second browser instance.
-
-3. Reuse the existing tabs and login state. Continue with the requested browser operation.
-
 ## Shared Resource Rules
 
-- Do not close or restart shared Chrome.
-- Do not change its profile or launch a replacement instance.
-- If a browser tool cannot connect, report the connection failure and let the owner reconnect it.
+- This is a shared resource across sessions. Do not close or restart it unless connection is genuinely unrecoverable and the user has confirmed.
+- Reuse existing tabs and login state. Do not switch to a different profile.
+- If a browser tool cannot connect, notify the user rather than silently launching a second instance.
