@@ -17,5 +17,5 @@
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
-- Never use `isolatedContext` on any MCP chrome-devtools method — it creates a separate browser partition that doesn't share login state. Use the same default context for all tabs.
+- Prefer the built-in `grep`/`find`/`read` tools over their shell equivalents (`grep`, `rg`, `ls`, `cat`).
 - Read the target repo's instruction file before any cross-repo write. Before modifying, creating, deleting, or moving a file outside the current workspace, find the file's git repo (walk up to `.git`) and read its root `AGENTS.md` (or `CLAUDE.md` if absent), then follow its rules. Read-only operations don't trigger this. Running build/test commands counts as a write. Skip repos already read this session.
