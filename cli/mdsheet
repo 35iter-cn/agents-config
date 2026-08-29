@@ -5,13 +5,15 @@
 #   mdsheet [options] get '<A1range>'
 #   mdsheet [options] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
 #   mdsheet [options] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
-#   mdsheet [options] set-date '<singleCellRange>' '<ISO-date>'   re-anchor banner date via USER_ENTERED
 #   mdsheet [options] clear '<A1range>'
+#   mdsheet set-date '<singleCellRange>' '<ISO-date>'    re-anchor banner date via USER_ENTERED
 #   mdsheet tabs                                         list tab names of --sheet
 #   mdsheet layout                                       header row + header→column-letter map (eval-friendly)
+#   mdsheet structure                                    layout + write-kind groups (daily_cols / weekly_cols)
 #   mdsheet find-date '<date>'                           absolute row of DATE cell matching date (ISO or M/D)
 #   mdsheet find '<name-substring>'                      list spreadsheets by name (Drive API)
 #   mdsheet create '<title>'                             create a BARE spreadsheet, print its id
+#   mdsheet create <MM/YYYY>                             create Hao-YYYY/MM from Hao-TEMPLATE, re-anchor, clear data
 #   mdsheet copy '<sourceTitleOrId>' '<newTitle>'        full-file copy (preserves formatting; template reuse)
 #   mdsheet trash '<spreadsheetId>'                      move a spreadsheet to Drive trash
 #   mdsheet -h | --help
@@ -19,7 +21,7 @@
 # options:
 #   -s, --sheet <id>      spreadsheet id (required for cell/inspection modes)
 #   -t, --tab <name>      tab name (default "Daily schedule")
-#   --from <titleOrId>   source sheet for 'create MM/YYYY' (default: Hao-TEMPLATE)
+#   --from <titleOrId>    create-source override (default: Hao-TEMPLATE)
 #   --cache               cache access token in /tmp/mdsheet_token for ~50 min
 #   --dry-run             print the request instead of sending it
 #   -h, --help
@@ -34,11 +36,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -s|--sheet) SHEET_ID="$2"; shift 2 ;;
     -t|--tab)   TAB="$2"; shift 2 ;;
+    --from)     FROM="$2"; shift 2 ;;
     --cache)    CACHE=1; shift ;;
-    --from)     FROM="${2:-}"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --) shift; ARGS+=("$@"); break ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ARGS+=("$1"); shift ;;
   esac
 done
@@ -46,12 +48,12 @@ done
 MODE="${ARGS[0]:-}"; RANGE="${ARGS[1]:-}"
 
 if [ "${ARGS[0]:-}" = "-h" ] || [ "${ARGS[0]:-}" = "--help" ] || [ -z "$MODE" ]; then
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
 case "$MODE" in
-  get|set|setmulti|clear|layout|find-date|tabs|set-date)
+  get|set|setmulti|clear|set-date|tabs|layout|structure|find-date)
     : "${SHEET_ID:?--sheet <id> required for cell/inspection modes (resolve first: mdsheet find 'Hao-YYYY/MM')}"
     TAB_URLSEG="${TAB// /%20}"
     ;;
@@ -117,7 +119,8 @@ print(json.dumps({"values":[[sys.argv[1]]],"majorDimension":"ROWS"}))
 PYEOF
 )
     if [ "$DRY_RUN" = 1 ]; then echo "PUT $range_url?valueInputOption=USER_ENTERED"; echo "$PAYLOAD"; exit 0; fi
-    printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json"       --data-binary @- "$range_url?valueInputOption=USER_ENTERED" | head -c 200; echo
+    printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+      --data-binary @- "$range_url?valueInputOption=USER_ENTERED" | head -c 200; echo
     ;;
   tabs)
     if [ "$DRY_RUN" = 1 ]; then echo "GET spreadsheets/$SHEET_ID?fields=sheets.properties.title"; exit 0; fi
@@ -150,31 +153,42 @@ else:
     sys.stderr.write('header row with DATE not found in A1:Z15\n'); sys.exit(1)
 "
     ;;
+  structure)
+    if [ "$DRY_RUN" = 1 ]; then echo "layout + daily/weekly grouping"; exit 0; fi
+    echo "$("$0" -s "$SHEET_ID" -t "$TAB" layout)"
+    eval "$("$0" -s "$SHEET_ID" -t "$TAB" layout)"
+    DAILY=""
+    [ -n "${task_col:-}" ] && DAILY+="task_col "
+    [ -n "${pr_link_col:-}" ] && DAILY+="pr_link_col"
+    WEEKLY=""
+    [ -n "${notes_col:-}" ] && WEEKLY=notes_col
+    echo "daily_cols=\"${DAILY% }\""
+    echo "weekly_cols=\"${WEEKLY}\""
+    ;;
   find-date)
     D="${ARGS[1]:-}"
     [ -n "$D" ] || { echo "find-date requires a date (ISO 2026-08-22 or M/D like 8/22)" >&2; exit 1; }
     if [ "$DRY_RUN" = 1 ]; then echo "layout + DATE column serial scan for $D"; exit 0; fi
-    eval "$("$0" -s "$SHEET_ID" -t "$TAB" layout)"
-    DCOL="${date_col:?layout did not report date_col}"
+    eval "$("$0" -s "$SHEET_ID" -t "$TAB" structure)"
+    DCOL="${date_col:?structure did not report date_col}"
     START=$(( header_row + 1 )); END=$(( header_row + 220 ))
-    PY="
+    PY='
 import json,sys,datetime
 arg=sys.argv[1]; start=int(sys.argv[2])
 try:
-    y,m,d=map(int,arg.split('-'))
+    y,m,d=map(int,arg.split("-"))
 except ValueError:
-    y=datetime.date.today().year; m,d=map(int,arg.split('/'))
-serial=(datetime.date(y,m,d)-datetime.date(1899,12,30)).days
-serial_f=float(serial)
-texts={f'{m}/{d}', f'{m:02d}/{d}', f'{y:04d}-{m:02d}-{d:02d}'}
-rows=json.load(sys.stdin).get('values',[])
+    y=datetime.date.today().year; m,d=map(int,arg.split("/"))
+serial=int((datetime.date(y,m,d)-datetime.date(1899,12,30)).days)
+texts={f"{m}/{d}", f"{m:02d}/{d}", f"{y:04d}-{m:02d}-{d:02d}"}
+rows=json.load(sys.stdin).get("values",[])
 for i,r in enumerate(rows):
-    v=r[0] if r else ''
-    if (isinstance(v,(int,float)) and (v==serial or v==serial_f)) or str(v).strip() in texts:
-        print('row='+str(start+i)); break
+    v=r[0] if r else ""
+    if (isinstance(v,(int,float)) and int(v)==serial) or str(v).strip() in texts:
+        print("row="+str(start+i)); break
 else:
-    sys.stderr.write('date not found in DATE column\n'); sys.exit(1)
-"
+    sys.stderr.write("date not found in DATE column\n"); sys.exit(1)
+'
     curl -fsS -H "Authorization: Bearer $T" \
       "https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG}!${DCOL}${START}:${DCOL}${END}?valueRenderOption=UNFORMATTED_VALUE" \
       | python3 -c "$PY" "$D" "$START"
@@ -193,7 +207,7 @@ else:
     TITLE="${ARGS[1]:-}"
     [ -n "$TITLE" ] || { echo "create requires a title or MM/YYYY" >&2; exit 1; }
     if [[ "$TITLE" =~ ^[0-9]{1,2}/[0-9]{4}$ ]]; then
-      M="${TITLE%%/*}"; Y="${TITLE##*/}"; MM=$(printf "%02d" "$((10#$M))")
+      M="${TITLE%%/*}"; Y="${TITLE##*/}"; MM=$(printf '%02d' "$((10#$M))")
       SRC="$FROM"
       if [ -z "$SRC" ]; then
         SRC=$("$0" find 'Hao-TEMPLATE' | head -n1 | cut -d' ' -f1)
@@ -205,11 +219,11 @@ else:
       NAME="Hao-$Y/$M"
       if [ "$DRY_RUN" = 1 ]; then
         echo "POST drive/v3/files/$SRC/copy (name=$NAME)"
-        echo "PUT ${TAB// /%20}!C2 = $Y-$MM-01 (USER_ENTERED)"
-        echo "POST values/C5:G$(( 4 + 31 )):clear (data region)"
+        echo "PUT ${TAB_URLSEG}!C2 = $Y-$MM-01 (USER_ENTERED)"
+        echo "POST values/C5:G35:clear (data region)"
         exit 0
       fi
-      BODY=$(python3 - "$Y/$M" << 'PYEOF'
+      BODY=$(python3 - "$NAME" << 'PYEOF'
 import json,sys
 print(json.dumps({'name':sys.argv[1]}))
 PYEOF

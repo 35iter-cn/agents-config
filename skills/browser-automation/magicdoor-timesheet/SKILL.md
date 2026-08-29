@@ -9,15 +9,13 @@ description: Use when the user mentions 日报, 周报, 月报, timesheet, fill 
 
 Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Every write is a single-cell HTTP PUT — atomic, no browser, no paste risk.
 
-## Core Rules
-
-- **Never hardcode grid positions** — detect via CLI (see Run): `mdsheet -s "$SID" layout` maps headers→column letters (eval-friendly); `mdsheet -s "$SID" find-date '<date>'` → absolute row.
+- **Write targets are detected, never assumed** — `mdsheet -s "$SID" structure` resolves headers→colums and prints write-kind groups (eval-friendly).
 - Only two write kinds exist; never plan around "本周 / 上周":
 
-| Kind | Columns | Row | `work-summary` range |
+| Kind | Cells (from `structure`) | Row (from `find-date`) | `work-summary` range |
 |------|---------|-----|----------------------|
-| 日报 | C=TASK, F=PR LINK | that day | that day |
-| 周报 | G=NOTES | Saturday **S** | **S−7 … S−1** (never on S−7) |
+| 日报 | `$task_col` + `$pr_link_col` | the day's row | that day |
+| 周报 | `$notes_col` | Saturday **S** | **S−7 … S−1** (never on S−7) |
 
 - Data source: `work-summary` skill only (`--cwd ~/code/magicdoor`). If its PR section is empty, F stays empty; skip days with no commits/PRs entirely.
 - **周报 default S** = latest Friday ≤ today, + 1 day. Before writing say: S, content window, target `G{row}`; confirm the DATE on that row is S. User named a non-Saturday → use `that Friday + 1` only if clearly a week-end.
@@ -26,14 +24,11 @@ Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Eve
 ## Run — Sheets API (~2 min)
 
 ```bash
-SID=$(mdsheet find 'Hao-YYYY/MM' | cut -d' ' -f1)   # new month: mdsheet copy '<lastMonthTitle>' 'Hao-YYYY/MM'
-eval "$(mdsheet -s "$SID" layout)"                  # header_row, <header>_col letters (e.g. date_col=B task_col=C pr_link_col=F notes_col=G)
-# copy 后必须重锚月份(模板 C2 是旧月末,DATE 列 =C2+N 全表联动):
-mdsheet -s "$SID" set-date 'C2' '2026-09-01'        # 格式不变(显示『九月 1』),全表日期随之更新
-mdsheet -s "$SID" clear "${task_col}5:${notes_col}$(( header_row + 30 ))"   # 清上月 TASK/HOURS/KANBAN/PR/NOTES(B 列公式保留)
+SID=$(mdsheet find 'Hao-YYYY/MM' | cut -d' ' -f1)   # new month: mdsheet create '09/2026'  (from Hao-TEMPLATE)
+eval "$(mdsheet -s "$SID" -t "Daily schedule" structure)"   # header_row; task_col=C pr_link_col=F notes_col=G; daily_cols/weekly_cols
 ```
 
-1. Resolve rows: `D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-date '<S>')`. Column A often mirrors stray text — always drive writes from the layout map, never from the gutter.
+1. Resolve rows: `D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-date '<S>')`. Column A often mirrors stray text — always drive writes from the structure map, never from the gutter.
 2. Loop `work-summary` (each day in range + the weekly window) → JSON.
 3. Render per-cell files matching the sheet's style:
    - TASK: `## project` + `- emoji subject` bullets
