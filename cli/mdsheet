@@ -19,6 +19,7 @@
 # options:
 #   -s, --sheet <id>      spreadsheet id (required for cell/inspection modes)
 #   -t, --tab <name>      tab name (default "Daily schedule")
+#   --from <titleOrId>   source sheet for 'create MM/YYYY' (default: Hao-TEMPLATE)
 #   --cache               cache access token in /tmp/mdsheet_token for ~50 min
 #   --dry-run             print the request instead of sending it
 #   -h, --help
@@ -27,13 +28,14 @@
 # Refresh-token rotation is handled by gcloud; never paste tokens into shells.
 set -euo pipefail
 
-SHEET_ID=""; TAB="Daily schedule"; DRY_RUN=0; CACHE=0
+SHEET_ID=""; TAB="Daily schedule"; FROM=""; DRY_RUN=0; CACHE=0
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -s|--sheet) SHEET_ID="$2"; shift 2 ;;
     -t|--tab)   TAB="$2"; shift 2 ;;
     --cache)    CACHE=1; shift ;;
+    --from)     FROM="${2:-}"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --) shift; ARGS+=("$@"); break ;;
     -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -189,7 +191,40 @@ else:
     ;;
   create)
     TITLE="${ARGS[1]:-}"
-    [ -n "$TITLE" ] || { echo "create requires a title" >&2; exit 1; }
+    [ -n "$TITLE" ] || { echo "create requires a title or MM/YYYY" >&2; exit 1; }
+    if [[ "$TITLE" =~ ^[0-9]{1,2}/[0-9]{4}$ ]]; then
+      M="${TITLE%%/*}"; Y="${TITLE##*/}"; MM=$(printf "%02d" "$((10#$M))")
+      SRC="$FROM"
+      if [ -z "$SRC" ]; then
+        SRC=$("$0" find 'Hao-TEMPLATE' | head -n1 | cut -d' ' -f1)
+        [ -n "$SRC" ] || { echo "template sheet 'Hao-TEMPLATE' not found (create once: mdsheet copy '<anyMonth>' 'Hao-TEMPLATE')" >&2; exit 1; }
+      elif [[ "$SRC" != *-*-*-** ]]; then
+        SRC=$("$0" find "$SRC" | awk -v t="$SRC" '$2==t{print $1; exit}')
+        [ -n "$SRC" ] || { echo "template source not found: $FROM" >&2; exit 1; }
+      fi
+      NAME="Hao-$Y/$M"
+      if [ "$DRY_RUN" = 1 ]; then
+        echo "POST drive/v3/files/$SRC/copy (name=$NAME)"
+        echo "PUT ${TAB// /%20}!C2 = $Y-$MM-01 (USER_ENTERED)"
+        echo "POST values/C5:G$(( 4 + 31 )):clear (data region)"
+        exit 0
+      fi
+      BODY=$(python3 - "$Y/$M" << 'PYEOF'
+import json,sys
+print(json.dumps({'name':sys.argv[1]}))
+PYEOF
+)
+      NEWID=$(curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$BODY" \
+        "https://www.googleapis.com/drive/v3/files/$SRC/copy" \
+        | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+      [ -n "$NEWID" ] || { echo "copy failed" >&2; exit 1; }
+      "$0" -s "$NEWID" set-date 'C2' "$Y-$MM-01" > /dev/null
+      DAYS=$(python3 -c "import calendar;print(calendar.monthrange($Y,$((10#$M)))[1])")
+      LMAP=$("$0" -s "$NEWID" layout); eval "$LMAP"
+      "$0" -s "$NEWID" clear "${task_col}5:${notes_col}$(( 4 + DAYS ))" > /dev/null
+      echo "$NEWID"
+      exit 0
+    fi
     if [ "$DRY_RUN" = 1 ]; then echo "POST sheets/v4/spreadsheets (title=$TITLE)"; exit 0; fi
     BODY=$(python3 - "$TITLE" << 'PYEOF'
 import json,sys
