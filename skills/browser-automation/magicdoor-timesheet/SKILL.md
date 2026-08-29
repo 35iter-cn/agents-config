@@ -7,7 +7,7 @@ description: Use when the user mentions 日报, 周报, 月报, timesheet, fill 
 
 ## Overview
 
-Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet` (this repo's `cli/`, on PATH). Every write is a single-cell HTTP PUT — atomic, no browser, no paste risk.
+Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Every write is a single-cell HTTP PUT — atomic, no browser, no paste risk.
 
 ## Core Rules
 
