@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# mdsheet — MagicDoor timesheet Google Sheets helper (Sheets API v4 via gcloud ADC)
+#
+# usage:
+#   mdsheet [--dry-run] get '<A1range>'
+#   mdsheet [--dry-run] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
+#   mdsheet [--dry-run] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
+#   mdsheet [--dry-run] clear '<A1range>'
+#   mdsheet -h | --help
+#
+# env:
+#   SHEET_ID            (required)
+#   TAB                 (default "Daily schedule")
+#   MD_SHEET_CACHE=1    cache access token in /tmp/mdsheet_token for ~50 min
+#
+# auth: Application Default Credentials (gcloud auth application-default login).
+# Refresh-token rotation is handled by gcloud; never paste tokens into shells.
+set -euo pipefail
+
+DRY_RUN=0
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --dry-run) DRY_RUN=1 ;;
+    --) ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+MODE="${ARGS[0]:-}"; RANGE="${ARGS[1]:-}"
+
+if [ "${ARGS[0]:-}" = "-h" ] || [ "${ARGS[0]:-}" = "--help" ] || [ -z "$MODE" ]; then
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+SHEET_ID="${SHEET_ID:?SHEET_ID required (e.g. export SHEET_ID=1khV... before calling)}"
+TAB="${TAB:-Daily schedule}"
+
+token() {
+  if [ "${MD_SHEET_CACHE:-0}" = "1" ] && [ -s /tmp/mdsheet_token ] && \
+     [ $(( $(date +%s) - $(stat -c %Y /tmp/mdsheet_token) )) -lt 3000 ]; then
+    cat /tmp/mdsheet_token; return
+  fi
+  gcloud auth application-default print-access-token > /tmp/mdsheet_token
+  cat /tmp/mdsheet_token
+}
+
+URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB// /%20}!${RANGE}"
+T=$(token)
+
+case "$MODE" in
+  get)
+    if [ "$DRY_RUN" = 1 ]; then echo "GET $URL"; exit 0; fi
+    curl -fsS -H "Authorization: Bearer $T" "$URL" \
+      | python3 -c "import json,sys;[print('\t'.join(r)) for r in json.load(sys.stdin).get('values',[[]])]"
+    ;;
+  set)
+    FILE="${ARGS[2]:?'set' requires a file}"
+    [ -f "$FILE" ] || { echo "file not found: $FILE" >&2; exit 1; }
+    PAYLOAD=$(python3 - "$FILE" << 'PYEOF'
+import json,sys
+print(json.dumps({"values":[[open(sys.argv[1]).read()]],"majorDimension":"ROWS"}))
+PYEOF
+)
+    if [ "$DRY_RUN" = 1 ]; then echo "PUT $URL?valueInputOption=RAW"; echo "$PAYLOAD" | head -c 200; echo; exit 0; fi
+    printf '{"values":[[%s]],"majorDimension":"ROWS"}' "$PAYLOAD" > /dev/null # placeholder never used
+    printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+      --data-binary @- "$URL?valueInputOption=RAW" | head -c 200; echo
+    ;;
+  setmulti)
+    FILE="${ARGS[2]:?'setmulti' requires a file}"
+    [ -f "$FILE" ] || { echo "file not found: $FILE" >&2; exit 1; }
+    PAYLOAD=$(python3 - "$FILE" << 'PYEOF'
+import json,sys
+print(json.dumps({"values":[l.rstrip('\n') for l in open(sys.argv[1]).read().split('\n')],"majorDimension":"COLUMNS"}))
+PYEOF
+)
+    if [ "$DRY_RUN" = 1 ]; then echo "PUT $URL?valueInputOption=RAW"; echo "$PAYLOAD" | head -c 200; echo; exit 0; fi
+    printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+      --data-binary @- "$URL?valueInputOption=RAW" | head -c 200; echo
+    ;;
+  clear)
+    if [ "$DRY_RUN" = 1 ]; then echo "POST $URL:clear"; exit 0; fi
+    curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" "$URL:clear" | head -c 200; echo
+    ;;
+  *)
+    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file]  (see header of $(readlink -f "$0"))" >&2
+    exit 1
+    ;;
+esac

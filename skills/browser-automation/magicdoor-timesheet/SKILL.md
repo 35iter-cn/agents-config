@@ -7,6 +7,22 @@ description: Fill or sync the user's MagicDoor monthly Google Sheets timesheet. 
 
 Fill or sync the `Hao-YYYY/MM` Google Sheet.
 
+## Fast Path — Sheets API (PRIMARY, ~2 minutes; verified 2026-08-29)
+
+Own OAuth client is set up; gcloud's built-in clients CANNOT mint Sheets scopes (`restricted_client`) — see §Pitfalls. One-time setup already done (project `magicdoor-timesheet`, Desktop client, client_secret at `~/.config/magicdoor-sheets/client_secret.json`, Sheets API enabled, ADC credentials saved, helper `mdsheet` — canonical source in this repo's `cli/` dir, synced to `~/.local/bin` by `scripts/sync-cli.mjs`).
+
+Per run (row = 4 + calendar day; row 5 = day 1; header row 4):
+
+1. One bash call: run `work-summary` in a loop (weekly range once + each day once) → JSON in /tmp.
+2. Render per-cell texts to `/tmp/<month>/cells/*` (strip trailing newline). Match the sheet's established style: TASK = `## project` + `- emoji subject` bullets; PR = `# PRs` + `- [MERGED] #n: title — url`; weekly NOTES (G on Saturday S) = Chinese emoji bullets with `(#PR)`, no dashes, content = S−7 … S−1.
+3. Write each cell: `SHEET_ID=<id> mdsheet set 'C26' <file>` — multiline-safe (whole file lands in ONE cell). Skip days with no commits/PRs. Weekly: `mdsheet set 'G{S}' <file>` where S = most recent Saturday.
+4. Verify: `mdsheet get 'B33:G33'` — API returns RAW text WITH newlines, so verify by full-file sha256 (no normalization needed) or direct equality; empty-rule cells asserted empty. No browser, no keyboard, no focus gates.
+5. If API fails (401/403): token refresh via `gcloud auth application-default print-access-token`; if revoked → re-run ADC login with `--client-id-file=$HOME/.config/magicdoor-sheets/client_secret.json --scopes=cloud-platform,spreadsheets` and click through the unverified-app interstitial in shared Chrome.
+
+### If API unavailable (401/403/revoked)
+
+No fallback inside this skill: refresh via `gcloud auth application-default print-access-token`; if revoked/re-consent needed → re-run ADC login with `--client-id-file=$HOME/.config/magicdoor-sheets/client_secret.json --scopes=cloud-platform,spreadsheets` and click through the unverified-app interstitial in shared Chrome. If that still fails, STOP and report; do NOT revert to browser keyboard automation.
+
 There are **only two write kinds**. Do not use "本周 / 上周 / this week" as planning concepts.
 
 | Kind | Columns | Row | `work-summary` range |
@@ -66,24 +82,26 @@ If step 4 fails, stop and fix the row mapping.
 
 ## Quick Start
 
-1. Ensure shared Chrome is running (`shared-chrome` skill).
+1. Resolve `SHEET_ID` for `Hao-YYYY/MM` (recorded in this skill's run history / project memory; browser lookup via §Workflow.4 only when unknown).
 2. Resolve the work directory: explicit path → common locations → ask.
 3. Classify intent as **日报** and/or **周报**; derive dates from the rules above.
-4. Open or create the target monthly sheet.
-5. Detect the sheet layout.
-6. Invoke `work-summary` with `--cwd`, `--start-date`, `--end-date`.
-7. Write cells via the driver-agnostic procedure in Workflow §7.
+4. Run `work-summary` with `--cwd`, `--start-date`, `--end-date`.
+5. Render cells + write + verify via the **Fast Path (Sheets API)**.
+6. Open/create the sheet in the browser ONLY when `SHEET_ID` is unknown (new month).
 
 ## Prerequisites
 
-- Any browser automation driver attached to the shared Chrome (CDP `127.0.0.1:9222`) that provides the capability contract in §7 — e.g. chrome-devtools MCP, a Puppeteer/Playwright-backed browser tool, or any raw CDP client. The skill is driver-agnostic: map each step to whatever primitive your driver offers; never invent steps from another tool's API names.
-- `shared-chrome` skill
+- gcloud + ADC credentials from the project's own OAuth client, Sheets API enabled (see §Pitfalls)
+- `mdsheet` helper (repo `cli/mdsheet`; `scripts/sync-cli.mjs` → `~/.local/bin/mdsheet`)
 - `work-summary` skill with `--cwd` support
 - `gh` CLI authenticated (for PR links)
+- Browser driver on shared Chrome (CDP `127.0.0.1:9222`) ONLY for new-sheet creation or re-consent — routine runs are API-only
 
 ## Workflow
 
-### 1. Ensure Chrome
+> Sections 1 / 4 / 5 are browser steps — needed ONLY for a new-month sheet or an unknown spreadsheet id. Routine runs use intent (3) → work-summary (6) → Fast Path API writes.
+
+### 1. Browser (when needed)
 
 Check `http://127.0.0.1:9222/json/version`. If unreachable, invoke the `shared-chrome` skill.
 
@@ -117,15 +135,15 @@ Only these actions exist:
 
 If ambiguous, ask.
 
-### 4. Open or create sheet
+### 4. Open or create sheet (browser)
 
 Navigate to Google Sheets home. Look for `Hao-YYYY/MM`:
 
-- If found: open it.
+- If found: open it and **record its `SHEET_ID` in project memory** (routine runs never need the browser again).
 - If not found: open the most recent existing monthly sheet, make a copy, rename it to `Hao-YYYY/MM`, clear data rows, adjust the first DATE formula to the 1st.
 - If no previous sheet exists: ask the user to create the first one manually.
 
-### 5. Detect layout
+### 5. Detect layout (browser, only for a brand-new month)
 
 1. Navigate to `#range=B1`.
 2. Move down via URL hashes until the formula bar reads `DATE`.
@@ -154,59 +172,27 @@ Take its Markdown output and split it for the sheet:
 
 If `work-summary` returns no PRs, PR LINK stays empty. Skip a day's `C`/`F` when there are no commits and no PRs for that day (unless the user asked to write empty markers).
 
-### 7. Write cells — capability contract + verified edit loop
-
-Multiline Markdown must land inside ONE cell. Pasting multiline text onto a selected-but-not-editing cell scatters it row-by-row down the sheet (this has destroyed a month before). The safe path is the cell **editor**, reached by keyboard, with focus asserted before every destructive key.
-
-**Capability contract** — whatever browser driver is in use MUST provide equivalents of:
-
-| Primitive | Purpose | Driver examples |
-|---|---|---|
-| Bring page to OS front | paste shortcuts are silently ignored when the tab lacks focus | MCP `select_page(bringToFront)`; puppeteer `page.bringToFront()` |
-| Trusted keyboard events incl. modifier combos | Enter / Ctrl+A / Ctrl+V | MCP `press_key`; raw `keyboard.down('Control') → press('KeyA') → up` (wrapper `press("Control+V")` may reject combo strings) |
-| In-page JS evaluation | name-box jumps, focus assertions, content readback | MCP `evaluate_script`; puppeteer-backed `evaluate` |
-| Clipboard write | put the cell text on the system clipboard | `navigator.clipboard.writeText` via evaluation; needs page focus |
-| ≥2 verification channels | screenshots / per-cell formula-bar reads / CSV export | CSV export can be rate-limited — never rely on it alone |
-
-If any primitive is missing, stop and tell the user. Do not approximate with another tool's API names.
-
-**Per-cell algorithm (REQUIRED, in order):**
-
-1. Bring the page to the front.
-2. Jump to the target cell via the name box (`#t-name-box`: focus it, set its value to the ref, press Enter), then **read back the name-box value — must equal the target**, else abort.
-3. Press Enter to open the cell editor; **assert the focused element is the editor** (Sheets: `document.activeElement.id === 'waffle-rich-text-editor'`).
-4. Write the cell text to the clipboard.
-5. **Re-assert editor focus immediately before the keys**, then Ctrl+A and Ctrl+V inside the editor.
-6. **Strict-compare** the editor's text against the expected text. Mismatch → bring-to-front again and retry ONCE; still mismatched → STOP and report.
-7. Commit with Enter.
-
-**Pilot rule:** write ONE cell first; read back the cell directly below (must be empty/unrelated) before batching.
-
-**Red flags — STOP and re-verify if any of these happened:**
-
-- A destructive key (Ctrl+A / Backspace / Ctrl+V) was sent without a fresh step-3/5 focus assertion. A stale check once selected all cells on the grid and deleted an entire month.
-- Batching writes without per-batch bring-to-front — pastes become silent no-ops or hit the grid.
-- Trusting one verification channel only.
-- Coordinate-clicking Sheets' top chrome (formula bar, toolbars): overlapping elements intercept clicks at some x positions. Prefer keyboard-driven paths; the formula bar is acceptable only when focus is asserted at click time.
-
-### 8. After 日报 fills, refresh related 周报
+### 7. After 日报 fills, refresh related 周报
 
 When any day in `[S−7, S−1]` was filled or Saturday `S`'s `G` is blank, regenerate NOTES for that `S` (content `[S−7, S−1]` → `G` on `S`).
 
 For `sync-month`: every Saturday row in the month with blank `G` and at least one non-empty daily in its content window gets a 周报 fill.
 
-### 9. Post-write check (周报)
+### 8. Post-write check (周报)
 
 1. `G` on `S` has the NOTES.
 2. `G` on `S−7` is **not** where this NOTES landed (unless that cell is a different week's report).
 3. Cell directly below the written `G` is clean (no spill).
 4. Verify through two independent channels (screenshot + per-cell formula-bar reads, or CSV export) — export alone gets rate-limited.
 
+## Pitfalls (2026-08-29 verified)
+
+- **Sheets/Drive scopes are BLOCKED for gcloud's built-in clients** (Google policy, verified): ADC login via default client demotes the grant to openid+email (gcloud crashes with "Scope has changed"); minting via auth-login's own client returns `403 restricted_client: Unregistered scope(s)`; even tokens carrying `cloud-platform` in tokeninfo get 403 from Sheets/Drive APIs. Remedy (already done): own OAuth client — GCP project + Auth Platform branding + Desktop client; ADC login with `--client-id-file` + `--scopes=cloud-platform,spreadsheets`; then ENABLE the Sheets API on that project (`serviceusage.googleapis.com:enable` works with the ADC token). Client JSON saved at `~/.config/magicdoor-sheets/client_secret.json`.
+- The full write path is now API-only, so a wrong paste can no longer scatter into other rows. If a cell ends up with wrong content, just rewrite it via `mdsheet set`; for gross mistakes use **File → Version history → Restore** in the browser.
+- Keyboard-era Sheets automation pitfalls (atob byte-string corruption, name-box/focus gates, formula-bar newline loss, concurrent-session focus steal, pkill self-match, Chrome download prompt) are preserved in project memory and the AI-taught-me repo (`tools/google-sheets-api-own-oauth-client`) — consult them if browser scripting of Sheets is ever needed again.
+
 ## Recovery
 
-If content scattered below a target cell:
-
-1. Stop writing immediately.
-2. Prefer **File → Version history → Restore** to the last clean revision (fastest full fix).
-3. Or navigate cells below (`C12`, `C13`, …), read each via the formula bar, and clear unexpected task-like text using the §7 editor path (select-all + delete inside a focus-asserted editor; grid Delete on multiline is unreliable).
-4. Re-write only via the §7 per-cell algorithm.
+- A cell with wrong/extra content is a one-cell problem: re-render the file and `mdsheet set` that cell again (API writes are atomic per cell; scatter cannot happen).
+- Gross damage (human edit, bad bulk script): **File → Version history → Restore** in the browser to the last clean revision.
+- Auth/API failures: see Fast Path "If API unavailable".
