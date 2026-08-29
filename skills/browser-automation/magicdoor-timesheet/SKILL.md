@@ -28,6 +28,9 @@ Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Eve
 ```bash
 SID=$(mdsheet find 'Hao-YYYY/MM' | cut -d' ' -f1)   # new month: mdsheet copy '<lastMonthTitle>' 'Hao-YYYY/MM'
 eval "$(mdsheet -s "$SID" layout)"                  # header_row, <header>_col letters (e.g. date_col=B task_col=C pr_link_col=F notes_col=G)
+# copy 后必须重锚月份(模板 C2 是旧月末,DATE 列 =C2+N 全表联动):
+mdsheet -s "$SID" set-date 'C2' '2026-09-01'        # 格式不变(显示『九月 1』),全表日期随之更新
+mdsheet -s "$SID" clear "${task_col}5:${notes_col}$(( header_row + 30 ))"   # 清上月 TASK/HOURS/KANBAN/PR/NOTES(B 列公式保留)
 ```
 
 1. Resolve rows: `D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-date '<S>')`. Column A often mirrors stray text — always drive writes from the layout map, never from the gutter.
@@ -41,6 +44,7 @@ eval "$(mdsheet -s "$SID" layout)"                  # header_row, <header>_col l
    - `mdsheet -s "$SID" -t "$TAB" set "$pr_link_col$D_ROW" <file>`
    - weekly last: `mdsheet -s "$SID" -t "$TAB" set "$notes_col$G_ROW" <file>`
 5. Verify: `mdsheet -s "$SID" get` → full-file sha256 equality (API returns raw newlines; no normalization). Also refresh `G{S}` whenever any day in its window was just filled.
+6. After a new-month copy: `set-date` re-anchor + data-area clear are MANDATORY (see code block above) — otherwise the sheet still shows last month's dates and data. `set-date` is the only intentional USER_ENTERED write; everything else stays RAW so markdown can never be parsed as a formula.
 
 Flags / auth: `mdsheet --help`. If 401/403: refresh via `gcloud auth application-default print-access-token`; revoked → re-run ADC login with `~/.config/magicdoor-sheets/client_secret.json` + `--scopes=cloud-platform,spreadsheets` and click the unverified-app interstitial in shared Chrome. Never revert to browser keyboard typing.
 

@@ -5,6 +5,7 @@
 #   mdsheet [options] get '<A1range>'
 #   mdsheet [options] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
 #   mdsheet [options] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
+#   mdsheet [options] set-date '<singleCellRange>' '<ISO-date>'   re-anchor banner date via USER_ENTERED
 #   mdsheet [options] clear '<A1range>'
 #   mdsheet tabs                                         list tab names of --sheet
 #   mdsheet layout                                       header row + header→column-letter map (eval-friendly)
@@ -48,7 +49,7 @@ if [ "${ARGS[0]:-}" = "-h" ] || [ "${ARGS[0]:-}" = "--help" ] || [ -z "$MODE" ];
 fi
 
 case "$MODE" in
-  get|set|setmulti|clear|layout|find-date|tabs)
+  get|set|setmulti|clear|layout|find-date|tabs|set-date)
     : "${SHEET_ID:?--sheet <id> required for cell/inspection modes (resolve first: mdsheet find 'Hao-YYYY/MM')}"
     TAB_URLSEG="${TAB// /%20}"
     ;;
@@ -101,6 +102,20 @@ PYEOF
   clear)
     if [ "$DRY_RUN" = 1 ]; then echo "POST $URL:clear"; exit 0; fi
     curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" "$URL:clear" | head -c 200; echo
+    ;;
+  set-date)
+    # USER_ENTERED lets Google parse the ISO string as a real date; the cell's existing
+    # number format (MMMM d) keeps the banner rendering, and =C2+N chains follow suit.
+    CELL="${ARGS[1]:-}"; ISO="${ARGS[2]:-}"
+    [ -n "$CELL" ] && [ -n "$ISO" ] || { echo "set-date requires <singleCellRange> <ISO-date, e.g. 2026-09-01>" >&2; exit 1; }
+    range_url="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG}!${CELL}"
+    PAYLOAD=$(python3 - "$ISO" << 'PYEOF'
+import json,sys
+print(json.dumps({"values":[[sys.argv[1]]],"majorDimension":"ROWS"}))
+PYEOF
+)
+    if [ "$DRY_RUN" = 1 ]; then echo "PUT $range_url?valueInputOption=USER_ENTERED"; echo "$PAYLOAD"; exit 0; fi
+    printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json"       --data-binary @- "$range_url?valueInputOption=USER_ENTERED" | head -c 200; echo
     ;;
   tabs)
     if [ "$DRY_RUN" = 1 ]; then echo "GET spreadsheets/$SHEET_ID?fields=sheets.properties.title"; exit 0; fi
