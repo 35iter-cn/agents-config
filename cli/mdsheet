@@ -6,6 +6,9 @@
 #   mdsheet [--dry-run] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
 #   mdsheet [--dry-run] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
 #   mdsheet [--dry-run] clear '<A1range>'
+#   mdsheet find '<name-substring>'                        list spreadsheets by name (Drive API)
+#   mdsheet create '<title>'                               create a spreadsheet, print its id
+#   mdsheet trash '<spreadsheetId>'                        move a spreadsheet to Drive trash
 #   mdsheet -h | --help
 #
 # env:
@@ -33,8 +36,16 @@ if [ "${ARGS[0]:-}" = "-h" ] || [ "${ARGS[0]:-}" = "--help" ] || [ -z "$MODE" ];
   exit 0
 fi
 
-SHEET_ID="${SHEET_ID:?SHEET_ID required (e.g. export SHEET_ID=1khV... before calling)}"
+SHEET_ID="${SHEET_ID:-}"
 TAB="${TAB:-Daily schedule}"
+
+case "$MODE" in
+  get|set|setmulti|clear)
+    : "${SHEET_ID:?SHEET_ID required for cell operations (e.g. export SHEET_ID=1khV... or run: mdsheet find 'Hao-YYYY/MM')}"
+    TAB_URLSEG="${TAB// /%20}"
+    ;;
+  find|create|trash|*) ;;
+esac
 
 token() {
   if [ "${MD_SHEET_CACHE:-0}" = "1" ] && [ -s /tmp/mdsheet_token ] && \
@@ -45,7 +56,7 @@ token() {
   cat /tmp/mdsheet_token
 }
 
-URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB// /%20}!${RANGE}"
+URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG:-}!${RANGE}"
 T=$(token)
 
 case "$MODE" in
@@ -83,8 +94,38 @@ PYEOF
     if [ "$DRY_RUN" = 1 ]; then echo "POST $URL:clear"; exit 0; fi
     curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" "$URL:clear" | head -c 200; echo
     ;;
+  find)
+    NAME="${ARGS[1]:-}"
+    [ -n "$NAME" ] || { echo "find requires a name substring" >&2; exit 1; }
+    if [ "$DRY_RUN" = 1 ]; then echo "GET drive/v3/files?q=name contains '$NAME'"; exit 0; fi
+    curl -fsS -G -H "Authorization: Bearer $T" \
+      --data-urlencode "q=name contains '$NAME' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false" \
+      --data-urlencode "fields=files(id,name)" \
+      "https://www.googleapis.com/drive/v3/files" \
+      | python3 -c "import json,sys;[print(f['id'], f['name']) for f in json.load(sys.stdin).get('files',[])]"
+    ;;
+  create)
+    TITLE="${ARGS[1]:-}"
+    [ -n "$TITLE" ] || { echo "create requires a title" >&2; exit 1; }
+    if [ "$DRY_RUN" = 1 ]; then echo "POST sheets/v4/spreadsheets (title=$TITLE)"; exit 0; fi
+    BODY=$(python3 - "$TITLE" << 'PYEOF'
+import json,sys
+print(json.dumps({'properties':{'title':sys.argv[1]}}))
+PYEOF
+)
+    curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$BODY" \
+      "https://sheets.googleapis.com/v4/spreadsheets" \
+      | python3 -c "import json,sys;print(json.load(sys.stdin).get('spreadsheetId',''))"
+    ;;
+  trash)
+    SID="${ARGS[1]:-}"
+    [ -n "$SID" ] || { echo "trash requires a spreadsheetId (find first: mdsheet find <name>)" >&2; exit 1; }
+    if [ "$DRY_RUN" = 1 ]; then echo "PATCH drive/v3/files/$SID trashed=true"; exit 0; fi
+    curl -fsS -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+      -d '{"trashed": true}' "https://www.googleapis.com/drive/v3/files/$SID" | head -c 100; echo
+    ;;
   *)
-    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file]  (see header of $(readlink -f "$0"))" >&2
+    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file] | find <name> | create <title> | trash <id>" >&2
     exit 1
     ;;
 esac

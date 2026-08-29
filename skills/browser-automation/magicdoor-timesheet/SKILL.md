@@ -99,7 +99,7 @@ If step 4 fails, stop and fix the row mapping.
 
 ## Workflow
 
-> Sections 1 / 4 / 5 are browser steps — needed ONLY for a new-month sheet or an unknown spreadsheet id. Routine runs use intent (3) → work-summary (6) → Fast Path API writes.
+> Sections 1 / 4 are browser steps — needed ONLY for a first-time lookup of pre-existing sheets or re-consent. Routine runs use intent (3) → work-summary (6) → Fast Path API writes (find → set → verify), including sheet lookup/creation.
 
 ### 1. Browser (when needed)
 
@@ -135,13 +135,16 @@ Only these actions exist:
 
 If ambiguous, ask.
 
-### 4. Open or create sheet (browser)
+### 4. Open or create sheet (API first; browser as last resort)
 
-Navigate to Google Sheets home. Look for `Hao-YYYY/MM`:
+```bash
+mdsheet find 'Hao-YYYY/MM'      # resolve SHEET_ID by name — record it for the run
+mdsheet create 'Hao-YYYY/MM'    # only when no previous sheet exists
+```
 
-- If found: open it and **record its `SHEET_ID` in project memory** (routine runs never need the browser again).
-- If not found: open the most recent existing monthly sheet, make a copy, rename it to `Hao-YYYY/MM`, clear data rows, adjust the first DATE formula to the 1st.
-- If no previous sheet exists: ask the user to create the first one manually.
+- Routine runs: `SHEET_ID` from `find` (fast, no browser). Note: `find` only sees sheets created/authorized by this OAuth app — for pre-existing legacy sheets resolve the id once in the browser and record it in project memory.
+- New month WITHOUT a template to copy: `create` gives a bare spreadsheet — replicate banner/DATE-column layout via §Workflow.5 notes (or create a browser copy of last month and record the id). Copying last month via browser remains the path when formatting must be preserved.
+- If a sheet must be discarded: `mdsheet trash <id>` (Drive trash, recoverable).
 
 ### 5. Detect layout (browser, only for a brand-new month)
 
