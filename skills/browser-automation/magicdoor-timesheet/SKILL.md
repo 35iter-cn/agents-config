@@ -11,7 +11,7 @@ Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Eve
 
 ## Core Rules
 
-- **Row = 4 + calendar day** (row 5 = day 1; headers: DATE, TASK, HOURS, KANBAN LINK, PR LINK, NOTES)
+- **Never hardcode grid positions** — detect via CLI (see Run): `mdsheet -s "$SID" layout` maps headers→column letters (eval-friendly); `mdsheet -s "$SID" find-date '<date>'` → absolute row.
 - Only two write kinds exist; never plan around "本周 / 上周":
 
 | Kind | Columns | Row | `work-summary` range |
@@ -27,15 +27,20 @@ Fill the monthly `Hao-YYYY/MM` sheet via the **Sheets API** using `mdsheet`. Eve
 
 ```bash
 SID=$(mdsheet find 'Hao-YYYY/MM' | cut -d' ' -f1)   # new month: mdsheet copy '<lastMonthTitle>' 'Hao-YYYY/MM'
+eval "$(mdsheet -s "$SID" layout)"                  # header_row, <header>_col letters (e.g. date_col=B task_col=C pr_link_col=F notes_col=G)
 ```
 
-1. Loop `work-summary` (each day in range + the weekly window) → JSON.
-2. Render per-cell files matching the sheet's style:
+1. Resolve rows: `D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-date '<S>')`. Column A often mirrors stray text — always drive writes from the layout map, never from the gutter.
+2. Loop `work-summary` (each day in range + the weekly window) → JSON.
+3. Render per-cell files matching the sheet's style:
    - TASK: `## project` + `- emoji subject` bullets
    - PR: `# PRs` + `- [MERGED] #N: title — url`
    - weekly NOTES: Chinese emoji bullets with `(#PR)`, no dashes
-3. Write per cell: `mdsheet -s "$SID" set 'C26' <file>`; weekly last: `mdsheet -s "$SID" set 'G{S}' <file>`.
-4. Verify: `mdsheet get` → full-file sha256 equality (API returns raw newlines; no normalization). Also refresh `G{S}` whenever any day in its window was just filled.
+4. Write per cell (`set` ranges are pure A1, no tab prefix):
+   - `mdsheet -s "$SID" -t "$TAB" set "$task_col$D_ROW" <file>`
+   - `mdsheet -s "$SID" -t "$TAB" set "$pr_link_col$D_ROW" <file>`
+   - weekly last: `mdsheet -s "$SID" -t "$TAB" set "$notes_col$G_ROW" <file>`
+5. Verify: `mdsheet -s "$SID" get` → full-file sha256 equality (API returns raw newlines; no normalization). Also refresh `G{S}` whenever any day in its window was just filled.
 
 Flags / auth: `mdsheet --help`. If 401/403: refresh via `gcloud auth application-default print-access-token`; revoked → re-run ADC login with `~/.config/magicdoor-sheets/client_secret.json` + `--scopes=cloud-platform,spreadsheets` and click the unverified-app interstitial in shared Chrome. Never revert to browser keyboard typing.
 
