@@ -7,7 +7,8 @@
 #   mdsheet [--dry-run] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
 #   mdsheet [--dry-run] clear '<A1range>'
 #   mdsheet find '<name-substring>'                        list spreadsheets by name (Drive API)
-#   mdsheet create '<title>'                               create a spreadsheet, print its id
+#   mdsheet create '<title>'                               create a BARE spreadsheet, print its id
+#   mdsheet copy '<sourceTitleOrId>' '<newTitle>'          full-file copy (preserves formatting; template reuse)
 #   mdsheet trash '<spreadsheetId>'                        move a spreadsheet to Drive trash
 #   mdsheet -h | --help
 #
@@ -117,6 +118,23 @@ PYEOF
       "https://sheets.googleapis.com/v4/spreadsheets" \
       | python3 -c "import json,sys;print(json.load(sys.stdin).get('spreadsheetId',''))"
     ;;
+  copy)
+    SRC="${ARGS[1]:-}"; TITLE="${ARGS[2]:-}"
+    [ -n "$SRC" ] && [ -n "$TITLE" ] || { echo "copy requires <sourceTitleOrId> <newTitle>" >&2; exit 1; }
+    if [ "$DRY_RUN" = 1 ]; then echo "POST drive/v3/files/$SRC/copy (name=$TITLE)"; exit 0; fi
+    if [[ "$SRC" != *-*-*-** ]]; then
+      SRC=$("$0" find "$SRC" | awk -v t="$SRC" '$2==t{print $1; exit}')
+      [ -n "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
+    fi
+    BODY=$(python3 - "$TITLE" << 'PYEOF'
+import json,sys
+print(json.dumps({'name':sys.argv[1]}))
+PYEOF
+)
+    curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$BODY" \
+      "https://www.googleapis.com/drive/v3/files/$SRC/copy" \
+      | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))"
+    ;;
   trash)
     SID="${ARGS[1]:-}"
     [ -n "$SID" ] || { echo "trash requires a spreadsheetId (find first: mdsheet find <name>)" >&2; exit 1; }
@@ -125,7 +143,7 @@ PYEOF
       -d '{"trashed": true}' "https://www.googleapis.com/drive/v3/files/$SID" | head -c 100; echo
     ;;
   *)
-    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file] | find <name> | create <title> | trash <id>" >&2
+    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file] | find <name> | create <title> | copy <src> <title> | trash <id>" >&2
     exit 1
     ;;
 esac

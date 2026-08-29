@@ -139,11 +139,11 @@ If ambiguous, ask.
 
 ```bash
 mdsheet find 'Hao-YYYY/MM'      # resolve SHEET_ID by name — record it for the run
-mdsheet create 'Hao-YYYY/MM'    # only when no previous sheet exists
+mdsheet copy 'Hao-2026/08' 'Hao-YYYY/MM'   # ★ new month = full-file copy of last month (banner/DATE layout preserved); bare alternative: mdsheet create 'Hao-YYYY/MM'
 ```
 
 - Routine runs: `SHEET_ID` from `find` (fast, no browser). Note: `find` only sees sheets created/authorized by this OAuth app — for pre-existing legacy sheets resolve the id once in the browser and record it in project memory.
-- New month WITHOUT a template to copy: `create` gives a bare spreadsheet — replicate banner/DATE-column layout via §Workflow.5 notes (or create a browser copy of last month and record the id). Copying last month via browser remains the path when formatting must be preserved.
+- New month: prefer `copy` from last month (keeps banner + DATE formulas); clean its data cells afterwards. Bare `create` yields an unformatted sheet — only for starting over.
 - If a sheet must be discarded: `mdsheet trash <id>` (Drive trash, recoverable).
 
 ### 5. Detect layout (browser, only for a brand-new month)
