@@ -82,12 +82,12 @@ If step 4 fails, stop and fix the row mapping.
 
 ## Quick Start
 
-1. Resolve `SHEET_ID` for `Hao-YYYY/MM` (recorded in this skill's run history / project memory; browser lookup via §Workflow.4 only when unknown).
+1. Resolve `SHEET_ID` for `Hao-YYYY/MM`: `mdsheet find 'Hao-YYYY/MM'`; unknown new month → `mdsheet copy '<lastMonthTitleOrId>' 'Hao-YYYY/MM'`; pre-existing legacy sheets → browser lookup once (§Workflow.4).
 2. Resolve the work directory: explicit path → common locations → ask.
 3. Classify intent as **日报** and/or **周报**; derive dates from the rules above.
 4. Run `work-summary` with `--cwd`, `--start-date`, `--end-date`.
 5. Render cells + write + verify via the **Fast Path (Sheets API)**.
-6. Open/create the sheet in the browser ONLY when `SHEET_ID` is unknown (new month).
+6. Browser ONLY for: first-time lookup of pre-app sheets, or OAuth re-consent.
 
 ## Prerequisites
 
@@ -95,7 +95,7 @@ If step 4 fails, stop and fix the row mapping.
 - `mdsheet` helper (repo `cli/mdsheet`; `scripts/sync-cli.mjs` → `~/.local/bin/mdsheet`)
 - `work-summary` skill with `--cwd` support
 - `gh` CLI authenticated (for PR links)
-- Browser driver on shared Chrome (CDP `127.0.0.1:9222`) ONLY for new-sheet creation or re-consent — routine runs are API-only
+- Browser driver on shared Chrome (CDP `127.0.0.1:9222`) ONLY for legacy-sheet first lookup or re-consent — routine runs are API-only
 
 ## Workflow
 
