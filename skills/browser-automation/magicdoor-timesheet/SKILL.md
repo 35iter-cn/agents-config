@@ -15,8 +15,8 @@ Per run (row = 4 + calendar day; row 5 = day 1; header row 4):
 
 1. One bash call: run `work-summary` in a loop (weekly range once + each day once) → JSON in /tmp.
 2. Render per-cell texts to `/tmp/<month>/cells/*` (strip trailing newline). Match the sheet's established style: TASK = `## project` + `- emoji subject` bullets; PR = `# PRs` + `- [MERGED] #n: title — url`; weekly NOTES (G on Saturday S) = Chinese emoji bullets with `(#PR)`, no dashes, content = S−7 … S−1.
-3. Write each cell: `SHEET_ID=<id> mdsheet set 'C26' <file>` — multiline-safe (whole file lands in ONE cell). Skip days with no commits/PRs. Weekly: `mdsheet set 'G{S}' <file>` where S = most recent Saturday.
-4. Verify: `mdsheet get 'B33:G33'` — API returns RAW text WITH newlines, so verify by full-file sha256 (no normalization needed) or direct equality; empty-rule cells asserted empty. No browser, no keyboard, no focus gates.
+3. Write each cell: `SID=$(mdsheet find 'Hao-YYYY/MM' | cut -d' ' -f1)` then `mdsheet -s "$SID" set 'C26' <file>` — multiline-safe (whole file lands in ONE cell). Skip days with no commits/PRs. Weekly: `mdsheet -s "$SID" set 'G{S}' <file>` where S = most recent Saturday.
+4. Verify: `mdsheet -s "$SID" get 'B33:G33'` — API returns RAW text WITH newlines, so verify by full-file sha256 (no normalization needed) or direct equality; empty-rule cells asserted empty. No browser, no keyboard, no focus gates.
 5. If API fails (401/403): token refresh via `gcloud auth application-default print-access-token`; if revoked → re-run ADC login with `--client-id-file=$HOME/.config/magicdoor-sheets/client_secret.json --scopes=cloud-platform,spreadsheets` and click through the unverified-app interstitial in shared Chrome.
 
 ### If API unavailable (401/403/revoked)

@@ -2,54 +2,59 @@
 # mdsheet — MagicDoor timesheet Google Sheets helper (Sheets API v4 via gcloud ADC)
 #
 # usage:
-#   mdsheet [--dry-run] get '<A1range>'
-#   mdsheet [--dry-run] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
-#   mdsheet [--dry-run] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
-#   mdsheet [--dry-run] clear '<A1range>'
-#   mdsheet find '<name-substring>'                        list spreadsheets by name (Drive API)
-#   mdsheet create '<title>'                               create a BARE spreadsheet, print its id
-#   mdsheet copy '<sourceTitleOrId>' '<newTitle>'          full-file copy (preserves formatting; template reuse)
-#   mdsheet trash '<spreadsheetId>'                        move a spreadsheet to Drive trash
+#   mdsheet [options] get '<A1range>'
+#   mdsheet [options] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
+#   mdsheet [options] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
+#   mdsheet [options] clear '<A1range>'
+#   mdsheet find '<name-substring>'                      list spreadsheets by name (Drive API)
+#   mdsheet create '<title>'                             create a BARE spreadsheet, print its id
+#   mdsheet copy '<sourceTitleOrId>' '<newTitle>'        full-file copy (preserves formatting; template reuse)
+#   mdsheet trash '<spreadsheetId>'                      move a spreadsheet to Drive trash
 #   mdsheet -h | --help
 #
-# env:
-#   SHEET_ID            (required)
-#   TAB                 (default "Daily schedule")
-#   MD_SHEET_CACHE=1    cache access token in /tmp/mdsheet_token for ~50 min
+# options:
+#   -s, --sheet <id>      spreadsheet id (required for get/set/setmulti/clear)
+#   -t, --tab <name>      tab name (default "Daily schedule")
+#   --cache               cache access token in /tmp/mdsheet_token for ~50 min
+#   --dry-run             print the request instead of sending it
+#   -h, --help
 #
 # auth: Application Default Credentials (gcloud auth application-default login).
 # Refresh-token rotation is handled by gcloud; never paste tokens into shells.
 set -euo pipefail
 
-DRY_RUN=0
+SHEET_ID=""; TAB="Daily schedule"; DRY_RUN=0; CACHE=0
 ARGS=()
-for a in "$@"; do
-  case "$a" in
-    --dry-run) DRY_RUN=1 ;;
-    --) ;;
-    *) ARGS+=("$a") ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s|--sheet) SHEET_ID="$2"; shift 2 ;;
+    -t|--tab)   TAB="$2"; shift 2 ;;
+    --cache)    CACHE=1; shift ;;
+    --dry-run)  DRY_RUN=1; shift ;;
+    --) shift; ARGS+=("$@"); break ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) ARGS+=("$1"); shift ;;
   esac
 done
+
 MODE="${ARGS[0]:-}"; RANGE="${ARGS[1]:-}"
 
 if [ "${ARGS[0]:-}" = "-h" ] || [ "${ARGS[0]:-}" = "--help" ] || [ -z "$MODE" ]; then
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
-SHEET_ID="${SHEET_ID:-}"
-TAB="${TAB:-Daily schedule}"
-
 case "$MODE" in
   get|set|setmulti|clear)
-    : "${SHEET_ID:?SHEET_ID required for cell operations (e.g. export SHEET_ID=1khV... or run: mdsheet find 'Hao-YYYY/MM')}"
+    [ -n "$SHEET_ID" ] || { echo "missing --sheet <id> (resolve first: mdsheet find 'Hao-YYYY/MM')" >&2; exit 1; }
     TAB_URLSEG="${TAB// /%20}"
     ;;
-  find|create|trash|*) ;;
+  find|create|copy|trash) ;;
+  *) echo "unknown mode: $MODE" >&2; exit 1 ;;
 esac
 
 token() {
-  if [ "${MD_SHEET_CACHE:-0}" = "1" ] && [ -s /tmp/mdsheet_token ] && \
+  if [ "$CACHE" = 1 ] && [ -s /tmp/mdsheet_token ] && \
      [ $(( $(date +%s) - $(stat -c %Y /tmp/mdsheet_token) )) -lt 3000 ]; then
     cat /tmp/mdsheet_token; return
   fi
@@ -57,8 +62,8 @@ token() {
   cat /tmp/mdsheet_token
 }
 
-URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG:-}!${RANGE}"
 T=$(token)
+URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG:-}!${RANGE}"
 
 case "$MODE" in
   get)
@@ -75,7 +80,6 @@ print(json.dumps({"values":[[open(sys.argv[1]).read()]],"majorDimension":"ROWS"}
 PYEOF
 )
     if [ "$DRY_RUN" = 1 ]; then echo "PUT $URL?valueInputOption=RAW"; echo "$PAYLOAD" | head -c 200; echo; exit 0; fi
-    printf '{"values":[[%s]],"majorDimension":"ROWS"}' "$PAYLOAD" > /dev/null # placeholder never used
     printf '%s' "$PAYLOAD" | curl -fsS -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
       --data-binary @- "$URL?valueInputOption=RAW" | head -c 200; echo
     ;;
@@ -141,9 +145,5 @@ PYEOF
     if [ "$DRY_RUN" = 1 ]; then echo "PATCH drive/v3/files/$SID trashed=true"; exit 0; fi
     curl -fsS -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
       -d '{"trashed": true}' "https://www.googleapis.com/drive/v3/files/$SID" | head -c 100; echo
-    ;;
-  *)
-    echo "usage: mdsheet [--dry-run] get|set|setmulti|clear <range> [file] | find <name> | create <title> | copy <src> <title> | trash <id>" >&2
-    exit 1
     ;;
 esac
