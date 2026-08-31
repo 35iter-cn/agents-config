@@ -16,7 +16,10 @@ Fill the monthly `Hao-YYYY/MM` sheet via the Sheets API with `mdsheet` (full fla
 - 日报 = that day's row, cells `$task_col` (TASK) + `$pr_link_col` (PR LINK). Skip days with no commits/PRs.
 - 周报 = Saturday S's row, cell `$notes_col`; content window **S−7…S−1 — never written on S−7**. Default S = latest Friday ≤ today, + 1. Before writing, state S / window / target `G{row}`.
 - New month: `mdsheet create '09/2026'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
-- Never guess HOURS (D) or KANBAN LINK (E). 补充缺失: audit with `get`, write only blanks.
+- Never guess HOURS (D) or KANBAN LINK (E). HOURS acquisition recipe: pull from project memory; if memory lookup misses, ask the user explicitly — never substitute for it. 补充缺失: audit with `get`, write only blanks.
+- Batch reads: `get '<range>'` outputs raw API JSON (values rows). Parse rules: row N of range = `values[N]` (empty cell = `[]`, leading/trailing fully-empty rows trimmed); multi-line cells keep `\n` literally.
+- Monthly audit: `timesheet-audit --month MM/YYYY` cross-checks TASK bullets vs git, PR rows vs gh — one-shot report; WARN lines are merge-day restatements / issue refs, ERROR findings must be fixed before handoff.
+- Verification (per user directive): no per-cell re-read loops. Batch write (setmulti for single-line columns, per-cell set for multi-line) → ONE batch `get` of the same range → local diff against the expected array. Per-cell `get` is for spot checks/diagnosis only.
 
 ## Run
 
@@ -40,4 +43,5 @@ D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-da
 
 - Sheets/Drive scopes are blocked for gcloud's built-in clients — only this project's own OAuth client works, and both APIs must be `:enable`d. 401/403 → re-run the ADC login with `~/.config/magicdoor-sheets/client_secret.json`; never revert to browser typing.
 - Wrong cell content = rewrite that one cell (atomic writes can't scatter). Gross damage → File → Version history → Restore.
+- `setmulti '<A1range>' file` writes file lines vertically into one column (fixed 2026-08-31; payload was missing a nesting level and always 400). Safe for single-line cells only (e.g. HOURS); multi-line content must go through per-cell `set`.
 - Keyboard-era canvas pitfalls (atob corruption, name-box focus gates, session focus steal): `references/legacy-browser-automation.md`.
