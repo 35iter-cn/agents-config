@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+// timesheet-audit — cross-check the monthly MagicDoor timesheet against git/github sources.
+//
+// usage:
+//   timesheet-audit --month YYYY/MM [--cwd <magicdoor root>] [--sheet-id <id>]
+//
+// sources: work-summary.mjs (commits via `git log --all`, PRs via gh),
+// sheet via `mdsheet get` (raw API JSON, one request per column).
+//
+// checks:
+//   1. TASK bullets trace to same-project commits within ±1 day (dice bigrams ≥ 0.5)  → WARN-free = OK
+//   2. PR LINK rows: known month PRs OK; unknown ones probed via `gh pr view` (BAD if absent)
+//   3. reverse: month PRs present in gh but never listed in the sheet → MISSED
+//   4. Saturday NOTES rows: (#N) references not in the PR set → advisory (may be issue refs)
+//
+// exit code 1 on any ERROR; MISSED/WARN printed but advisory. HOURS (D) is filled and verified at write time from its own source (see project memory) — not re-audited here.
+
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+let MONTH = '', CWD = '', SHEET_ID = '';
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i];
+  if (a === '--month') MONTH = process.argv[++i];
+  else if (a === '--cwd') CWD = process.argv[++i];
+  else if (a === '--sheet-id') SHEET_ID = process.argv[++i];
+  else if (a === '-h' || a === '--help') { console.log('usage: timesheet-audit --month YYYY/MM [--cwd <magicdoor root>] [--sheet-id <id>]'); process.exit(0); }
+  else { console.error(`unknown argument: ${a}`); process.exit(1); }
+}
+let MM, YYYY;
+const mA = MONTH.match(/^(\d{4})\/(\d{2})$/);
+const mB = MONTH.match(/^(\d{2})\/(\d{4})$/);
+if (mA) { YYYY = mA[1]; MM = mA[2]; }
+else if (mB) { MM = mB[1]; YYYY = mB[2]; }
+else { console.error('--month must be YYYY/MM (e.g. 2026/08) or MM/YYYY (e.g. 08/2026)'); process.exit(1); }
+if (!CWD) CWD = path.join(os.homedir(), 'code', 'magicdoor');
+const TAB = 'Daily schedule';
+const daysInMonth = new Date(+YYYY, +MM, 0).getDate();
+const dateOf = (i) => `${YYYY}-${String(+MM).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
+const today = new Date().toISOString().slice(0, 10);
+
+const sh = (cmd, args) => {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')}\nexited ${r.status}: ${(r.stderr || '').slice(0, 400)}\nstdout: ${(r.stdout || '').slice(0, 400)}`);
+  return r.stdout;
+};
+
+// ---- resolve sheet ----
+if (!SHEET_ID) SHEET_ID = sh('mdsheet', ['find', `Hao-${YYYY}/${MM}`]).trim().split(/\s+/)[0];
+if (!/^[A-Za-z0-9_-]{20,}$/.test(SHEET_ID)) { console.error(`cannot resolve sheet Hao-${YYYY}/${MM}`); process.exit(1); }
+const layout = sh('mdsheet', ['-s', SHEET_ID, '-t', TAB, 'structure']);
+const colOf = {};
+for (const m of layout.matchAll(/(\w+)_col=([A-Z])/g)) colOf[m[1]] = m[2];
+const headerRow = +layout.match(/header_row=(\d+)/)[1];
+const startRow = headerRow + 1;
+const { task: task_col, hours: hours_col, pr_link: pr_link_col, notes: notes_col } = colOf;
+
+// one GET per column; values[N] maps to row startRow+N; API trims leading/trailing
+// empty rows (missing tail simply maps back to '')
+const readCol = (letter, n) => {
+  const out = sh('mdsheet', ['-s', SHEET_ID, '-t', TAB, '--cache', 'get', `${letter}${startRow}:${letter}${startRow + n - 1}`]);
+  const values = JSON.parse(out).values || [];
+  return new Array(n).fill('').map((_, i) => (i < values.length && values[i] && values[i][0]) || '');
+};
+const TASK = readCol(task_col, daysInMonth);
+const PRLINK = readCol(pr_link_col, daysInMonth);
+const NOTES = readCol(notes_col, daysInMonth);
+
+// ---- facts: commits + PRs (work-summary.mjs with the fixed squash filter) ----
+const wsPath = path.join(os.homedir(), '.pi', 'agent', 'skills', 'work-summary', 'work-summary.mjs');
+const ws = JSON.parse(sh('node', [wsPath, '--start-date', dateOf(0), '--end-date', dateOf(daysInMonth - 1), '--cwd', CWD]));
+const commitsByDay = new Map();
+for (const p of ws.projects) for (const c of p.commits) {
+  if (!commitsByDay.has(c.date)) commitsByDay.set(c.date, []);
+  commitsByDay.get(c.date).push({ project: p.name, subject: c.subject });
+}
+const wsPrs = {};
+for (const p of ws.projects) for (const pr of p.prs) {
+  wsPrs[pr.number] = { repo: p.name, state: pr.state, title: pr.title, createdAt: (pr.createdAt || '').slice(0, 10) };
+}
+
+// ---- parsing helpers ----
+const norm = (s) => s.toLowerCase().replace(/\(#[\d, ]+\)/g, ' ').replace(/[^a-z0-9/{}._ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const dice = (a, b) => {
+  const gr = (s) => { const set = new Set(); for (let i = 0; i + 1 < s.length; i++) set.add(s.slice(i, i + 2)); return set; };
+  if (!a || !b) return 0;
+  const ga = gr(a), gb = gr(b); let inter = 0;
+  for (const x of ga) if (gb.has(x)) inter++;
+  return ga.size && gb.size ? 2 * inter / (ga.size + gb.size) : 0;
+};
+const bulletsIn = (text) => {
+  const out = []; let proj = null;
+  for (const line of text.split('\n')) {
+    const l = line.trim();
+    if (l.startsWith('## ')) proj = l.slice(3).trim();
+    else if (l.startsWith('- ') && proj) out.push([proj, l.slice(2).trim()]);
+  }
+  return out;
+};
+const prRowsIn = (text) => {
+  const rows = []; let proj = null;
+  for (const line of text.split('\n')) {
+    const l = line.trim();
+    if (l.startsWith('## ')) proj = l.slice(3).trim();
+    else if (proj) {
+      const m = l.match(/^(?:-\s*)?\[(MERGED|OPEN|CLOSED)\]\s*#(\d+):\s*(.*?)\s*(?:—\s*https?:\/\/\S+)?$/);
+      if (m) rows.push({ project: proj, state: m[1], number: +m[2] });
+    }
+  }
+  return rows;
+};
+
+// ---- run checks ----
+const errors = [], warns = [], missed = [];
+let taskBullets = 0, taskUnmatched = 0, prRows = 0, prProbed = 0, prBad = 0;
+
+for (let i = 0; i < daysInMonth; i++) {
+  const date = dateOf(i);
+
+  // 1. TASK bullets vs same-project commits (±1 day)
+  const pairs = bulletsIn(TASK[i]); taskBullets += pairs.length;
+  const unmatched = [];
+  for (const [proj, b] of pairs) {
+    const nb = norm(b); let best = 0;
+    for (let off = -1; off <= 1; off++) {
+      const ds = new Date(Date.UTC(+YYYY, +MM - 1, i + 1 + off)).toISOString().slice(0, 10);
+      for (const c of (commitsByDay.get(ds) || [])) {
+        if (c.project !== proj) continue;
+        best = Math.max(best, dice(nb, norm(c.subject)));
+      }
+    }
+    if (best < 0.5) unmatched.push(`[${proj}] ${b.slice(0, 90)}`);
+  }
+  taskUnmatched += unmatched.length;
+  if (unmatched.length) warns.push(`TASK ${date}: no same-source commit — verify manually (may be merge-day restatement or narrative summary): ${unmatched.join(' / ')}`);
+
+  // 2. PR rows
+  for (const row of prRowsIn(PRLINK[i])) {
+    prRows++;
+    if (wsPrs[row.number]) continue;
+    const pr = gh_probe(row.project, row.number);
+    if (pr) prProbed++;
+    else { prBad++; errors.push(`PR ${date}: [${row.project} #${row.number}] (${row.state}) unknown to month set and gh probe failed`); }
+  }
+}
+function gh_probe(project, number) {
+  const r = spawnSync('gh', ['pr', 'view', String(number), '--repo', `MagicDoorInc/${project}`, '--json', 'number,state'], { encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  try { const j = JSON.parse(r.stdout); return j.number === number ? j : null; } catch { return null; }
+}
+
+// 3. reverse: month PRs never listed in the sheet
+const sheetPrs = new Set();
+for (let i = 0; i < daysInMonth; i++) for (const r of prRowsIn(PRLINK[i])) sheetPrs.add(r.number);
+for (const n of Object.keys(wsPrs).map(Number).sort((a, b) => a - b)) {
+  if (!sheetPrs.has(n)) missed.push(`#${n} [${wsPrs[n].repo} ${wsPrs[n].state}] created ${wsPrs[n].createdAt}: ${wsPrs[n].title.slice(0, 70)}`);
+}
+
+// 4. Saturday NOTES (#N) references
+for (let i = 0; i < daysInMonth; i++) {
+  if (new Date(Date.UTC(+YYYY, +MM - 1, i + 1)).getUTCDay() !== 6 || !NOTES[i]) continue;
+  const refs = [...new Set((NOTES[i].match(/\(#(\d+)\)/g) || []).map(m => +m.replace(/\D/g, '')))];
+  const unknown = refs.filter(n => !wsPrs[n]);
+  if (unknown.length) warns.push(`NOTES row ${i + startRow}: (#N) refs not in month PR set: ${unknown.join(', ')} — may be issue refs, verify manually`);
+}
+
+// ---- output ----
+console.log(`# timesheet-audit Hao-${YYYY}/${MM} (sheet ${SHEET_ID})`);
+console.log(`TASK bullets: ${taskBullets} (unmatched: ${taskUnmatched}) | PR rows: ${prRows} (probed ok: ${prProbed}, bad: ${prBad}) | MISSED candidates: ${missed.length}`);
+if (missed.length) {
+  console.log(`\n[MISSED] month PRs never listed in the sheet:`);
+  for (const m of missed) console.log(`  - ${m}`);
+}
+for (const w of warns) console.log(`\n[WARN] ${w}`);
+if (errors.length) {
+  console.log(`\n[ERRORS] ${errors.length}`);
+  for (const e of errors) console.log(`  - ${e}`);
+} else console.log(`\n[OK] no error-level findings`);
+process.exit(errors.length ? 1 : 0);
