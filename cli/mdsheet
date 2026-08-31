@@ -2,9 +2,9 @@
 # mdsheet — MagicDoor timesheet Google Sheets helper (Sheets API v4 via gcloud ADC)
 #
 # usage:
-#   mdsheet [options] get '<A1range>'
-#   mdsheet [options] set '<singleCellRange>' <file>     whole file into ONE cell (multiline-safe)
-#   mdsheet [options] setmulti '<A1range>' <file>        file lines as one cell per line (COLUMNS)
+#   mdsheet [options] get '<A1range>'                    raw API JSON to stdout (values rows, newline-safe)
+#   mdsheet [options] set '<singleCellRange>' <file>     on-disk file only; whole file into ONE cell (RAW, multiline-safe)
+#   mdsheet [options] setmulti '<A1range>' <file>        one file line per cell, vertical COLUMNS; trailing blank line dropped; single-line cells only
 #   mdsheet [options] clear '<A1range>'
 #   mdsheet set-date '<singleCellRange>' '<ISO-date>'    re-anchor banner date via USER_ENTERED
 #   mdsheet tabs                                         list tab names of --sheet
@@ -41,6 +41,7 @@ while [ $# -gt 0 ]; do
     --dry-run)  DRY_RUN=1; shift ;;
     --) shift; ARGS+=("$@"); break ;;
     -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; exit 1 ;;
     *) ARGS+=("$1"); shift ;;
   esac
 done
@@ -71,17 +72,21 @@ token() {
 }
 
 T=$(token)
-URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG:-}!${RANGE}"
+RANGE_URLSEG="${RANGE// /%20}"
+if [[ "$RANGE" == *'!'* ]]; then
+  URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${RANGE_URLSEG}"
+else
+  URL="https://sheets.googleapis.com/v4/spreadsheets/$SHEET_ID/values/${TAB_URLSEG:-}!${RANGE_URLSEG}"
+fi
 
 case "$MODE" in
   get)
     if [ "$DRY_RUN" = 1 ]; then echo "GET $URL"; exit 0; fi
-    curl -fsS -H "Authorization: Bearer $T" "$URL" \
-      | python3 -c "import json,sys;[print('\t'.join(r)) for r in json.load(sys.stdin).get('values',[[]])]"
+    curl -fsS -H "Authorization: Bearer $T" "$URL"
     ;;
   set)
     FILE="${ARGS[2]:?'set' requires a file}"
-    [ -f "$FILE" ] || { echo "file not found: $FILE" >&2; exit 1; }
+    [ -f "$FILE" ] || { echo "set requires an on-disk file (pipes//dev/stdin rejected): '$FILE'" >&2; exit 1; }
     PAYLOAD=$(python3 - "$FILE" << 'PYEOF'
 import json,sys
 print(json.dumps({"values":[[open(sys.argv[1]).read()]],"majorDimension":"ROWS"}))
@@ -93,10 +98,13 @@ PYEOF
     ;;
   setmulti)
     FILE="${ARGS[2]:?'setmulti' requires a file}"
-    [ -f "$FILE" ] || { echo "file not found: $FILE" >&2; exit 1; }
+    [ -f "$FILE" ] || { echo "setmulti requires an on-disk file (pipes//dev/stdin rejected): '$FILE'" >&2; exit 1; }
     PAYLOAD=$(python3 - "$FILE" << 'PYEOF'
 import json,sys
-print(json.dumps({"values":[l.rstrip('\n') for l in open(sys.argv[1]).read().split('\n')],"majorDimension":"COLUMNS"}))
+lines=[l.rstrip('\n') for l in open(sys.argv[1]).read().split('\n')]
+if len(lines) > 1 and lines[-1] == '':
+    lines.pop()
+print(json.dumps({"values":[lines],"majorDimension":"COLUMNS"}))
 PYEOF
 )
     if [ "$DRY_RUN" = 1 ]; then echo "PUT $URL?valueInputOption=RAW"; echo "$PAYLOAD" | head -c 200; echo; exit 0; fi
