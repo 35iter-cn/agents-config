@@ -224,39 +224,28 @@ export function filterSquashMerge(commits) {
   const seenKeys = new Set();
   const result = [];
 
-  // First pass: build a set of PR numbers that appear in any commit subject
-  const prNumbersInRange = new Set();
+  // A squash-merge duplicate only exists when the SAME canonical subject
+  // (trailing '(#N)' stripped, case-insensitive) appears both with and
+  // without its PR marker within the window. Marked copies with no bare
+  // twin are ordinary commits referencing an issue/PR — keep them all.
+  const canon = new Map(); // canonical subject -> { marked: n, bare: n }
   for (const c of commits) {
-    const match = c.subject.match(/#(\d+)/);
-    if (match) prNumbersInRange.add(match[1]);
+    const key = c.subject.replace(/\s*\(#\d+\)\s*$/, '').toLowerCase();
+    const marked = /\(\s*#\d+\s*\)\s*$/.test(c.subject);
+    const slot = canon.get(key) || { marked: 0, bare: 0 };
+    if (marked) slot.marked += 1; else slot.bare += 1;
+    canon.set(key, slot);
   }
 
-  // Second pass: determine which commits are squash merges
-  const squashPrs = new Set();
-  for (const prNum of prNumbersInRange) {
-    let hasNonSquash = false;
-    for (const c of commits) {
-      const match = c.subject.match(/#(\d+)/);
-      if (!match || match[1] !== prNum) {
-        // This commit does NOT reference this PR number → non-squash exists
-        hasNonSquash = true;
-        break;
-      }
-    }
-    if (hasNonSquash) {
-      squashPrs.add(prNum);
-    }
-  }
-
-  // Third pass: filter out squash merges and deduplicate
+  // Drop the marked copy only when its bare twin exists; then deduplicate
+  // by date+subject.
   for (const c of commits) {
-    const match = c.subject.match(/#(\d+)/);
-    if (match && squashPrs.has(match[1])) {
-      continue; // exclude squash-merge commit
-    }
-    const key = `${c.date}\t${c.subject}`;
-    if (seenKeys.has(key)) continue;
-    seenKeys.add(key);
+    const key = c.subject.replace(/\s*\(#\d+\)\s*$/, '').toLowerCase();
+    const marked = /\(\s*#\d+\s*\)\s*$/.test(c.subject);
+    if (marked && (canon.get(key)?.bare || 0) > 0) continue;
+    const dedup = `${c.date}\t${c.subject}`;
+    if (seenKeys.has(dedup)) continue;
+    seenKeys.add(dedup);
     result.push(c);
   }
 

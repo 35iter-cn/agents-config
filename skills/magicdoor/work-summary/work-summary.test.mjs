@@ -243,6 +243,20 @@ test('filterSquashMerge: deduplicates by date+subject', () => {
   assert.equal(result.length, 1);
 });
 
+test('filterSquashMerge: keeps issue-referencing commits when only unrelated bare commits exist', () => {
+  // Regression (2026-08-31): the old logic marked ANY pr# as squash whenever
+  // some unrelated bare commit existed in-window, wiping whole days where
+  // every commit referenced the same issue (e.g. all '(#143)' receipts commits).
+  const commits = [
+    { date: '2026-08-05', subject: 'feat(a): generate receipt pdf (#143)', hash: 'h1' },
+    { date: '2026-08-05', subject: 'chore(a): add transaction_receipts migration (#143)', hash: 'h2' },
+    { date: '2026-08-06', subject: 'feat(b): rely on company scope (#143)', hash: 'h3' },
+    { date: '2026-08-08', subject: 'chore(c): unrelated work', hash: 'h4' },
+  ];
+  const result = filterSquashMerge(commits);
+  assert.equal(result.length, 4);
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end JSON output schema test
 // ---------------------------------------------------------------------------
