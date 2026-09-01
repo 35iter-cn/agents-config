@@ -60,7 +60,7 @@ Run only when the session already produced UI screenshots (walkthrough/dev captu
 
 **Goal: publish UAT cases to the PR as a comment.**
 
-1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Writes `<topic-dir>/uat-cases.uat-case.md` (resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`).
+1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Creates the UAT case file via `node session-topic.mjs artifact-create <topic> uat-case uat-cases` (yielding `NN-uat-cases.uat-case.md` in the topic dir; resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`). Never under project `.knowledge/`.
 2. **Post/Patch** — Read the generated file. If non-empty, search PR comments for `<!-- uat-cases -->`; POST if new, PATCH if exists. If empty/missing, skip.
 
 **Must publish.** Do not stop at file generation; `pr-uat-case-gen` alone only writes the file, this step must also publish it.

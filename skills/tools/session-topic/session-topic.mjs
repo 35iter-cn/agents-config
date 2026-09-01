@@ -6,8 +6,10 @@ import { execSync } from 'node:child_process';
 import { ADJECTIVES } from './words/adjectives.mjs';
 import { NOUNS } from './words/nouns.mjs';
 
-const COMMANDS = ['init', 'resolve', 'spec-create', 'plan-create', 'plan-status', 'verify', 'worktree-path', 'guard'];
+const COMMANDS = ['init', 'resolve', 'artifact-create', 'plan-status', 'verify', 'worktree-path', 'guard'];
 const PLAN_STATUSES = ['open', 'implemented'];
+const ARTIFACT_TYPES = ['spec', 'plan', 'research', 'handoff', 'uat-case', 'notes'];
+const NON_SPEC_ARTIFACT_TYPES = ['research', 'handoff', 'uat-case', 'notes'];
 
 function sessionsRoot() {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -79,9 +81,11 @@ function parseState(content, topic = '') {
   const frontmatter = lines.slice(1, endIndex).join('\n');
   const body = lines.slice(endIndex + 1).join('\n').replace(/^\n+/, '');
 
-  const state = { topic: '', title: '', created: today(), current_spec: '', specs: [] };
+  const state = { topic: '', title: '', created: today(), current_spec: '', specs: [], artifacts: [] };
   let currentSpec = null;
+  let currentArtifact = null;
   let inSpecs = false;
+  let inArtifacts = false;
 
   for (const line of frontmatter.split('\n')) {
     const trimmed = line.trim();
@@ -89,7 +93,17 @@ function parseState(content, topic = '') {
 
     if (trimmed === 'specs:') {
       inSpecs = true;
+      inArtifacts = false;
       currentSpec = null;
+      currentArtifact = null;
+      continue;
+    }
+
+    if (trimmed === 'artifacts:') {
+      inArtifacts = true;
+      inSpecs = false;
+      currentSpec = null;
+      currentArtifact = null;
       continue;
     }
 
@@ -115,7 +129,29 @@ function parseState(content, topic = '') {
       inSpecs = false;
     }
 
+    if (inArtifacts) {
+      const listMatch = trimmed.match(/^- id:\s*(.+)$/);
+      if (listMatch) {
+        currentArtifact = { id: listMatch[1].trim(), name: '', type: '', file: '' };
+        state.artifacts.push(currentArtifact);
+        continue;
+      }
+
+      if (currentArtifact) {
+        const colonIndex = trimmed.indexOf(':');
+        if (colonIndex !== -1) {
+          const key = trimmed.slice(0, colonIndex).trim();
+          const value = trimmed.slice(colonIndex + 1).trim();
+          if (['name', 'type', 'file'].includes(key)) currentArtifact[key] = value;
+        }
+        continue;
+      }
+
+      inArtifacts = false;
+    }
+
     currentSpec = null;
+    currentArtifact = null;
     const colonIndex = trimmed.indexOf(':');
     if (colonIndex === -1) continue;
     const key = trimmed.slice(0, colonIndex).trim();
@@ -140,6 +176,15 @@ function formatSpec(spec) {
   return lines;
 }
 
+function formatArtifact(artifact) {
+  return [
+    `  - id: ${artifact.id}`,
+    `    name: ${artifact.name}`,
+    `    type: ${artifact.type}`,
+    `    file: ${artifact.file}`,
+  ].join('\n');
+}
+
 function formatState(state) {
   return [
     '---',
@@ -149,6 +194,8 @@ function formatState(state) {
     `current_spec: ${state.current_spec}`,
     'specs:',
     ...state.specs.map(formatSpec),
+    'artifacts:',
+    ...state.artifacts.map(formatArtifact),
     '---',
     '',
     state.body,
@@ -158,7 +205,7 @@ function formatState(state) {
 function readState(topic) {
   const path = join(topicDir(topic), 'STATE.md');
   if (!existsSync(path)) {
-    return { topic, title: '', created: today(), current_spec: '', specs: [], body: '' };
+    return { topic, title: '', created: today(), current_spec: '', specs: [], artifacts: [], body: '' };
   }
   return parseState(readFileSync(path, 'utf-8'), topic);
 }
@@ -169,18 +216,21 @@ function writeState(topic, state) {
   writeFileSync(join(dir, 'STATE.md'), formatState(state));
 }
 
-function parseSpecNumber(filename) {
+function parseArtifactNumber(filename) {
   const match = filename.match(/^(\d{2,})-/);
   return match ? parseInt(match[1], 10) : 0;
 }
 
-function nextSpecNumber(topic) {
+function nextArtifactNumber(topic) {
   const state = readState(topic);
-  const numbers = state.specs.map((s) => parseInt(s.id, 10));
+  const numbers = [
+    ...state.specs.map((s) => parseInt(s.id, 10)),
+    ...state.artifacts.map((a) => parseInt(a.id, 10)),
+  ];
   const dir = topicDir(topic);
   if (existsSync(dir)) {
     for (const file of readdirSync(dir)) {
-      const n = parseSpecNumber(file);
+      const n = parseArtifactNumber(file);
       if (n > 0) numbers.push(n);
     }
   }
@@ -225,6 +275,7 @@ function init(args) {
     created: today(),
     current_spec: '',
     specs: [],
+    artifacts: [],
     body: '',
   });
 
@@ -238,13 +289,11 @@ function resolveTopic(args) {
   console.log(topicDir(topic));
 }
 
-function specCreate(args) {
-  if (args.length < 2) throw new Error('usage: session-topic spec-create <topic> <spec-name>');
-  const [topic, name] = args;
-  validateTopicName(topic);
-  const id = nextSpecNumber(topic);
+function createSpec(topic, name) {
+  const id = nextArtifactNumber(topic);
   const dir = topicDir(topic);
-  const file = join(dir, `${id}-${name}.spec.md`);
+  const filename = `${id}-${name}.spec.md`;
+  const file = join(dir, filename);
 
   mkdirSync(dir, { recursive: true });
   if (existsSync(file)) throw new Error(`spec file already exists: ${file}; 如需重建请先手动删除`);
@@ -255,16 +304,14 @@ function specCreate(args) {
   state.current_spec = id;
   writeState(topic, state);
 
-  console.log(file);
+  return file;
 }
 
-function planCreate(args) {
-  if (args.length < 2) throw new Error('usage: session-topic plan-create <topic> <spec-id>');
-  const [topic, id] = args;
-  validateTopicName(topic);
+function createPlan(topic, id) {
   const name = specName(topic, id);
   const dir = topicDir(topic);
-  const file = join(dir, `${id}-${name}.plan.md`);
+  const filename = `${id}-${name}.plan.md`;
+  const file = join(dir, filename);
 
   mkdirSync(dir, { recursive: true });
   if (!existsSync(file)) writeFileSync(file, '');
@@ -274,6 +321,41 @@ function planCreate(args) {
   if (!spec) throw new Error(`spec ${id} not found; create the spec before creating its plan`);
   spec.plan = 'open';
   writeState(topic, state);
+
+  return file;
+}
+
+function createOtherArtifact(topic, type, name) {
+  const id = nextArtifactNumber(topic);
+  const dir = topicDir(topic);
+  const filename = `${id}-${name}.${type}.md`;
+  const file = join(dir, filename);
+
+  mkdirSync(dir, { recursive: true });
+  if (existsSync(file)) throw new Error(`artifact file already exists: ${file}; 如需重建请先手动删除`);
+  writeFileSync(file, '');
+
+  const state = readState(topic);
+  state.artifacts.push({ id, name, type, file: filename });
+  writeState(topic, state);
+
+  return file;
+}
+
+function artifactCreate(args) {
+  if (args.length < 3) throw new Error('usage: session-topic artifact-create <topic> <type> <name-or-spec-id>');
+  const [topic, type, nameOrId] = args;
+  validateTopicName(topic);
+  if (!ARTIFACT_TYPES.includes(type)) throw new Error(`invalid artifact type: ${type}`);
+
+  let file;
+  if (type === 'spec') {
+    file = createSpec(topic, nameOrId);
+  } else if (type === 'plan') {
+    file = createPlan(topic, nameOrId);
+  } else {
+    file = createOtherArtifact(topic, type, nameOrId);
+  }
 
   console.log(file);
 }
@@ -287,7 +369,7 @@ function planStatus(args) {
   const state = readState(topic);
   const spec = state.specs.find((s) => s.id === id);
   if (!spec) throw new Error(`spec ${id} not found`);
-  if (!spec.plan) throw new Error(`spec ${id} has no plan; run plan-create first`);
+  if (!spec.plan) throw new Error(`spec ${id} has no plan; run artifact-create ${topic} plan ${id} first`);
   spec.plan = status;
   writeState(topic, state);
 
@@ -327,6 +409,31 @@ function guardTopic(args) {
   return 1;
 }
 
+function expectedArtifactFilename(name, type) {
+  return `${name}.${type}.md`;
+}
+
+function parseNumberedMdFile(file) {
+  const specMatch = file.match(/^(\d{2,})-(.+)\.spec\.md$/);
+  if (specMatch) return { kind: 'spec', id: specMatch[1], name: specMatch[2], type: 'spec' };
+
+  const planMatch = file.match(/^(\d{2,})-(.+)\.plan\.md$/);
+  if (planMatch) return { kind: 'plan', id: planMatch[1], name: planMatch[2], type: 'plan' };
+
+  for (const type of NON_SPEC_ARTIFACT_TYPES) {
+    const pattern = new RegExp(`^(\\d{2,})-(.+)\\.${type.replace('-', '\\-')}\\.md$`);
+    const match = file.match(pattern);
+    if (match) return { kind: 'artifact', id: match[1], name: match[2], type };
+  }
+
+  const numberedMatch = file.match(/^(\d{2,})-(.+)\.md$/);
+  if (numberedMatch) {
+    return { kind: 'invalid', id: numberedMatch[1], name: numberedMatch[2], type: null };
+  }
+
+  return null;
+}
+
 function verifyTopic(args) {
   if (args.length < 1) throw new Error('usage: session-topic verify <topic>');
   const [topic] = args;
@@ -342,26 +449,49 @@ function verifyTopic(args) {
 
   const specFiles = [];
   const planFiles = [];
+  const artifactFiles = [];
+
   for (const file of readdirSync(dir)) {
-    const specMatch = file.match(/^(\d{2,})-(.+)\.spec\.md$/);
-    if (specMatch) {
-      specFiles.push({ file, id: specMatch[1], name: specMatch[2] });
+    if (!file.endsWith('.md')) continue;
+    if (file === 'STATE.md') continue;
+
+    const numberedMatch = file.match(/^(\d{2,})-.+\.md$/);
+    if (!numberedMatch) {
+      issues.push(
+        `${file} 是未注册的非编号文件(不在 STATE.md 中,且不符合 NN-<name>.<type>.md 命名)。` +
+          `修复:删除该文件或移出 topic 目录;持久化 artifact 必须通过 artifact-create 创建`,
+      );
       continue;
     }
-    const planMatch = file.match(/^(\d{2,})-(.+)\.plan\.md$/);
-    if (planMatch) {
-      planFiles.push({ file, id: planMatch[1], name: planMatch[2] });
+
+    const parsed = parseNumberedMdFile(file);
+    if (!parsed) continue;
+
+    if (parsed.kind === 'invalid') {
+      issues.push(
+        `${file} 编号文件名不符合 NN-<name>.<type>.md 格式(类型须为 spec/plan/research/handoff/uat-case/notes)。` +
+          `修复:保存内容后删除该文件,再 session-topic artifact-create ${topic} <type> <name> 重建并写回;误建则删除该文件`,
+      );
+      continue;
+    }
+
+    if (parsed.kind === 'spec') {
+      specFiles.push({ file, id: parsed.id, name: parsed.name });
+    } else if (parsed.kind === 'plan') {
+      planFiles.push({ file, id: parsed.id, name: parsed.name });
+    } else {
+      artifactFiles.push({ file, id: parsed.id, name: parsed.name, type: parsed.type });
     }
   }
 
-  const registered = state.specs.map((s) => ({ id: s.id, name: s.name }));
+  const registeredSpecs = state.specs.map((s) => ({ id: s.id, name: s.name }));
 
   for (const spec of specFiles) {
-    const reg = registered.find((s) => s.id === spec.id);
+    const reg = registeredSpecs.find((s) => s.id === spec.id);
     if (!reg) {
       issues.push(
-        `${spec.file} 未注册到 STATE.md(手动创建,未走 spec-create)。` +
-          `修复:内容需保留则先保存内容,再 session-topic spec-create ${topic} ${spec.name} 重建并写回;误建则删除该文件`,
+        `${spec.file} 未注册到 STATE.md(手动创建,未走 artifact-create)。` +
+          `修复:内容需保留则先保存内容,再 session-topic artifact-create ${topic} spec ${spec.name} 重建并写回;误建则删除该文件`,
       );
       continue;
     }
@@ -380,17 +510,17 @@ function verifyTopic(args) {
     if (!specFile) {
       issues.push(
         `${plan.file} 无对应 spec 文件(${plan.id}-${plan.name}.spec.md 缺失或未注册)。` +
-          `修复:session-topic spec-create ${topic} ${plan.name} 创建对应 spec,或删除该 plan 文件`,
+          `修复:session-topic artifact-create ${topic} spec ${plan.name} 创建对应 spec,或删除该 plan 文件`,
       );
     }
   }
 
-  for (const reg of registered) {
+  for (const reg of registeredSpecs) {
     const specFile = specFiles.find((s) => s.id === reg.id);
     if (!specFile) {
       issues.push(
         `spec ${reg.id} (${reg.name}) 已注册但 ${reg.id}-${reg.name}.spec.md 不存在。` +
-          `修复:session-topic spec-create ${topic} ${reg.name} 重建`,
+          `修复:session-topic artifact-create ${topic} spec ${reg.name} 重建`,
       );
     }
     const plan = state.specs.find((s) => s.id === reg.id)?.plan;
@@ -402,7 +532,62 @@ function verifyTopic(args) {
     }
   }
 
-  if (state.current_spec && !registered.some((s) => s.id === state.current_spec)) {
+  const registeredArtifacts = state.artifacts || [];
+
+  for (const artifact of artifactFiles) {
+    const reg = registeredArtifacts.find((a) => a.id === artifact.id);
+    if (!reg) {
+      issues.push(
+        `${artifact.file} 未注册到 STATE.md(手动创建,未走 artifact-create)。` +
+          `修复:内容需保留则先保存内容,再 session-topic artifact-create ${topic} ${artifact.type} ${artifact.name} 重建并写回;误建则删除该文件`,
+      );
+      continue;
+    }
+    if (reg.name !== artifact.name) {
+      issues.push(
+        `${artifact.file} 与 STATE.md 注册名不一致(注册名:${reg.name})。` +
+          `修复:对齐 STATE.md 注册名或重命名文件后重跑 verify`,
+      );
+    }
+    if (reg.type !== artifact.type) {
+      issues.push(
+        `${artifact.file} 与 STATE.md 注册类型不一致(注册类型:${reg.type})。` +
+          `修复:对齐 STATE.md 注册类型或重命名文件后重跑 verify`,
+      );
+    }
+    const expectedFile = `${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`;
+    if (reg.file !== expectedFile) {
+      issues.push(
+        `artifact ${reg.id} (${reg.name}) STATE.md file 字段(${reg.file})与期望文件名(${expectedFile})不一致。` +
+          `修复:对齐 STATE.md file 字段或重命名文件后重跑 verify`,
+      );
+    }
+    if (reg.file !== artifact.file) {
+      issues.push(
+        `artifact ${reg.id} (${reg.name}) STATE.md file 字段(${reg.file})与磁盘文件(${artifact.file})不一致。` +
+          `修复:对齐 STATE.md file 字段或重命名文件后重跑 verify`,
+      );
+    }
+  }
+
+  for (const reg of registeredArtifacts) {
+    const artifactFile = artifactFiles.find((a) => a.id === reg.id);
+    if (!artifactFile) {
+      issues.push(
+        `artifact ${reg.id} (${reg.name}, type:${reg.type}) 已注册但 ${reg.file || `${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`} 不存在。` +
+          `修复:session-topic artifact-create ${topic} ${reg.type} ${reg.name} 重建`,
+      );
+      continue;
+    }
+    if (reg.type && !NON_SPEC_ARTIFACT_TYPES.includes(reg.type)) {
+      issues.push(
+        `artifact ${reg.id} (${reg.name}) 注册类型非法:${reg.type}(仅允许 research/handoff/uat-case/notes)。` +
+          `修复:更新 STATE.md artifacts 条目`,
+      );
+    }
+  }
+
+  if (state.current_spec && !registeredSpecs.some((s) => s.id === state.current_spec)) {
     issues.push(
       `current_spec 指向 ${state.current_spec},但 specs 列表无此 id。` +
         `修复:更新 STATE.md current_spec 为有效 spec id`,
@@ -417,7 +602,7 @@ function verifyTopic(args) {
     return 1;
   }
 
-  console.log(`ok: ${topic} STATE.md 与 spec/plan 文件一致`);
+  console.log(`ok: ${topic} STATE.md 与 artifact 文件一致`);
   return 0;
 }
 
@@ -427,10 +612,12 @@ function help() {
 Commands:
   init <semantic-hint>              Create a new topic and print its name
   resolve <topic>                   Print the absolute path of a topic directory
-  spec-create <topic> <spec-name>   Create a numbered spec file and update STATE.md
-  plan-create <topic> <spec-id>     Create a plan file for an existing spec (same number/name)
+  artifact-create <topic> <type> <name-or-spec-id>
+                                    Create a numbered artifact file and update STATE.md
+                                    Types: spec | plan | research | handoff | uat-case | notes
+                                    For plan, <name-or-spec-id> is the spec id (reuses spec number/name)
   plan-status <topic> <spec-id> <status>  Update plan status (open|implemented)
-  verify <topic>                  Verify STATE.md matches spec/plan files; exit 1 on drift
+  verify <topic>                  Verify STATE.md matches artifact files; exit 1 on drift
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
   guard <topic> [dir]           Assert $PWD is inside the topic worktree for the repo; exit 1 if not
 `);
@@ -450,8 +637,7 @@ function main(argv) {
   switch (command) {
     case 'init': init(args); break;
     case 'resolve': resolveTopic(args); break;
-    case 'spec-create': specCreate(args); break;
-    case 'plan-create': planCreate(args); break;
+    case 'artifact-create': artifactCreate(args); break;
     case 'plan-status': planStatus(args); break;
     case 'verify': code = verifyTopic(args); break;
     case 'worktree-path': worktreePath(args); break;

@@ -7,7 +7,7 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Sync branch, analyze diff, generate UAT test cases for frontend feature branches. Each case traces to actual code changes. Output: `<topic-dir>/uat-cases.uat-case.md` (never under project `.knowledge/`). Resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`.
+Sync branch, analyze diff, generate UAT test cases for frontend feature branches. Each case traces to actual code changes. Create the UAT case file via `node session-topic.mjs artifact-create <topic> uat-case uat-cases` (yielding `NN-uat-cases.uat-case.md` in the topic dir; never under project `.knowledge/`). Resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`.
 
 ## Quick Reference
 
@@ -19,7 +19,7 @@ Sync branch, analyze diff, generate UAT test cases for frontend feature branches
 
 ### Analyze & write UAT cases
 
-`git diff origin/$LMB..HEAD` — review all changes, identify user-facing scenarios, edge cases, and risk points. Then generate `<topic-dir>/uat-cases.uat-case.md`. Up to 10 cases, fewer for small diffs. Each case must trace to an actual code change.
+`git diff origin/$LMB..HEAD` — review all changes, identify user-facing scenarios, edge cases, and risk points. Then create the file via `node session-topic.mjs artifact-create <topic> uat-case uat-cases` and write UAT content to the printed path (`NN-uat-cases.uat-case.md` in the topic dir). Up to 10 cases, fewer for small diffs. Each case must trace to an actual code change.
 
 Template:
 

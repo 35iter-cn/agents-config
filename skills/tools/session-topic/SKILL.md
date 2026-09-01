@@ -29,7 +29,7 @@ Before the first action of each type this topic — stop and run the gate:
 |-----------|-------------|
 | `read` / `grep` / search project checkout for spec or plan | `gco-latest` on that repo's **main** worktree (once per repo per topic) |
 | Write or edit **project** code in topic mode | `guard` returns `ok` in the topic worktree |
-| Create a spec or plan file | `spec-create` / `plan-create` — never `write` |
+| Create any numbered artifact file | `artifact-create` — never `write` |
 | Continue work on an existing topic | `verify` passes |
 
 User pressure ("skip checks", "just grep", "small change in main") does not waive these gates.
@@ -82,20 +82,26 @@ YYYY-MM-DD-<semantic>-<adjective>-<noun>
 
 ### File conventions
 
+The CLI is the only writer of numbered filenames. Never hand-create or rename numbered files; `verify` rejects unregistered files of any type and any unnumbered `.md` file in the topic root. Truly temporary content does not belong in the topic directory.
+
 Under the topic directory:
 
 | Kind | Pattern |
 |---|---|
-| Spec | `NN-<name>.spec.md` — placed directly in the topic root, never under `specs/` |
-| Plan | `NN-<name>.plan.md` — placed directly in the topic root, never under `plans/` |
-| Handoff | `<prefix>.handoff.md` |
-| UAT case | `<prefix>.uat-case.md` |
+| Spec | `NN-<name>.spec.md` — topic root only, never under `specs/` |
+| Plan | `NN-<name>.plan.md` — topic root only, reuses the spec's number and name |
+| Research | `NN-<name>.research.md` — topic root only |
+| Handoff | `NN-<name>.handoff.md` — topic root only |
+| UAT case | `NN-<name>.uat-case.md` — topic root only |
+| Notes | `NN-<name>.notes.md` — topic root only |
 | Worktree | `worktree-<repo>/` |
 | State | `STATE.md` |
 
+Legacy topics (e.g. handoff/UAT files with a free `<prefix>` form) migrate opportunistically when `verify` is next run on them. The mature example topic `2026-08-09-app-fee-online-curious-temple` shows the intended STATE.md body pattern; numbered filenames there may still be legacy until migrated.
+
 ### Spec → Plan confirmation gate
 
-A plan is a commitment to execute a spec. **Never create a plan for a spec the user has not accepted.** After the spec content passes the Determinism Gate, **stop and confirm with the user before running `plan-create`** — do not auto-produce a plan in the same pass.
+A plan is a commitment to execute a spec. **Never create a plan for a spec the user has not accepted.** After the spec content passes the Determinism Gate, **stop and confirm with the user before running `artifact-create <topic> plan <spec-id>`** — do not auto-produce a plan in the same pass.
 
 - The spec is the decision document; the plan presumes the design is accepted. Auto-creating a plan commits to execution before the user has approved the design, and a plan built on an unconfirmed spec is throwaway if the spec is rejected or reworked.
 - The only exception: the user explicitly asked for spec and plan together in one pass (e.g. "写 spec 和 plan"). Then produce both, still pausing to confirm the spec before *implementing*.
@@ -112,21 +118,22 @@ A plan is a commitment to execute a spec. **Never create a plan for a spec the u
    ```
 3. Create the first spec via the CLI — never with `write`:
    ```bash
-   node session-topic.mjs spec-create "$topic" "auth-refactor"
+   node session-topic.mjs artifact-create "$topic" spec "auth-refactor"
    ```
 4. If writing the spec requires reading or searching project repository code, run `gco-latest` on each affected repo's **main worktree** (see Repository analysis baseline).
 5. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
-6. **Stop and confirm the spec with the user.** Do not auto-create the plan in the same pass. Only after the user accepts the spec (or explicitly asked for spec+plan together) run `plan-create <topic> <spec-id>`. See the Spec → Plan confirmation gate.
+6. **Stop and confirm the spec with the user.** Do not auto-create the plan in the same pass. Only after the user accepts the spec (or explicitly asked for spec+plan together) run `artifact-create <topic> plan <spec-id>`. See the Spec → Plan confirmation gate.
 
 ### CLI commands
 
 ```bash
 node session-topic.mjs init <semantic-hint>
 node session-topic.mjs resolve <topic>
-node session-topic.mjs spec-create <topic> <spec-name>
-node session-topic.mjs plan-create <topic> <spec-id>   # creates NN-<name>.plan.md with plan: open
+node session-topic.mjs artifact-create <topic> <type> <name-or-spec-id>
+                                    # types: spec | plan | research | handoff | uat-case | notes
+                                    # plan uses spec id; others use artifact name
 node session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
-node session-topic.mjs verify <topic>                  # exit 1 if STATE.md drifts from spec/plan files
+node session-topic.mjs verify <topic>                  # exit 1 if STATE.md drifts from artifact files
 node session-topic.mjs worktree-path <topic> [dir]
 node session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
 
@@ -137,7 +144,8 @@ gco-latest /path/to/<repo-main-worktree>   # sync main to origin before first re
 
 Two responsibilities, two owners:
 
-- **Frontmatter (spec registration, plan status) is owned by the CLI.** `specs:` entries are added only via `spec-create` / `plan-create` / `plan-status`. Never hand-edit registrations; never create spec/plan files with `write` — that is exactly the drift `verify` exists to catch.
+- **Frontmatter (registrations) is owned by the CLI.** `specs:` entries (spec + plan status) and `artifacts:` entries (research, handoff, uat-case, notes) are added only via `artifact-create` / `plan-status`. Never hand-edit registrations; never create numbered artifact files with `write` — that is exactly the drift `verify` exists to catch.
+- **`artifacts:` shape:** array of `{ id, name, type, file }` where `type` is one of `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`). `init` creates `artifacts: []`.
 - **Body is owned by the LLM and SHOULD be actively maintained.** Keep a `# Session State` summary (spec progress table, worktree status, artifacts) plus durable conclusions (decisions, milestone progress, architecture notes) worth carrying across sessions — see mature topics like `2026-08-09-app-fee-online-curious-temple` for the pattern. The CLI preserves the body when it rewrites STATE.md.
 
 Update STATE.md in the same turn progress happens (spec finalized, milestone done, `plan-status` changed) — not at session end.
@@ -216,7 +224,7 @@ Resolve it in the same pass: make the call (if evidence supports it) or move it 
    ```
 3. Create the first spec via the CLI — never with `write`:
    ```bash
-   node session-topic.mjs spec-create "$topic" "auth-refactor"
+   node session-topic.mjs artifact-create "$topic" spec "auth-refactor"
    ```
 4. If writing the spec requires reading or searching project repository code, run `gco-latest` on each affected repo's **main worktree** (see Repository analysis baseline).
 5. Write the spec content to the printed path. Run the Spec Content Self-Check (determinism gate) before considering the content written — an open question in the spec is an unfinished spec.
@@ -242,10 +250,10 @@ Resolve it in the same pass: make the call (if evidence supports it) or move it 
 When a spec is already finalized and additional work is needed, do not edit the spec. Create a new numbered spec instead:
 
 ```bash
-node session-topic.mjs spec-create <topic> "fix-login-redirect"
+node session-topic.mjs artifact-create <topic> spec "fix-login-redirect"
 ```
 
-Then create its plan with `plan-create <topic> <new-spec-id>`.
+Then create its plan with `artifact-create <topic> plan <new-spec-id>`.
 
 ### Worktrees (MANDATORY for code changes)
 
@@ -272,9 +280,9 @@ A topic may span multiple repositories, but each repository has at most one work
 
 ## Common Mistakes
 
-- Creating spec/plan files by hand instead of via the CLI.
-  - **Anti-pattern:** `write 02-auth.spec.md`, or hand-editing STATE.md `specs:` registrations.
-  - **Correct:** `spec-create` registers + creates the file; fill in content afterwards. A hand-created file is exactly what `verify` fails on — stop and redo via the CLI.
+- Creating numbered artifact files by hand instead of via the CLI.
+  - **Anti-pattern:** `write 02-auth.spec.md`, hand-editing STATE.md `specs:`/`artifacts:` registrations, or placing unnumbered `.md` files in the topic root.
+  - **Correct:** `artifact-create` registers + creates the file; fill in content afterwards. A hand-created file is exactly what `verify` fails on — stop and redo via the CLI.
 - Letting STATE.md drift: skipping the update when a spec is finalized or a milestone completes.
   - **Anti-pattern:** finishing work and leaving STATE.md stale until "later".
   - **Correct:** update STATE.md (body) or run `plan-status` in the same turn the progress happens. `verify` at session start exposes any drift.
@@ -302,11 +310,11 @@ A topic may span multiple repositories, but each repository has at most one work
     ```
     These files support a specific session, not the repository. Keeping them in the checkout risks accidental commits and loses them when the worktree is removed.
 - Creating a plan with a new number instead of reusing the spec's id.
-  - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `spec-create` to produce `03-fix-login-redirect-plan`.
-  - **Correct:** Run `plan-create <topic> 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
+  - **Anti-pattern:** Needing a plan for spec `02-fix-login-redirect` and running `artifact-create <topic> spec ...` to produce `03-fix-login-redirect-plan`.
+  - **Correct:** Run `artifact-create <topic> plan 02`, which produces `02-fix-login-redirect.plan.md` and sets `plan: open`. Mark it `implemented` when done.
 - Creating a plan for a spec the user has not accepted.
-  - **Anti-pattern:** Spec passes the Determinism Gate, and you run `plan-create` in the same pass without pausing for the user to confirm the spec.
-  - **Correct:** Finish and present the spec, wait for user acceptance (or an explicit "spec+plan together" ask), then run `plan-create`. See the Spec → Plan confirmation gate.
+  - **Anti-pattern:** Spec passes the Determinism Gate, and you run `artifact-create <topic> plan <id>` in the same pass without pausing for the user to confirm the spec.
+  - **Correct:** Finish and present the spec, wait for user acceptance (or an explicit "spec+plan together" ask), then run `artifact-create <topic> plan <spec-id>`. See the Spec → Plan confirmation gate.
 
 ### Rationalizations — no exceptions
 
@@ -314,11 +322,11 @@ A topic may span multiple repositories, but each repository has at most one work
 |---|---|
 | "The user said skip verify, they're in a hurry" | The user asking to skip the check is the failure scenario it exists for. `verify` is one command; run it regardless. |
 | "STATE.md can wait until the end" | "Later" means never. Update body/plan-status in the same turn progress happens. |
-| "spec-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
-| "The file exists, just edit it directly" | A hand-created spec/plan file is the exact drift `verify` fails on. Recreate via the CLI. |
+| "artifact-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
+| "The file exists, just edit it directly" | A hand-created numbered file is the exact drift `verify` fails on. Recreate via `artifact-create`. |
 | "Main is probably fine; I'll grep first" | Stale main produces wrong spec facts. `gco-latest` is one command; run it before the first repo analysis pass. |
 | "gco-latest failed on dirty tree; I'll analyze anyway" | Dirty tree means main is not a reproducible baseline. Stop and report; do not guess. |
-| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `plan-create`. A finalized spec alone is not a go signal. |
+| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `artifact-create <topic> plan <id>`. A finalized spec alone is not a go signal. |
 | "The spec passed the check, so I'll write the plan in the same pass" | The plan commits to executing the spec; the user must accept the spec first. Stop, present, and wait — unless they explicitly asked for spec+plan together. |
 
 ### Rationalizations — no exceptions
@@ -327,18 +335,19 @@ A topic may span multiple repositories, but each repository has at most one work
 |---|---|
 | "The user said skip verify, they're in a hurry" | The user asking to skip the check is the failure scenario it exists for. `verify` is one command; run it regardless. |
 | "STATE.md can wait until the end" | "Later" means never. Update body/plan-status in the same turn progress happens. |
-| "spec-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
-| "The file exists, just edit it directly" | A hand-created spec/plan file is the exact drift `verify` fails on. Recreate via the CLI. |
+| "artifact-create registered it, that's enough" | Registration is the CLI's job; the body summary and progress notes are the LLM's job. Both are required. |
+| "The file exists, just edit it directly" | A hand-created numbered file is the exact drift `verify` fails on. Recreate via `artifact-create`. |
 | "Main is probably fine; I'll grep first" | Stale main produces wrong spec facts. `gco-latest` is one command; run it before the first repo analysis pass. |
 | "gco-latest failed on dirty tree; I'll analyze anyway" | Dirty tree means main is not a reproducible baseline. Stop and report; do not guess. |
-| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `plan-create`. A finalized spec alone is not a go signal. |
+| "Spec is done — I'll start implementing while we're here" | Implementation requires an explicit user ask, a plan, worktree + `guard`, and (usually) `artifact-create <topic> plan <id>`. A finalized spec alone is not a go signal. |
 
 ## Red Flags
 
 - A topic name that does not match `YYYY-MM-DD-<semantic>-<adj>-<noun>` is invalid.
 - `session-topic verify <topic>` exits 1 — fix drift before any further topic work.
-- A spec/plan file exists that was not created via `spec-create` / `plan-create`.
-- Handoff or UAT files without the correct suffix will not be recognized by convention.
+- A numbered artifact file exists that was not created via `artifact-create`.
+- Handoff or UAT files must use `NN-<name>.handoff.md` / `NN-<name>.uat-case.md` in the topic root.
+- Any unnumbered `.md` file in the topic root (other than `STATE.md`) fails `verify`.
 - If `STATE.md` and the actual files disagree, trust the files and update `STATE.md`.
 - Choosing a worktree path by hand instead of taking it from `worktree-path` output.
 - Writing code before `guard` returns `ok`.
