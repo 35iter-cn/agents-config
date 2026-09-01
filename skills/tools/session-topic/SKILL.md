@@ -49,6 +49,16 @@ Whenever you need to create, read, or update a session artifact. This includes:
 - Generating UAT cases
 - Resolving paths for linked worktrees
 
+## Spec Writing
+
+When writing a spec, read `spec-writing-guide.md` (in the same directory as this file) first. It defines the required structure, chart conventions, and anti-patterns to avoid.
+
+Key rules:
+- Spec is an **implementation plan**, not a discussion record
+- Use mermaid charts for any流程 with 3+ steps or 2+ branches
+- Never leave「待定」「TBD」「后续确认」— either decide now or mark as out of scope
+- Reorganize discussion notes into implementation logic (改动范围 → 流程 → 实现 → 边界条件)
+
 ## When NOT to Use
 
 - For committed project files (use the project repository)
@@ -263,9 +273,12 @@ Then create its plan with `artifact-create <topic> plan <new-spec-id>`.
 
 **Enforcement point:** run `guard` before writing any code. A non-`ok` result is a hard stop — create the worktree first (path from `worktree-path`), re-run `guard`, then code. If you are about to write code and have not run `guard`, stop.
 
+**Before creating the worktree:** run `gco-latest` on the main worktree to ensure the new branch is based on the latest `origin`. This prevents branching from stale code.
+
 ```bash
+gco-latest ~/code/<repo>                           # sync main to latest origin
 worktree=$(node session-topic.mjs worktree-path <topic>)
-git worktree add "$worktree" -b <branch>
+git worktree add "$worktree" -b <branch>             # branch from latest
 ```
 
 Before writing ANY code, run guard to verify you are inside the worktree:
