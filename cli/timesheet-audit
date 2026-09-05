@@ -30,10 +30,8 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 let MM, YYYY;
 const mA = MONTH.match(/^(\d{4})\/(\d{2})$/);
-const mB = MONTH.match(/^(\d{2})\/(\d{4})$/);
 if (mA) { YYYY = mA[1]; MM = mA[2]; }
-else if (mB) { MM = mB[1]; YYYY = mB[2]; }
-else { console.error('--month must be YYYY/MM (e.g. 2026/08) or MM/YYYY (e.g. 08/2026)'); process.exit(1); }
+else { console.error('--month must be YYYY/MM (e.g. 2026/08)'); process.exit(1); }
 if (!CWD) CWD = path.join(os.homedir(), 'code', 'magicdoor');
 const TAB = 'Daily schedule';
 const daysInMonth = new Date(+YYYY, +MM, 0).getDate();

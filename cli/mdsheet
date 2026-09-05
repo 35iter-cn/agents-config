@@ -13,7 +13,7 @@
 #   mdsheet find-date '<date>'                           absolute row of DATE cell matching date (ISO or M/D)
 #   mdsheet find '<name-substring>'                      list spreadsheets by name (Drive API)
 #   mdsheet create '<title>'                             create a BARE spreadsheet, print its id
-#   mdsheet create <MM/YYYY>                             create Hao-YYYY/MM from Hao-TEMPLATE, re-anchor, clear data
+#   mdsheet create <YYYY/MM>                             create Hao-YYYY/MM from Hao-TEMPLATE, re-anchor, clear data
 #   mdsheet copy '<sourceTitleOrId>' '<newTitle>'        full-file copy (preserves formatting; template reuse)
 #   mdsheet trash '<spreadsheetId>'                      move a spreadsheet to Drive trash
 #   mdsheet -h | --help
@@ -213,10 +213,26 @@ else:
     ;;
   create)
     TITLE="${ARGS[1]:-}"
-    [ -n "$TITLE" ] || { echo "create requires a title or MM/YYYY" >&2; exit 1; }
-    if [[ "$TITLE" =~ ^[0-9]{1,2}/[0-9]{4}$ ]]; then
-      M="${TITLE%%/*}"; Y="${TITLE##*/}"; MM=$(printf '%02d' "$((10#$M))")
-      SRC="$FROM"
+    [ -n "$TITLE" ] || { echo "create requires a title or YYYY/MM (e.g. 2026/09)" >&2; exit 1; }
+    if [[ "$TITLE" =~ ^[0-9]{4}/[0-9]{1,2}$ ]]; then
+      Y="${TITLE%%/*}"; M="${TITLE##*/}"
+    else
+      if [[ "$TITLE" =~ ^[0-9]{1,2}/[0-9]{4}$ ]]; then
+        echo "ambiguous legacy MM/YYYY: use YYYY/MM instead (e.g. 2026/09)" >&2; exit 1
+      fi
+      if [ "$DRY_RUN" = 1 ]; then echo "POST sheets/v4/spreadsheets (title=$TITLE)"; exit 0; fi
+      BODY=$(python3 - "$TITLE" << 'PYEOF'
+import json,sys
+print(json.dumps({'properties':{'title':sys.argv[1]}}))
+PYEOF
+)
+      curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$BODY" \
+        "https://sheets.googleapis.com/v4/spreadsheets" \
+        | python3 -c "import json,sys;print(json.load(sys.stdin).get('spreadsheetId',''))"
+      exit 0
+    fi
+    MM=$(printf '%02d' "$((10#$M))"); M=$MM
+    SRC="$FROM"
       if [ -z "$SRC" ]; then
         SRC=$("$0" find 'Hao-TEMPLATE' | head -n1 | cut -d' ' -f1)
         [ -n "$SRC" ] || { echo "template sheet 'Hao-TEMPLATE' not found (create once: mdsheet copy '<anyMonth>' 'Hao-TEMPLATE')" >&2; exit 1; }
@@ -224,10 +240,10 @@ else:
         SRC=$("$0" find "$SRC" | awk -v t="$SRC" '$2==t{print $1; exit}')
         [ -n "$SRC" ] || { echo "template source not found: $FROM" >&2; exit 1; }
       fi
-      NAME="Hao-$Y/$M"
+      NAME="Hao-$Y/$MM"
       if [ "$DRY_RUN" = 1 ]; then
         echo "POST drive/v3/files/$SRC/copy (name=$NAME)"
-        echo "PUT ${TAB_URLSEG}!C2 = $Y-$MM-01 (USER_ENTERED)"
+        echo "PUT ${TAB_URLSEG:-Daily schedule}!C2 = $Y-$MM-01 (USER_ENTERED)"
         echo "POST values/C5:G35:clear (data region)"
         exit 0
       fi
@@ -246,16 +262,6 @@ PYEOF
       "$0" -s "$NEWID" clear "${task_col}5:${notes_col}$(( 4 + DAYS ))" > /dev/null
       echo "$NEWID"
       exit 0
-    fi
-    if [ "$DRY_RUN" = 1 ]; then echo "POST sheets/v4/spreadsheets (title=$TITLE)"; exit 0; fi
-    BODY=$(python3 - "$TITLE" << 'PYEOF'
-import json,sys
-print(json.dumps({'properties':{'title':sys.argv[1]}}))
-PYEOF
-)
-    curl -fsS -X POST -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$BODY" \
-      "https://sheets.googleapis.com/v4/spreadsheets" \
-      | python3 -c "import json,sys;print(json.load(sys.stdin).get('spreadsheetId',''))"
     ;;
   copy)
     SRC="${ARGS[1]:-}"; TITLE="${ARGS[2]:-}"

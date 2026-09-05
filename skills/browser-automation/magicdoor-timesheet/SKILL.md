@@ -15,10 +15,11 @@ Fill the monthly `Hao-YYYY/MM` sheet via the Sheets API with `mdsheet` (full fla
 - Targets detected, never assumed: `structure` maps headers→columns and prints `daily_cols="task_col pr_link_col"` / `weekly_cols="notes_col"`; `find-date '<date>'` resolves a DATE cell's absolute row.
 - 日报 = that day's row, cells `$task_col` (TASK) + `$pr_link_col` (PR LINK). Skip days with no commits/PRs.
 - 周报 = Saturday S's row, cell `$notes_col`; content window **S−7…S−1 — never written on S−7**. Default S = latest Friday ≤ today, + 1. Before writing, state S / window / target `G{row}`.
-- New month: `mdsheet create '09/2026'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
+- Sheet naming口径: always `Hao-YYYY/MM` (e.g. `Hao-2026/09`) — for find, audit, and all references.
+- New month: `mdsheet create '2026/09'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). The `create` argument is YYYY/MM, matching the Hao-YYYY/MM naming口径. Any string that is not a date (e.g. `'Hao-2026/09'`) is treated as a bare-spreadsheet title and yields an empty sheet (single 工作表1 tab, structure/get → 400). Trash it and recreate with a date. `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
 - Never guess HOURS (D) or KANBAN LINK (E). HOURS acquisition recipe: pull from project memory; if memory lookup misses, ask the user explicitly — never substitute for it. 补充缺失: audit with `get`, write only blanks.
 - Batch reads: `get '<range>'` outputs raw API JSON (values rows). Parse rules: row N of range = `values[N]` (empty cell = `[]`, leading/trailing fully-empty rows trimmed); multi-line cells keep `\n` literally.
-- Monthly audit: `timesheet-audit --month MM/YYYY` cross-checks TASK bullets vs git, PR rows vs gh — one-shot report; WARN lines are merge-day restatements / issue refs, ERROR findings must be fixed before handoff.
+- Monthly audit: `timesheet-audit --month 2026/09` cross-checks TASK bullets vs git, PR rows vs gh — one-shot report; WARN lines are merge-day restatements / issue refs, ERROR findings must be fixed before handoff.
 - Verification (per user directive): no per-cell re-read loops. Batch write (setmulti for single-line columns, per-cell set for multi-line) → ONE batch `get` of the same range → local diff against the expected array. Per-cell `get` is for spot checks/diagnosis only.
 
 ## Run
