@@ -84,7 +84,7 @@ node $CLAUDE_SKILL_DIR/session-topic.mjs --help  # Manage session artifacts by t
 
 - Skills are organized hierarchically in `skills/` but flattened into each target directory via symlinks
 - `skills/` is the **single source of truth** for Claude Code skill sources (other tools that read `~/.claude/skills` share this tree)
-- Targets are declared in `scripts/skills-symlinks.targets` (currently `~/.claude/skills`)
+- Targets are declared in `scripts/skills-symlinks.targets` (currently `~/.claude/skills`, `~/.cursor/skills`, `~/.hermes/skills`, `~/.pi/agent/skills`)
 
 ### CLI Sync Architecture
 

@@ -1,5 +1,6 @@
 # Targets for sync-skills: flat symlinks are created in each target directory.
 # One target per line; '#' lines and blank lines are ignored.
 ~/.claude/skills
+~/.cursor/skills
 ~/.hermes/skills
 ~/.pi/agent/skills

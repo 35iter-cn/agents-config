@@ -26,7 +26,7 @@ Personal AI agent configuration and skill tree for Claude Code.
 ## Quick Start
 
 ```bash
-# Sync skills to ~/.claude/skills
+# Sync skills to ~/.claude/skills, ~/.cursor/skills, ~/.hermes/skills, ~/.pi/agent/skills
 scripts/sync-skills.mjs
 
 # Sync CLI scripts to ~/.local/bin
