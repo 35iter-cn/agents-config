@@ -1,6 +1,6 @@
 ---
 name: session-topic
-description: Use when creating or updating session artifacts (specs, plans, handoffs, UAT, worktrees) under ~/.config/sessions/, when spec/plan work needs reading project repository code, or when topic-mode edits might land in the main checkout instead of a topic worktree.
+description: Use when creating or updating session artifacts (specs, plans, handoffs, UAT, worktrees) under ~/.config/sessions/, when spec/plan work needs reading project repository code, when topic-mode edits might land in the main checkout instead of a topic worktree, or when locating an existing topic from a PR link, branch name, repo, or date/keyword — run `session-topic find` instead of grepping the sessions tree.
 ---
 
 ## Overview
@@ -31,6 +31,8 @@ Before the first action of each type this topic — stop and run the gate:
 | Write or edit **project** code in topic mode | `guard` returns `ok` in the topic worktree |
 | Create any numbered artifact file | `artifact-create` — never `write` |
 | Continue work on an existing topic | `verify` passes |
+| Create or replace a topic worktree | `worktree-check` passes (worktree absent or clean) |
+| Locate a topic from a PR link, branch, repo, or date/keyword | `find` — never recursive-grep the sessions tree |
 
 User pressure ("skip checks", "just grep", "small change in main") does not waive these gates.
 
@@ -48,6 +50,35 @@ Whenever you need to create, read, or update a session artifact. This includes:
 - Creating handoff documents
 - Generating UAT cases
 - Resolving paths for linked worktrees
+
+## Locating a topic (find)
+
+To locate an existing topic from a PR link, branch, repo, or date/keyword, **always run `find` — never grep the sessions tree**. Recursive grep hits `worktree-*/` build artifacts and takes multiple passes; `find` is one command over `STATE.md` files only.
+
+```bash
+node session-topic.mjs find "https://github.com/MagicDoorInc/magic-manager/pull/1"
+node session-topic.mjs find "MagicDoorInc/magic-manager#1"
+node session-topic.mjs find "refactor/chat-upload-sessions"
+node session-topic.mjs find "chat multipart" --since 2026-08-20
+```
+
+- The CLI auto-classifies the query: PR URL / `owner/repo#N` / `short#N` / bare `#N` / branch (contains `/`) / keyword.
+- `--repo`, `--since`, `--until` narrow results. Translate relative dates ("yesterday", "last week") into `YYYY-MM-DD` yourself — the CLI does not parse natural-language dates.
+- Matching layers, most reliable first: frontmatter `prs:` registry → canonical `owner/repo#N` refs in body → full PR URLs → bare `PR #N` inside a `worktree-<repo>` bullet (repo inferred from the bullet) → loose/keyword (candidates; loose hits are marked `[unconfirmed]`).
+- Bare `#N` collides across repos (backend #1 vs magic-manager #1): find lists all candidates, it never guesses.
+- Output is a ranked candidate list, never a single verdict. Read the top candidate's `STATE.md` to confirm before continuing work in it.
+
+## Registering a PR (pr-add)
+
+When topic work produces a PR, register it **in the same turn** so future `find` queries hit the registry directly:
+
+```bash
+node session-topic.mjs pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
+```
+
+- Entry shape (frontmatter, CLI-owned): `prs:` array of `{ repo: full slug, number, branch? }`. The registry is an **index, not a mirror** — no status/title fields; those stay in body narrative.
+- Idempotent: re-registering an existing repo+number only updates `branch`.
+- Legacy topics are never backfilled; for them `find` relies on body layers (URL / worktree-bullet), which is by design.
 
 ## Spec Writing
 
@@ -144,8 +175,12 @@ node session-topic.mjs artifact-create <topic> <type> <name-or-spec-id>
                                     # plan uses spec id; others use artifact name
 node session-topic.mjs plan-status <topic> <spec-id> <open|implemented>
 node session-topic.mjs verify <topic>                  # exit 1 if STATE.md drifts from artifact files
+node session-topic.mjs worktree-check <topic> --repo <main-checkout-path>
+                              # Read-only preflight: clean gate + pushed/PR report + baseline snapshot
 node session-topic.mjs worktree-path <topic> [dir]
 node session-topic.mjs guard <topic> [dir]   # exit 1 unless $PWD is the topic worktree
+node session-topic.mjs find <query> [--repo r] [--since d] [--until d]
+node session-topic.mjs pr-add <topic> <pr-url|owner/repo#N> [--branch b]
 
 gco-latest /path/to/<repo-main-worktree>   # sync main to origin before first repo analysis pass
 ```
@@ -157,6 +192,7 @@ Two responsibilities, two owners:
 - **Frontmatter (registrations) is owned by the CLI.** `specs:` entries (spec + plan status) and `artifacts:` entries (research, handoff, uat-case, notes) are added only via `artifact-create` / `plan-status`. Never hand-edit registrations; never create numbered artifact files with `write` — that is exactly the drift `verify` exists to catch.
 - **`artifacts:` shape:** array of `{ id, name, type, file }` where `type` is one of `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`). `init` creates `artifacts: []`.
 - **Body is owned by the LLM and SHOULD be actively maintained.** Keep a `# Session State` summary (spec progress table, worktree status, artifacts) plus durable conclusions (decisions, milestone progress, architecture notes) worth carrying across sessions — see mature topics like `2026-08-09-app-fee-online-curious-temple` for the pattern. The CLI preserves the body when it rewrites STATE.md.
+- **PR references in the body:** outside a `worktree-<repo>` bullet, use canonical `owner/repo#N` form; bare `#N` is acceptable inside a worktree bullet (the bullet scopes the repo). Never rewrite legacy body text to canonical form.
 
 Update STATE.md in the same turn progress happens (spec finalized, milestone done, `plan-status` changed) — not at session end.
 
@@ -271,23 +307,38 @@ Then create its plan with `artifact-create <topic> plan <new-spec-id>`.
 
 **Worktree path source is authoritative.** The worktree path MUST come from `node session-topic.mjs worktree-path <topic>` output — never a hand-chosen path (project sibling, `/tmp`, etc.). A hand-picked path is a violation even if it looks reasonable.
 
+**Invariant: at most one worktree per repo per topic at any time.** A topic may accumulate multiple PRs in the same repo, but never multiple live worktrees. Starting a new independent spec in a repo whose worktree is occupied by a parked (unmerged) PR is a **replace, not a branch switch** — never checkout a different branch inside the existing worktree.
+
+**Replace flow (new spec in a repo that already has a worktree):**
+
+1. Preflight — read-only, no git mutations:
+   ```bash
+   node session-topic.mjs worktree-check <topic> --repo <path-to-main-checkout>
+   ```
+   MUST pass (exit 0): worktree absent, or present and clean. FAIL = stop, resolve, re-run. The report also covers push state, PR registration in STATE.md `prs:`, and an origin baseline snapshot — treat every FAIL item as a blocker.
+2. Retire the old worktree:
+   ```bash
+   git worktree remove <worktree-path>
+   ```
+   The local branch is **kept** — it is the recovery anchor of the parked PR.
+3. Create the new worktree (path from `worktree-path`, based on latest `origin/<default>` — run `gco-latest` on the main checkout first so the branch is not cut from stale code):
+   ```bash
+   git worktree add "<worktree-path>" -b <branch> <base>
+   ```
+   Choose the branch name from context. **Never reuse a branch already registered in STATE.md `prs:` for that repo** (check `git branch -a` and the registry) and never base a new spec's branch on another spec's PR branch.
+4. Write gate:
+   ```bash
+   node session-topic.mjs guard <topic>   # exit 1 unless $PWD is the topic worktree
+   ```
+   Must return ok before the first write, and re-run on every write-critical action (edits, builds, tests) — the shell cwd drifts across a long session.
+
 **Enforcement point:** run `guard` before writing any code. A non-`ok` result is a hard stop — create the worktree first (path from `worktree-path`), re-run `guard`, then code. If you are about to write code and have not run `guard`, stop.
 
-**Before creating the worktree:** run `gco-latest` on the main worktree to ensure the new branch is based on the latest `origin`. This prevents branching from stale code.
-
-```bash
-gco-latest ~/code/<repo>                           # sync main to latest origin
-worktree=$(node session-topic.mjs worktree-path <topic>)
-git worktree add "$worktree" -b <branch>             # branch from latest
-```
-
-Before writing ANY code, run guard to verify you are inside the worktree:
-
-```bash
-node session-topic.mjs guard <topic>   # exit 1 unless $PWD is the topic worktree
-```
-
 `guard` fails (exit 1) when you are in the main checkout or any other location. If it fails, stop, create the worktree, re-run `guard`, then code.
+
+**guard blind spot:** `guard` validates location only, not branch. An `ok` inside a worktree whose branch belongs to another spec's parked PR is a false pass — branch correctness comes from the worktree-check report and the branch↔spec records in the STATE.md body.
+
+**After retiring a worktree:** keep the frontmatter `prs:` entry and update the STATE.md body bullet (branch, HEAD, PR number, parked/merged status) — the body is the only durable map of parked branches.
 
 A topic may span multiple repositories, but each repository has at most one worktree within a topic.
 
@@ -302,10 +353,14 @@ A topic may span multiple repositories, but each repository has at most one work
 - Editing the main checkout during topic work instead of the topic worktree.
   - **Anti-pattern:** implementing a spec in `/home/manooog/code/.../<repo>` because the main checkout already has node_modules/rush installed.
   - **Correct:** `guard` first — if it exits 1, create the topic worktree and work there. Main-checkout state (installed deps, running dev server) is not a reason to modify it.
+- Creating or replacing a worktree without a passing `worktree-check`, or switching branches inside an existing worktree.
+  - **Anti-pattern:** `git worktree add` onto a dirty tree; a new spec's branch reusing a parked PR branch name; a worktree removed while commits are unpushed.
+  - **Correct:** `worktree-check` → remove → add → `guard`. Fresh branch name, never one registered in `prs:`.
 - Analyzing repository code on a stale main checkout without running `gco-latest` first.
   - **Anti-pattern:** grepping `~/code/<repo>` for spec baseline while main is days behind `origin`.
   - **Correct:** `gco-latest ~/code/<repo>` once per repo per topic, then read/search; if it fails (dirty tree), stop and report.
 - Creating a new topic when the current context already has one.
+- Locating a topic by recursive grep over `~/.config/sessions/` — hits `worktree-*/` build artifacts. Correct: `session-topic find`, which searches only STATE.md files.
 - Editing an already-finalized spec instead of creating a new numbered spec for follow-up work.
 - Forgetting to update `plan-status` after a plan has been executed.
 - Writing session artifacts inside the project checkout.
@@ -365,6 +420,7 @@ A topic may span multiple repositories, but each repository has at most one work
 - Choosing a worktree path by hand instead of taking it from `worktree-path` output.
 - Writing code before `guard` returns `ok`.
 - Writing topic code anywhere other than the topic worktree.
+- Creating or replacing a worktree without a passing `worktree-check`, or a new worktree branch whose name matches a parked PR branch in `prs:`.
 - Grepping or reading project checkout for spec/plan work before `gco-latest` on that repo's main worktree.
 
 ## Analysis Baseline Rationalizations — STOP and Run gco-latest
@@ -387,5 +443,6 @@ A topic may span multiple repositories, but each repository has at most one work
 | "The change is small / additive / low-risk" | Size does not decide location. The rule is unconditional inside topic mode. |
 | "I didn't commit, so the main checkout is safe" | Uncommitted edits on a detached or shared main checkout are exactly how work gets lost. "No commit" is not safety. |
 | "I'll move it to a worktree after" | The worktree must exist BEFORE the first edit, not after. |
+| "The parked worktree looks empty; checks are ceremony" | A dirty tree or unpushed commits deleted with the directory are lost work. `worktree-check` is the only preflight. |
 
 **All of these mean: stop, create the topic worktree, re-run guard, then code.**
