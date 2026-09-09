@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { ADJECTIVES } from './words/adjectives.mjs';
 import { NOUNS } from './words/nouns.mjs';
 
-const COMMANDS = ['init', 'resolve', 'artifact-create', 'plan-status', 'verify', 'worktree-path', 'worktree-check', 'guard', 'find', 'pr-add'];
+const COMMANDS = ['init', 'resolve', 'artifact-create', 'plan-status', 'artifact-remove', 'verify', 'worktree-path', 'worktree-check', 'guard', 'find', 'pr-add'];
+const DOC_NUMBER_FLOOR = 1;
 const PLAN_STATUSES = ['open', 'implemented'];
 const ARTIFACT_TYPES = ['spec', 'plan', 'research', 'handoff', 'uat-case', 'notes'];
 const NON_SPEC_ARTIFACT_TYPES = ['research', 'handoff', 'uat-case', 'notes'];
@@ -259,26 +260,45 @@ function writeState(topic, state) {
   writeFileSync(join(dir, 'STATE.md'), formatState(state));
 }
 
-function parseArtifactNumber(filename) {
-  const match = filename.match(/^(\d{2,})-/);
+function parseSpecNumber(filename) {
+  const match = filename.match(/^(\d{2,})-.+\.spec\.md$/);
   return match ? parseInt(match[1], 10) : 0;
 }
 
-function nextArtifactNumber(topic) {
+function nextSpecNumber(topic) {
   const state = readState(topic);
-  const numbers = [
-    ...state.specs.map((s) => parseInt(s.id, 10)),
-    ...state.artifacts.map((a) => parseInt(a.id, 10)),
-  ];
+  const numbers = state.specs.map((s) => parseInt(s.id, 10));
   const dir = topicDir(topic);
   if (existsSync(dir)) {
     for (const file of readdirSync(dir)) {
-      const n = parseArtifactNumber(file);
+      const n = parseSpecNumber(file);
       if (n > 0) numbers.push(n);
     }
   }
   const max = numbers.length > 0 ? Math.max(...numbers) : 0;
   return String(max + 1).padStart(2, '0');
+}
+
+function nextDocNumber(topic) {
+  const state = readState(topic);
+  const numbers = [DOC_NUMBER_FLOOR - 1];
+  for (const a of state.artifacts || []) {
+    if (!(a.file || '').startsWith('D-')) continue;
+    const n = parseInt(String(a.id).replace(/^D-/i, ''), 10);
+    if (!Number.isNaN(n)) numbers.push(n);
+  }
+  const tombstones = state.body || '';
+  for (const m of tombstones.matchAll(/^\u003e artifact D-(\d+) \(/gm)) {
+    numbers.push(parseInt(m[1], 10));
+  }
+  const dir = topicDir(topic);
+  if (existsSync(dir)) {
+    for (const file of readdirSync(dir)) {
+      const m = file.match(/^D-(\d{2,})-.+\.(?:research|handoff|uat-case|notes)\.md$/);
+      if (m) numbers.push(parseInt(m[1], 10));
+    }
+  }
+  return String(Math.max(...numbers) + 1).padStart(2, '0');
 }
 
 function specName(topic, id) {
@@ -333,7 +353,7 @@ function resolveTopic(args) {
 }
 
 function createSpec(topic, name) {
-  const id = nextArtifactNumber(topic);
+  const id = nextSpecNumber(topic);
   const dir = topicDir(topic);
   const filename = `${id}-${name}.spec.md`;
   const file = join(dir, filename);
@@ -369,9 +389,9 @@ function createPlan(topic, id) {
 }
 
 function createOtherArtifact(topic, type, name) {
-  const id = nextArtifactNumber(topic);
+  const id = nextDocNumber(topic);
   const dir = topicDir(topic);
-  const filename = `${id}-${name}.${type}.md`;
+  const filename = `D-${id}-${name}.${type}.md`;
   const file = join(dir, filename);
 
   mkdirSync(dir, { recursive: true });
@@ -625,17 +645,53 @@ function parseNumberedMdFile(file) {
   if (planMatch) return { kind: 'plan', id: planMatch[1], name: planMatch[2], type: 'plan' };
 
   for (const type of NON_SPEC_ARTIFACT_TYPES) {
-    const pattern = new RegExp(`^(\\d{2,})-(.+)\\.${type.replace('-', '\\-')}\\.md$`);
+    const pattern = new RegExp(`^(?:D-)?(\\d{2,})-(.+)\\.${type.replace('-', '\\-')}\\.md$`);
     const match = file.match(pattern);
     if (match) return { kind: 'artifact', id: match[1], name: match[2], type };
   }
 
-  const numberedMatch = file.match(/^(\d{2,})-(.+)\.md$/);
+  const numberedMatch = file.match(/^(?:D-)?(\d{2,})-(.+)\.md$/);
   if (numberedMatch) {
     return { kind: 'invalid', id: numberedMatch[1], name: numberedMatch[2], type: null };
   }
 
   return null;
+}
+
+function artifactRemove(args) {
+  const { positional, flags } = splitFlags(args, ['--reason']);
+  const [topic, idArg] = positional;
+  if (!topic || !idArg) {
+    throw new Error('usage: session-topic artifact-remove <topic> <id> [--reason <text>]');
+  }
+  validateTopicName(topic);
+  const numeric = parseInt(String(idArg).replace(/^D-/i, ''), 10);
+  if (Number.isNaN(numeric)) throw new Error(`invalid artifact id: ${idArg}`);
+  const id = String(numeric);
+  const state = readState(topic);
+  if (!state.artifacts) state.artifacts = [];
+  const idx = state.artifacts.findIndex((a) => Number(String(a.id).replace(/^D-/i, '')) === numeric);
+  if (idx < 0) {
+    throw new Error(
+      `artifact ${idArg} not registered in ${topic}` +
+        (state.specs.some((s) => String(s.id) === id)
+        ? ' (this id belongs to a spec; specs/plans cannot be removed — the full chain is kept for retrospection)'
+        : ''),
+    );
+  }
+  const entry = state.artifacts[idx];
+  const file = join(topicDir(topic), entry.file || `${entry.id}-${expectedArtifactFilename(entry.name, entry.type)}`);
+  if (existsSync(file)) {
+    unlinkSync(file);
+  } else {
+    console.log(`note: file already absent: ${file}`);
+  }
+  state.artifacts.splice(idx, 1);
+  const reason = flags['--reason'] || 'no reason given';
+  const tombstone = `> artifact ${(entry.file || '').startsWith('D-') ? 'D-' : ''}${entry.id} (${entry.name}, ${entry.type}) removed ${today()}: ${reason}`;
+  state.body = `${state.body ? state.body.replace(/\s*$/, '') + '\n\n' : ''}${tombstone}\n`;
+  writeState(topic, state);
+  console.log(`removed: ${basename(file)} (artifact ${id}, ${entry.type})`);
 }
 
 function verifyTopic(args) {
@@ -659,7 +715,7 @@ function verifyTopic(args) {
     if (!file.endsWith('.md')) continue;
     if (file === 'STATE.md') continue;
 
-    const numberedMatch = file.match(/^(\d{2,})-.+\.md$/);
+    const numberedMatch = file.match(/^(?:D-)?(\d{2,})-.+\.md$/);
     if (!numberedMatch) {
       issues.push(
         `${file} 是未注册的非编号文件(不在 STATE.md 中,且不符合 NN-<name>.<type>.md 命名)。` +
@@ -759,7 +815,7 @@ function verifyTopic(args) {
           `修复:对齐 STATE.md 注册类型或重命名文件后重跑 verify`,
       );
     }
-    const expectedFile = `${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`;
+    const expectedFile = `${reg.file && reg.file.startsWith('D-') ? 'D-' : ''}${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`;
     if (reg.file !== expectedFile) {
       issues.push(
         `artifact ${reg.id} (${reg.name}) STATE.md file 字段(${reg.file})与期望文件名(${expectedFile})不一致。` +
@@ -778,8 +834,8 @@ function verifyTopic(args) {
     const artifactFile = artifactFiles.find((a) => a.id === reg.id);
     if (!artifactFile) {
       issues.push(
-        `artifact ${reg.id} (${reg.name}, type:${reg.type}) 已注册但 ${reg.file || `${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`} 不存在。` +
-          `修复:session-topic artifact-create ${topic} ${reg.type} ${reg.name} 重建`,
+        `artifact ${reg.id} (${reg.name}, type:${reg.type}) 已注册但 ${reg.file || `${reg.file && reg.file.startsWith('D-') ? 'D-' : ''}${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`} 不存在。` +
+          `修复:内容已并走则 session-topic artifact-remove ${topic} ${reg.id} 清理注册,内容仍需要则 session-topic artifact-create ${topic} ${reg.type} ${reg.name} 重建`,
       );
       continue;
     }
@@ -1146,6 +1202,11 @@ Commands:
                                     Types: spec | plan | research | handoff | uat-case | notes
                                     For plan, <name-or-spec-id> is the spec id (reuses spec number/name)
   plan-status <topic> <spec-id> <status>  Update plan status (open|implemented)
+  artifact-remove <topic> <id> [--reason <text>]
+                                Hard-delete a non-spec artifact (file + registration),
+                                append a tombstone line to STATE.md body; specs/plans
+                                are never removable. New docs use D-NN numbering from
+                                D-100; legacy NN docs are grandfathered.
   verify <topic>                  Verify STATE.md matches artifact files; exit 1 on drift
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
   worktree-check <topic> --repo <main-checkout-path>
@@ -1176,6 +1237,7 @@ function main(argv) {
     case 'resolve': resolveTopic(args); break;
     case 'artifact-create': artifactCreate(args); break;
     case 'plan-status': planStatus(args); break;
+    case 'artifact-remove': artifactRemove(args); break;
     case 'verify': code = verifyTopic(args); break;
     case 'worktree-path': worktreePath(args); break;
     case 'worktree-check': code = worktreeCheck(args); break;

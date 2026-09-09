@@ -1,182 +1,176 @@
-# Spec 写作规范
+# Spec Writing Guide
 
-## 核心原则
+## Core Principle
 
-Spec 是**实施方案**，不是讨论记录。
+A spec is an **implementation plan**, not a discussion record.
 
-| 讨论记录（❌） | 实施方案（✅） |
-|---------------|---------------|
-| 列出选项 A/B/C，说「选了 B」 | 直接描述 B 的实现方式 |
-| 「我们讨论了 X，认为...」 | 「X 的处理方式是...」 |
-| D1-D17 平铺决策列表 | 按实施逻辑组织的结构化方案 |
-| 大段背景复述 | 精简的问题陈述 |
-| 「待定」「后续确认」 | 已决断的结论或明确的范围外 |
+| Discussion record (❌) | Implementation plan (✅) |
+|---|---|
+| Lists options A/B/C and says "B was chosen" | Describes how B is implemented directly |
+| "We discussed X and concluded..." | "X is handled by..." |
+| Flat D1–D17 decision list | Structure organized by implementation logic |
+| Long background recap | Compact problem statement |
 
-## 标准结构
+## Standard Structure
 
-### 必须 section
+### Required sections
 
 ```markdown
-# Spec NN: <简明标题>
+# Spec NN: <concise title>
 
-## 1. 问题陈述
-用 3-5 句话说清楚：现状是什么、问题是什么、影响有多大。
+## 1. Problem statement
+3–5 sentences: current state, the problem, the impact.
 
-## 2. 目标
-一句话：这次改动要达成什么。
+## 2. Goal
+One sentence: what this change achieves.
 
-## 3. 实施方案
-这是 spec 的核心。按实施逻辑组织，不是按讨论顺序。
+## 3. Implementation plan
+The core of the spec. Organized by implementation logic, not discussion order.
 
-### 3.1 改动范围
-列出要改的文件、类、方法。用表格或列表。
+### 3.1 Change scope
+Files, classes, methods to touch. Table or list.
 
-### 3.2 核心流程
-用 mermaid 图表展示调用链/状态变化/数据流。
+### 3.2 Core flow
+Mermaid diagram of the call chain / state changes / data flow.
 
-### 3.3 关键实现
-代码片段或伪代码，展示核心逻辑。
+### 3.3 Key implementation
+Code snippets or pseudocode showing the core logic.
 
-### 3.4 边界条件
-用表格列出所有状态组合及其处理方式。
+### 3.4 Boundary conditions
+Table listing every state combination and its handling.
 
-## 4. 验收标准
-可勾选的检查项，分场景测试/回归/手工验证。
+## 4. Acceptance criteria
+Checkable items, grouped by scenario tests / regression / manual verification.
 
-## 5. 风险与回退
-每个风险配一个具体的回退路径。
+## 5. Risks and rollback
+Each risk paired with a concrete rollback path.
 
-## 6. 范围外
-明确列出不做的事。
+## 6. Out of scope
+Explicit list of what is not done.
 ```
 
-### 可选 section
+### Optional sections
 
-- **背景**：仅当问题需要大量上下文才加，且控制在 5 句内
-- **决策记录**：仅当有多个备选方案且需要解释「为什么选这个」时加
-- **依赖/前置条件**：仅当实现依赖外部系统或团队时加
-- **部署策略**：仅当部署有特殊要求时加
+- **Background**: only when the problem needs extensive context, max 5 sentences
+- **Decision record**: only when multiple alternatives existed and the "why" needs explaining
+- **Dependencies / prerequisites**: only when implementation depends on external systems or teams
+- **Deployment strategy**: only when deployment has special requirements
 
-## 图表规范
+## Diagram Rules
 
-### 何时用哪种图
+### Which diagram for which case
 
-| 场景 | 图表类型 | 示例 |
-|------|---------|------|
-| 调用链/API 流程 | sequenceDiagram | PM 调用 submit → 后端处理 → DB 更新 |
-| 分支决策逻辑 | flowchart | 状态检查 → 不同分支处理 |
-| 状态变化 | stateDiagram | Draft → Submitted → Approved |
-| 数据模型关系 | classDiagram / erDiagram | 实体关系 |
+| Scenario | Diagram type | Example |
+|---|---|---|
+| Call chain / API flow | sequenceDiagram | PM calls submit → backend processes → DB update |
+| Branching decision logic | flowchart | state check → different branches |
+| State changes | stateDiagram | Draft → Submitted → Approved |
+| Data model relations | classDiagram / erDiagram | entity relations |
 
-### 图表写作要求
+### Diagram writing requirements
 
-1. **节点/参与者用简短标签**，不用完整句子
-2. **边/箭头用动词短语**，说明「做什么」
-3. **分支用条件标签**，说明「什么条件」
-4. **避免交叉连线**，必要时拆成多张图
+1. Short labels for nodes/actors, not full sentences
+2. Edges use verb phrases describing the action
+3. Branches carry condition labels
+4. Avoid crossing lines; split into multiple diagrams when necessary
 
-### 示例
+**❌ Bad**
 
-**❌ 差**
 ```mermaid
 sequenceDiagram
-    participant A as 公司门户的项目经理用户
-    participant B as 后端API服务器
-    A->>B: 点击提交按钮，发送HTTP POST请求到/company-portal/rental-applications/{id}/submit
+    participant A as Property Manager user of the company portal
+    participant B as Backend API server
+    A->>B: clicks the submit button, sends an HTTP POST request to /company-portal/rental-applications/{id}/submit
 ```
 
-**✅ 好**
+**✅ Good**
+
 ```mermaid
 sequenceDiagram
     participant PM as PM
     participant API as POST /submit
     participant Ext as ExternalSubmitUseCase
-    
+
     PM->>API: submit application
     API->>Ext: Execute(id)
 ```
 
-## 代码片段规范
+## Code Snippet Rules
 
-1. **只放核心逻辑**，不要完整类文件
-2. **标注改动位置**（新增/修改/删除）
-3. **省略号表示省略**，不要写完整代码
-4. **用注释说明意图**，不是翻译代码
+1. Core logic only, never full class files
+2. Mark the change location (new / modified / deleted)
+3. Use ellipses for elided parts
+4. Comments state intent, not translations
 
-### 示例
+**❌ Bad**
 
-**❌ 差**
 ```csharp
 public class ExternalSubmitRentalApplicationUseCase
 {
     private readonly IAcceptTermsUseCase _acceptTermsUseCase;
-    // ... 50行完整代码
+    // ... 50 lines of full code
 }
 ```
 
-**✅ 好**
+**✅ Good**
+
 ```csharp
-// ExternalSubmitRentalApplicationUseCase.Execute 新增逻辑
+// New logic in ExternalSubmitRentalApplicationUseCase.Execute
 if (application.Status == Draft && (MD null || TU null))
 {
     await acceptTermsUseCase.Execute(id, new AcceptTermsRequest { ... }, creator, ct);
 }
-// 现有 submit 逻辑不变
+// Existing submit logic unchanged
 ```
 
-## 常见反模式
+## Common Anti-patterns
 
-### 1. 聊天记录式
+### 1. Chat-log style
 
-**症状**：D1-D17 平铺列表，像从 Slack thread 摘录的
+Symptom: a flat D1–D17 list, like excerpts from a Slack thread.
+Fix: reorganize into "change scope → flow → implementation → boundary conditions".
 
-**修正**：按实施逻辑重组为「改动范围 → 流程 → 实现 → 边界条件」
+### 2. Discussion-record style
 
-### 2. 讨论记录式
+Symptom: "We discussed A, B, C and finally chose B because..."
+Fix: write "Plan B: ..." directly; compress the "why" into one sentence.
 
-**症状**：「我们讨论了 A、B、C 三个方案，最终选择了 B，因为...」
+### 3. Undecided style
 
-**修正**：直接写「方案 B：...」，把「为什么」压缩到一句话
+Symptom: "TBD", "to be confirmed", "decide during implementation".
+Fix: decide now, or move it to out of scope explicitly.
 
-### 3. 未决断式
+### 4. Over-background style
 
-**症状**：「待定」「后续确认」「实现时再定」
+Symptom: half a page of background and three lines of implementation.
+Fix: background max 5 sentences; the implementation plan is the body.
 
-**修正**：要么现在定下来，要么明确写进「范围外」
+### 5. No diagrams
 
-### 4. 过度背景式
+Symptom: a flow with 3+ steps or 2+ branches described in pure prose.
+Fix: any non-trivial flow must have a diagram.
 
-**症状**：背景写了半页，实施方案只有几行
+## From Discussion to Spec
 
-**修正**：背景最多 5 句，实施方案是主体
+When converting discussion notes or chat context into a spec:
 
-### 5. 无图式
+1. Extract decisions from the discussion
+2. Reorganize by implementation logic (not discussion order)
+3. Add diagrams for textual flows
+4. Delete noise: discussion process, option comparison, justification (unless necessary)
+5. Verify completeness: every section executable and testable
 
-**症状**：纯文字描述复杂流程，读者需要自己画图才能理解
+## Self-check
 
-**修正**：任何涉及 3 个以上步骤或 2 个以上分支的流程，必须有图
+After writing the spec, verify:
 
-## 从讨论到 Spec 的转化流程
-
-当用户给你一个讨论记录或聊天上下文，要转化为 spec 时：
-
-1. **提取决策**：从讨论中提取所有已做的决策
-2. **重组结构**：按实施逻辑（不是讨论顺序）组织
-3. **补充图表**：把文字描述的流程画成图
-4. **删除噪声**：删除讨论过程、选项对比、理由陈述（除非必要）
-5. **验证完整性**：检查每个 section 是否可执行、可测试
-
-## 自检清单
-
-写完 spec 后，用这个清单自检：
-
-- [ ] 问题陈述 ≤ 5 句？
-- [ ] 目标是一句话？
-- [ ] 实施方案有流程图/时序图？
-- [ ] 核心逻辑有代码片段？
-- [ ] 边界条件是表格？
-- [ ] 验收标准可勾选？
-- [ ] 没有「待定」「后续确认」？
-- [ ] 没有 D1-D17 式平铺列表？
-- [ ] 图表节点标签简短？
-- [ ] 范围外明确列出？
+- [ ] Problem statement ≤ 5 sentences?
+- [ ] Goal is one sentence?
+- [ ] Implementation plan has a flow/sequence diagram?
+- [ ] Core logic has code snippets?
+- [ ] Boundary conditions are a table?
+- [ ] Acceptance criteria are checkable?
+- [ ] No "TBD" / "to be confirmed"?
+- [ ] No flat D1–D17 lists?
+- [ ] Diagram labels are short?
+- [ ] Out of scope is explicit?
