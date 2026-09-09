@@ -54,7 +54,11 @@ One step that handles PR state check to body creation:
 
 Run only when the session already produced UI screenshots (walkthrough/dev captures); skip silently when none exist. Do not stage a capture session just for this step.
 
-**SUB-SKILL:** `attach-pr-images`. Uploads the images and splices them into the body's screenshots section (created if missing). Must run **after** every full body replace — a replaced body wipes previously embedded images, so on update flows this step re-runs after the body step even if the images did not change.
+**Tool:** `gh ≥ 2.99` native `--attach` flag on `gh pr create` / `gh pr edit`. The old `attach-pr-images` sub-skill is deprecated and removed.
+
+- `gh pr edit <n> --attach './img.png#Alt text'` — without a body flag the attachment is appended to the existing body; with `--body-file`, `![alt](./img.png)` references in the body are rewritten to the uploaded asset URL.
+- Alt text follows `#` after the path; up to 50 files per command.
+- On update flows, run after every full body replace — a replaced body wipes previously embedded images unless re-attached in the same command.
 
 ### Insert UAT comment
 
@@ -92,7 +96,7 @@ flowchart TD
 - Stopping at file generation after `pr-uat-case-gen` without publishing the UAT comment to the PR.
 - Creating duplicate UAT comments on the same PR instead of patching the existing one.
 - Resetting reviewers on an existing PR — assignment is create-only; update never touches reviewers.
-- Attaching screenshots before the body step — a full body replace wipes the embeds; attach after.
+- Attaching screenshots before the body step — on update flows re-run `--attach` after any full body replace, or pass `--attach` in the same command as `--body-file`.
 - Frontend PR depends on a backend change but ships without the `waiting for backend` label.
 - Writing the backend PR link as bare text (`backend PR #NNN`), backticked code (`` `https://…` ``), or a relative path — none are clickable; always `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)`.
 
