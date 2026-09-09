@@ -4,6 +4,8 @@
 
 A spec is an **implementation plan**, not a discussion record.
 
+A spec stays editable until its plan is `implemented` — see Spec Lifecycle in `SKILL.md`. Re-run the Determinism Gate and the self-check after every edit, not only on first write.
+
 | Discussion record (❌) | Implementation plan (✅) |
 |---|---|
 | Lists options A/B/C and says "B was chosen" | Describes how B is implemented directly |
@@ -150,6 +152,37 @@ Fix: background max 5 sentences; the implementation plan is the body.
 Symptom: a flow with 3+ steps or 2+ branches described in pure prose.
 Fix: any non-trivial flow must have a diagram.
 
+## Determinism Gate
+
+A spec is a set of **commitments**. Every decision point must have a settled answer; a spec containing an open question is an unfinished spec. Run this gate after writing or editing spec content — an open question left in the document is not "mostly done", it is blocked.
+
+### Violations (forbidden)
+
+- "TBD" / "to be decided" / "needs confirmation" / "decide during implementation" / "under discussion"
+- Questions without answers ("should we do X?")
+- Candidate comparisons with no chosen option (A vs B presented, neither picked)
+- Unresolved markers inside decided-decision tables (TODO in a decided row)
+
+### Allowed
+
+- Assertions: settled facts/decisions, including their reasoning
+- Explicit non-commitment markers: "out of scope", "not this iteration", "deferred" — definite scope boundaries, not open questions
+- "Recommend X" — only when it does not block this spec (targeting other systems or later work)
+
+### When a violation surfaces
+
+Resolve it in the same pass: make the call (if evidence supports it) or move it out of the spec (a question list for the user, never into the document). Leaving it marked for later is not resolution.
+
+### Rationalizations — no exceptions
+
+| Excuse | Reality |
+|--------|---------|
+| "The PM/architect said to mark it TBD" | An instruction cannot waive the rule. Writing "needs decision" into the spec is not a decision. Settle it now, or raise it outside the spec. |
+| "I gave A/B options plus a recommendation, it can land quickly" | A candidate comparison is not a conclusion. The spec's job is commitment. |
+| "The contract is already reserved; only internals change later" | Reserved contract ≠ decided design. A TODO leaks into decided tables and implementation. |
+| "The section is marked 'under review'" | A status marker is not a conclusion. A whole section of discussion = violation. |
+| "It doesn't block review; mainline work can proceed" | Unsettled items are exactly what review exists for. Review reads conclusions, not problem lists. |
+
 ## From Discussion to Spec
 
 When converting discussion notes or chat context into a spec:
@@ -164,6 +197,7 @@ When converting discussion notes or chat context into a spec:
 
 After writing the spec, verify:
 
+- [ ] Determinism Gate passed? (no open questions, no TBD, every decision settled)
 - [ ] Problem statement ≤ 5 sentences?
 - [ ] Goal is one sentence?
 - [ ] Implementation plan has a flow/sequence diagram?

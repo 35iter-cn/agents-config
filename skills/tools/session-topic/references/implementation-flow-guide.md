@@ -2,13 +2,13 @@
 
 How to execute an accepted plan inside a session topic: verify the plan, run tasks one by one, review each task, and close out.
 
-Read this guide when creating a plan or starting plan execution. The topic skeleton (worktrees, guards, artifact registration) lives in `SKILL.md` — this guide covers only execution discipline and never duplicates CLI commands.
+Read this guide when creating a plan or starting plan execution. The topic skeleton (worktrees, guards, artifact registration) lives in `SKILL.md` and `references/worktrees.md` — this guide covers only execution discipline and never duplicates CLI commands.
 
 ## Preconditions
 
 - The spec passed the Determinism Gate and was accepted by the user.
 - The plan exists: `artifact-create <topic> plan <spec-id>` produced `NN-<name>.plan.md` and `plan: open` in STATE.md.
-- The topic worktree exists and `guard` returns `ok` (see Worktrees in `SKILL.md`).
+- The topic worktree exists and `guard` returns `ok` (see `references/worktrees.md`).
 
 Do not start execution while any precondition is missing.
 
@@ -68,8 +68,7 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 
 ## Anti-patterns
 
-- Writing plan or code in the main checkout
-- Skipping the worktree because "the change is small"
+- Writing plan or code in the main checkout (see `references/worktrees.md`)
 - Writing code before the plan exists
 - Starting execution before the plan checklist passes
 - Accepting placeholders in the plan
@@ -77,4 +76,4 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 - Refactoring or reformatting code the change didn't touch
 - Marking a task complete without running its verification
 - Skipping the review gate because the user seems impatient
-- Editing an already-finalized spec instead of creating a new numbered spec for follow-up work
+- Opening a new numbered spec for a task whose spec is still `plan: open`; editing a spec whose plan is `implemented` (see Spec Lifecycle in `SKILL.md`)
