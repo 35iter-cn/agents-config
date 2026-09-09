@@ -82,13 +82,15 @@ function parseState(content, topic = '') {
   const frontmatter = lines.slice(1, endIndex).join('\n');
   const body = lines.slice(endIndex + 1).join('\n').replace(/^\n+/, '');
 
-  const state = { topic: '', title: '', created: today(), current_spec: '', specs: [], artifacts: [], prs: [] };
+  const state = { topic: '', title: '', created: today(), current_spec: '', specs: [], artifacts: [], prs: [], tombstones: [] };
   let currentSpec = null;
   let currentArtifact = null;
   let currentPr = null;
+  let currentTombstone = null;
   let inSpecs = false;
   let inArtifacts = false;
   let inPrs = false;
+  let inTombstones = false;
 
   for (const line of frontmatter.split('\n')) {
     const trimmed = line.trim();
@@ -119,6 +121,15 @@ function parseState(content, topic = '') {
       currentPr = null;
       continue;
     }
+    if (trimmed === 'tombstones:') {
+      inTombstones = true;
+      inSpecs = false;
+      inArtifacts = false;
+      inPrs = false;
+      currentTombstone = null;
+      continue;
+    }
+
 
     if (inSpecs) {
       const listMatch = trimmed.match(/^- id:\s*(.+)$/);
@@ -161,6 +172,25 @@ function parseState(content, topic = '') {
       }
 
       inArtifacts = false;
+    }
+
+    if (inTombstones) {
+      const listMatch = trimmed.match(/^-\s*(\w+):\s*(.+)$/);
+      if (listMatch) {
+        currentTombstone = { kind: listMatch[1].trim(), id: listMatch[2].trim() };
+        state.tombstones.push(currentTombstone);
+        continue;
+      }
+      if (currentTombstone) {
+        const colonIndex = trimmed.indexOf(':');
+        if (colonIndex !== -1) {
+          const key = trimmed.slice(0, colonIndex).trim();
+          const value = trimmed.slice(colonIndex + 1).trim();
+          if (['name', 'type', 'file', 'removed', 'reason'].includes(key)) currentTombstone[key] = value;
+        }
+        continue;
+      }
+      inTombstones = false;
     }
 
     if (inPrs) {
@@ -227,6 +257,14 @@ function formatPr(pr) {
   return lines;
 }
 
+function formatTombstone(t) {
+  let lines = `  - ${t.kind}: ${t.id}`;
+  for (const key of ['name', 'type', 'file', 'removed', 'reason']) {
+    if (t[key] !== undefined) lines += `\n    ${key}: ${t[key]}`;
+  }
+  return lines;
+}
+
 function formatState(state) {
   const lines = [
     '---',
@@ -242,6 +280,9 @@ function formatState(state) {
   if (state.prs && state.prs.length > 0) {
     lines.push('prs:', ...state.prs.map(formatPr));
   }
+  if (state.tombstones && state.tombstones.length > 0) {
+    lines.push('tombstones:', ...state.tombstones.map(formatTombstone));
+  }
   lines.push('---', '', state.body);
   return lines.join('\n');
 }
@@ -249,7 +290,7 @@ function formatState(state) {
 function readState(topic) {
   const path = join(topicDir(topic), 'STATE.md');
   if (!existsSync(path)) {
-    return { topic, title: '', created: today(), current_spec: '', specs: [], artifacts: [], prs: [], body: '' };
+    return { topic, title: '', created: today(), current_spec: '', specs: [], artifacts: [], prs: [], tombstones: [], body: '' };
   }
   return parseState(readFileSync(path, 'utf-8'), topic);
 }
@@ -268,7 +309,13 @@ function parseSpecNumber(filename) {
 function nextSpecNumber(topic) {
   const state = readState(topic);
   const numbers = state.specs.map((s) => parseInt(s.id, 10));
+  for (const t of state.tombstones || []) {
+    if (t.kind === 'spec') numbers.push(parseInt(String(t.id), 10));
+  }
   const dir = topicDir(topic);
+  for (const m of (state.body || '').matchAll(/^> spec (\d+) \(/gm)) {
+    numbers.push(parseInt(m[1], 10));
+  }
   if (existsSync(dir)) {
     for (const file of readdirSync(dir)) {
       const n = parseSpecNumber(file);
@@ -290,6 +337,11 @@ function nextDocNumber(topic) {
   const tombstones = state.body || '';
   for (const m of tombstones.matchAll(/^\u003e artifact D-(\d+) \(/gm)) {
     numbers.push(parseInt(m[1], 10));
+  }
+  for (const t of state.tombstones || []) {
+    if (t.kind !== 'artifact') continue;
+    const n = parseInt(String(t.id).replace(/^D-/i, ''), 10);
+    if (!Number.isNaN(n)) numbers.push(n);
   }
   const dir = topicDir(topic);
   if (existsSync(dir)) {
@@ -658,42 +710,143 @@ function parseNumberedMdFile(file) {
   return null;
 }
 
+const REMOVE_TYPES = ARTIFACT_TYPES;
+
 function artifactRemove(args) {
-  const { positional, flags } = splitFlags(args, ['--reason']);
+  const { positional, flags } = splitFlags(args, ['--reason', '--type', '--confirmed']);
   const [topic, idArg] = positional;
   if (!topic || !idArg) {
-    throw new Error('usage: session-topic artifact-remove <topic> <id> [--reason <text>]');
+    throw new Error(
+      'usage: session-topic artifact-remove <topic> <id> [--type spec|plan|research|handoff|uat-case|notes] [--reason <text>] [--confirmed]\n' +
+        '当 id 同时命中 spec 和 artifact 两个命名空间时，--type 必填，绝不猜。',
+    );
   }
   validateTopicName(topic);
   const numeric = parseInt(String(idArg).replace(/^D-/i, ''), 10);
-  if (Number.isNaN(numeric)) throw new Error(`invalid artifact id: ${idArg}`);
-  const id = String(numeric);
+  if (Number.isNaN(numeric)) throw new Error(`invalid id: ${idArg}`);
+  const typeFilter = flags['--type'];
+  if (typeFilter && !REMOVE_TYPES.includes(typeFilter)) {
+    throw new Error(`invalid --type "${typeFilter}"; expected ${REMOVE_TYPES.join('|')}`);
+  }
   const state = readState(topic);
   if (!state.artifacts) state.artifacts = [];
-  const idx = state.artifacts.findIndex((a) => Number(String(a.id).replace(/^D-/i, '')) === numeric);
-  if (idx < 0) {
+  if (!state.specs) state.specs = [];
+
+  const artifactIdx = state.artifacts.findIndex(
+    (a) =>
+      Number(String(a.id).replace(/^D-/i, ''), 10) === numeric &&
+      (!typeFilter || typeFilter === a.type),
+  );
+  const spec = state.specs.find((s) => parseInt(String(s.id), 10) === numeric);
+
+  if (artifactIdx >= 0 && spec && !typeFilter) {
+    const a = state.artifacts[artifactIdx];
     throw new Error(
-      `artifact ${idArg} not registered in ${topic}` +
-        (state.specs.some((s) => String(s.id) === id)
-        ? ' (this id belongs to a spec; specs/plans cannot be removed — the full chain is kept for retrospection)'
-        : ''),
+      `id ${idArg} 同时命中两个命名空间，拒绝猜测。请用 --type 指定：\n` +
+        `  - artifact ${a.id} (${a.name}, ${a.type}, ${a.file})\n` +
+        `  - spec ${spec.id} (${spec.name}${spec.plan ? `, plan: ${spec.plan}` : ''})`,
     );
   }
-  const entry = state.artifacts[idx];
+
+  if (typeFilter === 'spec' || typeFilter === 'plan') {
+    if (!spec) {
+      throw new Error(`spec ${idArg} not registered in ${topic}`);
+    }
+    if (typeFilter === 'plan') {
+      if (!spec.plan) throw new Error(`spec ${spec.id} (${spec.name}) 没有已登记的 plan，无需删除`);
+      if (spec.plan === 'implemented') {
+        throw new Error(
+          `spec ${spec.id} (${spec.name}) 的 plan 已实施，属完整实施链记录，不可删除。如需纠偏/后续工作，请按规范新建 spec`,
+        );
+      }
+      const file = join(topicDir(topic), `${spec.id}-${spec.name}.plan.md`);
+      removeFileOrNote(file);
+      const reason = flags['--reason'] || 'no reason given';
+      addTombstone(state, { kind: 'plan', id: spec.id, name: spec.name, removed: today(), reason });
+      spec.plan = null;
+      writeState(topic, state);
+      console.log(`removed: ${basename(file)} (plan ${spec.id})`);
+      return;
+    }
+    if (spec.plan === 'implemented') {
+      throw new Error(
+        `spec ${spec.id} (${spec.name}) 已实施（plan=implemented），属完整实施链记录，不可删除。如需纠偏/后续工作，请按规范新建 spec`,
+      );
+    }
+    if (spec.plan) {
+      throw new Error(
+        `spec ${spec.id} (${spec.name}) 还有已登记的 plan，先删 plan 再删 spec：\n` +
+          `  session-topic artifact-remove ${topic} ${spec.id} --type plan`,
+      );
+    }
+    if (!flags['--confirmed']) {
+      throw new Error(
+        'spec 删除是危险操作，需要用户明确指令。加 --confirmed 表示用户已明确要求删除，' +
+          '并在 --reason 中注明指令来源。',
+      );
+    }
+    const reason = flags['--reason'];
+    if (!reason) {
+      throw new Error('spec 删除必须带 --reason，注明用户指令来源（何时/何语境要求删除）');
+    }
+    const file = join(topicDir(topic), `${spec.id}-${spec.name}.spec.md`);
+    removeFileOrNote(file);
+    addTombstone(state, { kind: 'spec', id: spec.id, name: spec.name, removed: today(), reason });
+    state.specs = state.specs.filter((s) => s !== spec);
+    if (state.current_spec === spec.id) {
+      const last = state.specs[state.specs.length - 1];
+      state.current_spec = last ? last.id : '';
+    }
+    writeState(topic, state);
+    console.log(`removed: ${basename(file)} (spec ${spec.id})`);
+    return;
+  }
+
+  if (artifactIdx < 0) {
+    const specHint = spec
+      ? ` (这个 id 属于 spec ${spec.id} (${spec.name})；请加 --type ${spec.plan ? 'plan' : 'spec'})`
+      : '';
+    throw new Error(
+      `artifact ${idArg} not registered in ${topic}${specHint}` +
+        (typeFilter ? `；--type ${typeFilter} 下未命中` : ''),
+    );
+  }
+  const entry = state.artifacts[artifactIdx];
   const file = join(topicDir(topic), entry.file || `${entry.id}-${expectedArtifactFilename(entry.name, entry.type)}`);
+  removeFileOrNote(file);
+  state.artifacts.splice(artifactIdx, 1);
+  const reason = flags['--reason'] || 'no reason given';
+  addTombstone(state, {
+    kind: 'artifact',
+    id: `${(entry.file || '').startsWith('D-') ? 'D-' : ''}${entry.id}`,
+    name: entry.name,
+    type: entry.type,
+    file: basename(file),
+    removed: today(),
+    reason,
+  });
+  writeState(topic, state);
+  console.log(`removed: ${basename(file)} (artifact ${entry.id}, ${entry.type})`);
+}
+
+function removeFileOrNote(file) {
   if (existsSync(file)) {
     unlinkSync(file);
   } else {
     console.log(`note: file already absent: ${file}`);
   }
-  state.artifacts.splice(idx, 1);
-  const reason = flags['--reason'] || 'no reason given';
-  const tombstone = `> artifact ${(entry.file || '').startsWith('D-') ? 'D-' : ''}${entry.id} (${entry.name}, ${entry.type}) removed ${today()}: ${reason}`;
-  state.body = `${state.body ? state.body.replace(/\s*$/, '') + '\n\n' : ''}${tombstone}\n`;
-  writeState(topic, state);
-  console.log(`removed: ${basename(file)} (artifact ${id}, ${entry.type})`);
 }
 
+function appendTombstone(state, line) {
+  state.body = `${state.body ? state.body.replace(/\s*$/, '') + '\n\n' : ''}${line}\n`;
+}
+
+function addTombstone(state, entry) {
+  if (!state.tombstones) state.tombstones = [];
+  state.tombstones.push(entry);
+  const label = entry.type ? ` (${entry.name}, ${entry.type})` : ` (${entry.name})`;
+  appendTombstone(state, `> ${entry.kind} ${entry.id}${label} removed ${entry.removed}: ${entry.reason}`);
+}
 function verifyTopic(args) {
   if (args.length < 1) throw new Error('usage: session-topic verify <topic>');
   const [topic] = args;
@@ -874,12 +1027,18 @@ const PR_WITH_REPO_RE = /\b([A-Za-z][A-Za-z0-9_-]*)\s+PR\s*\*{0,2}#(\d+)\*{0,2}/
 const BODY_BRANCH_RE = /branch\s+`([^`]+)`/gi;
 const LAYER_WEIGHTS = { registry: 6, canonical: 5, url: 4, worktree: 3, loose: 2, keyword: 1 };
 
+const BOOLEAN_FLAGS = ['--confirmed'];
+
 function splitFlags(args, allowed) {
   const positional = [];
   const flags = {};
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (allowed.includes(arg)) {
+      if (BOOLEAN_FLAGS.includes(arg)) {
+        flags[arg] = true;
+        continue;
+      }
       const value = args[i + 1];
       if (value === undefined) throw new Error(`missing value for ${arg}`);
       flags[arg] = value;
