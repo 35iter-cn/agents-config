@@ -6,10 +6,11 @@
 - **The body is LLM-owned and actively maintained.** Keep a `# Session State` summary (spec progress, worktree status, artifacts) plus durable conclusions — decisions, milestones, architecture notes worth carrying across sessions. The CLI preserves the body when it rewrites STATE.md.
 - `artifacts:` entries are `{ id, name, type, file }`, where `type` is `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`).
 - Update STATE.md in the same turn progress happens — spec finalized, milestone done, `plan-status` changed — not at session end.
+- **Body revisions are committed in the same turn.** Material changes to the body land in the sessions git repo with a one-line commit message; the diff carries the detail. The sessions root is a git repo; worktrees are gitignored.
 
 ## Body writing rules (dashboard + index)
 
-The body is a dashboard and an index — never a second spec. Knowledge lives in artifacts; STATE.md only points at it. Five zones:
+The body is a dashboard and an index — never a second spec. Knowledge lives in artifacts; STATE.md only points at it. These rules are gates, not defaults: user pressure does not waive them (same clause as the Enforcement Checkpoints in `SKILL.md`). Five zones:
 
 **1. Status table** — one row per spec: `| Spec | Freeze | PR | Next |`. Freeze tracks the user-initiated freeze (`open` / `frozen`); Next holds the per-spec hint (together with Todos, the only places allowed to carry todo semantics).
 

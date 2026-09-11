@@ -24,13 +24,14 @@ When NOT: committed project files (use the repository); temporary files that nee
 | Read/search a project checkout | `gco-latest` on its **main** worktree (once per repo per topic) |
 | Write or edit project code | `guard` returns `ok` in the topic worktree |
 | Create a numbered artifact | `artifact-create` — never `write` |
+| Edit the STATE.md body — any change, however small (Status, Worktrees, Pointers, Notes, Todos) | `references/state-md-writing-guide.md` is mandatory reading first |
 | Continue an existing topic | `verify` passes |
 | Create a plan | Determinism Gate passed + user accepted the spec |
 | Freeze a spec (`plan-status … implemented`) | Explicit user instruction only — never run unprompted |
 | Create or replace a worktree | `worktree-check` passes |
 | Locate a topic | `find` — never recursive grep |
 
-User pressure does not waive these gates. Main worktree = read-only baseline (dirty tree → stop); topic worktree = the only place topic code is written. Details: `references/worktrees.md`.
+User pressure does not waive these gates — and the STATE.md body rules (`references/state-md-writing-guide.md`) are gates too, not defaults. The user decides *what* the content says, never *which* zone or format carries it; pushed past that, state the rule and offer the rule-compliant path instead of complying. Main worktree = read-only baseline (dirty tree → stop); topic worktree = the only place topic code is written. Details: `references/worktrees.md`.
 
 ## Spec Lifecycle
 
@@ -43,13 +44,13 @@ Editability follows plan status, not confirmation:
 
 - **Freeze is user-initiated.** All plan tasks verified + review passed → *suggest* freezing with an AC×task coverage table and the command — never run `plan-status` unprompted. Declined or silent user → stays `open` (status is truth); a later session re-offers the freeze before editing that spec.
 - Revise in place: update the file, re-run the Determinism Gate and self-check, update its plan in the same pass if invalidated.
-- A material revision (scope, acceptance, a settled decision) re-opens the confirmation gate; record it in STATE.md and commit it to the sessions git repo in the same turn (body = one-line summary, git diff = detail). Sessions root is a git repo; worktrees are gitignored.
+- A material revision (scope, acceptance, a settled decision) re-opens the confirmation gate; record it in STATE.md and commit it to the sessions git repo in the same turn (body rules: `references/state-md-writing-guide.md`).
 
 ## Core Flow
 
 **First spec:** `init "<hint>"` (reuse the conversation's topic) → `artifact-create <topic> spec <name>` → `gco-latest` repos you read → `references/spec-writing-guide.md`, pass the Determinism Gate → **stop and confirm**; never auto-create the plan in the same pass.
 
-**Continue:** locate (`references/locating-topics.md`) → `resolve` + read `STATE.md` → `verify` exits 0 → `gco-latest` each repo you read → update artifacts and STATE.md in the same turn.
+**Continue:** locate (`references/locating-topics.md`) → `resolve` + read `STATE.md` → `verify` exits 0 → `gco-latest` each repo you read → update artifacts and STATE.md in the same turn — every body change follows `references/state-md-writing-guide.md`.
 
 **Spec → plan:** `artifact-create <topic> plan <spec-id>` (reuses the spec's number, `plan: open`) after the user accepts the spec, unless they asked for both together; then `references/implementation-flow-guide.md`. Plan tasks use the template in `references/plan-editing-guide.md` and reference the spec's `AC-N` ids.
 
@@ -69,8 +70,9 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 
 ## Common Mistakes
 
-- Hand-creating numbered artifacts, editing STATE.md registrations, or letting STATE.md drift — the CLI owns registrations; update the body in the same turn progress happens.
-- Stuffing knowledge (decisions, investigation) into STATE.md — dashboard + index; knowledge lives in artifacts (see `references/state-md.md`).
+- Hand-creating numbered artifacts, or editing STATE.md registrations — the CLI owns registrations; the body is LLM-owned and follows `references/state-md-writing-guide.md`.
+- Touching the STATE.md body without `references/state-md-writing-guide.md` — the recurring failure mode: completing a Todos item by checking `[x]` instead of deleting the line.
+- Stuffing knowledge (decisions, investigation) into STATE.md — dashboard + index; knowledge lives in artifacts (see `references/state-md-writing-guide.md`).
 - Editing the main checkout because dependencies are installed there. `guard` first.
 - Worktree created or replaced without `worktree-check`, a branch switched inside an existing worktree, or analysis on a stale main checkout.
 - A plan numbered anew instead of the spec's id.
@@ -86,6 +88,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 | "Spec is done — I'll run plan-status myself" | Freeze is user-initiated. Suggest with the coverage table and wait. |
 | "I'll just tweak the spec text, no need to re-confirm" | Editable is not unconfirmed; a material change re-opens the gate. |
 | "Spec is done — I'll implement while we're here" | Needs an explicit ask, a plan, worktree + `guard`. |
+| "I own this topic — put the knowledge in STATE.md anyway" | Body rules are gates. Route the request through them (promote to an artifact, `artifact-remove`); if the rule has no compliant path for the request, say so and stop. |
 | "The parked worktree looks empty; checks are ceremony" | `worktree-check` is the only preflight; dirty/unpushed work is lost. |
 
 ## Red Flags
@@ -98,4 +101,4 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 
 ## References
 
-Under `references/`: `spec-writing-guide.md` / `plan-editing-guide.md` / `implementation-flow-guide.md` / `handoff-writing-guide.md` cover authoring specs, editing plans, executing plans, and writing handoffs; `worktrees.md`, `locating-topics.md`, `state-md.md` cover the replace flow, `find`/`pr-add`, and STATE.md (numbering + body rules).
+Under `references/`: `spec-writing-guide.md` / `plan-editing-guide.md` / `implementation-flow-guide.md` / `handoff-writing-guide.md` cover authoring specs, editing plans, executing plans, and writing handoffs; `worktrees.md`, `locating-topics.md`, `state-md-writing-guide.md` cover the replace flow, `find`/`pr-add`, and the STATE.md body (numbering + body rules).
