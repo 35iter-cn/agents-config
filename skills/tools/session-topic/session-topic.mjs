@@ -1116,7 +1116,7 @@ function collectVerifyWarnings(topic, state, specFiles, planFiles) {
     }
   }
 
-  const gitStatus = runGit(sessionsRoot(), ['status', '--porcelain']);
+  const gitStatus = runGit(sessionsRoot(), 'status --porcelain');
   if (gitStatus) {
     warns.push(`sessions 仓库有未提交的修订(git status 非空)——实质修订必须同 turn git commit`);
   }
