@@ -8,6 +8,7 @@ Read this guide when creating a plan or starting plan execution. The topic skele
 
 - The spec passed the Determinism Gate and was accepted by the user.
 - The plan exists: `artifact-create <topic> plan <spec-id>` produced `NN-<name>.plan.md` and `plan: open` in STATE.md.
+- The plan follows the task template in `references/plan-editing-guide.md` (T-n / Status / AC / Verify).
 - The topic worktree exists and `guard` returns `ok` (see `references/worktrees.md`).
 
 Do not start execution while any precondition is missing.
@@ -16,7 +17,7 @@ Do not start execution while any precondition is missing.
 
 Run this against the plan before the first task. Fix inline if any check fails.
 
-- [ ] Every requirement in the spec maps to a task
+- [ ] Every requirement in the spec maps to a task (by `AC-N` id)
 - [ ] No TBD, TODO, or vague steps
 - [ ] Names and types are consistent across tasks
 - [ ] Each task is verifiable and self-contained
@@ -62,9 +63,9 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 
 ## Close out
 
-1. `plan-status <topic> <spec-id> implemented`.
-2. Update the STATE.md body in the same turn (progress, PRs, worktree status).
-3. PR handoff via the `pr-handoff` skill (rebase, pre-push checks, PR, UAT) and register PRs with `pr-add`.
+1. **Suggest the freeze — do not run it.** Freeze is user-initiated: present the AC×task coverage table (every AC covered by a completed task, every task verified) and the command `plan-status <topic> <spec-id> implemented`, then wait. A declined or silent user leaves the spec `open` (status is truth); a later session re-offers the freeze before editing that spec.
+2. Update the STATE.md body in the same turn (progress, PRs, worktree status) and commit the material revisions to the sessions git repo.
+3. PR handoff via the `pr-handoff` skill (rebase, pre-push checks, PR, UAT) and register PRs with `pr-add` (`--spec <id>` when the PR belongs to one spec).
 
 ## Anti-patterns
 
@@ -74,6 +75,7 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 - Accepting placeholders in the plan
 - Adding features not in the spec
 - Refactoring or reformatting code the change didn't touch
+- Running `plan-status` without an explicit user instruction
 - Marking a task complete without running its verification
 - Skipping the review gate because the user seems impatient
 - Opening a new numbered spec for a task whose spec is still `plan: open`; editing a spec whose plan is `implemented` (see Spec Lifecycle in `SKILL.md`)

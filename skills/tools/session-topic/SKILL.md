@@ -26,6 +26,7 @@ When NOT: committed project files (use the repository); temporary files that nee
 | Create a numbered artifact | `artifact-create` — never `write` |
 | Continue an existing topic | `verify` passes |
 | Create a plan | Determinism Gate passed + user accepted the spec |
+| Freeze a spec (`plan-status … implemented`) | Explicit user instruction — suggest with coverage table, never run unprompted |
 | Create or replace a worktree | `worktree-check` passes |
 | Locate a topic | `find` — never recursive grep |
 
@@ -40,8 +41,11 @@ Editability follows plan status, not confirmation:
 | No plan yet, or `plan: open` | Yes — edit in place | Same spec; never a second spec for one task |
 | `plan: implemented` | No — frozen | A new numbered spec |
 
+- **Freeze is user-initiated.** When all plan tasks are verified and review passes, *suggest* freezing with an AC×task coverage table and the command (`plan-status <topic> <spec-id> implemented`) — never run `plan-status` unprompted. Declined or silent user → status stays `open` (status is truth); a later session re-offers the freeze before editing that spec.
 - Revise in place: update the file, re-run the Determinism Gate and self-check, update its plan in the same pass if invalidated.
-- A material revision (scope, acceptance, a settled decision) re-opens the confirmation gate. Record each revision in STATE.md in the same turn; `plan-status <spec-id> implemented` is the freeze marker.
+- A material revision (scope, acceptance, a settled decision) re-opens the confirmation gate. Record each revision in STATE.md in the same turn; commit it to the sessions git repo in the same turn (the body keeps the one-line semantic summary, git diff keeps the detail).
+- `plan-status <spec-id> implemented` is the freeze marker.
+- The sessions root is a git repository (`git init` + commit on material revisions). Worktrees under topics are gitignored.
 
 ## Core Flow
 
@@ -49,7 +53,7 @@ Editability follows plan status, not confirmation:
 
 **Continue:** locate (`references/locating-topics.md`) → `resolve` + read `STATE.md` → `verify` exits 0 → `gco-latest` each repo you read → update artifacts and STATE.md in the same turn.
 
-**Spec → plan:** `artifact-create <topic> plan <spec-id>` (reuses the spec's number, `plan: open`) after the user accepts the spec, unless they asked for both together; then `references/implementation-flow-guide.md`.
+**Spec → plan:** `artifact-create <topic> plan <spec-id>` (reuses the spec's number, `plan: open`) after the user accepts the spec, unless they asked for both together; then `references/implementation-flow-guide.md`. Plan tasks follow the template in `references/plan-editing-guide.md` and reference the spec's `AC-N` ids.
 
 **Code:** only in the topic worktree, at the `worktree-path` (`references/worktrees.md`).
 
@@ -68,6 +72,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 ## Common Mistakes
 
 - Hand-creating numbered artifacts, editing STATE.md registrations, or letting STATE.md drift — the CLI owns registrations; update the body in the same turn progress happens.
+- Stuffing knowledge (decisions, investigation, regression analysis) into STATE.md — it is a dashboard + index; knowledge lives in artifacts (see `references/state-md.md`).
 - Editing the main checkout because dependencies are installed there. `guard` first.
 - Worktree created or replaced without `worktree-check`, a branch switched inside an existing worktree, or analysis on a stale main checkout.
 - A second spec while `plan: open`; editing an `implemented` spec; a plan numbered anew instead of the spec's id.
@@ -80,6 +85,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 | "Skip verify, I'm in a hurry" | That is the failure scenario the check exists for. |
 | "Main is probably fine / it's just a dirty tree" | Stale or dirty main is not a baseline. `gco-latest` first; on exit 1 stop and report. |
 | "The change is small / low-risk" | Size does not decide location; the worktree rule is unconditional. |
+| "Spec is done — I'll run plan-status myself" | Freeze is user-initiated. Suggest with the coverage table and wait. |
 | "The spec is confirmed, so I'll open a 02" | Confirmed ≠ frozen. Until `implemented`, revise the same spec. |
 | "I'll just tweak the spec text, no need to re-confirm" | Editable is not unconfirmed; a material change re-opens the gate. |
 | "Spec is done — I'll implement while we're here" | Needs an explicit ask, a plan, worktree + `guard`. |
@@ -91,8 +97,9 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 - A numbered artifact not created via `artifact-create`, or an unnumbered `.md` in the topic root.
 - A hand-picked worktree path; code written before `guard` returns `ok` or outside the topic worktree.
 - A new branch matching a parked PR branch in `prs:`.
+- Running `plan-status … implemented` without an explicit user instruction.
 - A second spec while the same task's spec is `plan: open`; editing an `implemented` spec.
 
 ## References
 
-Under `references/`: `spec-writing-guide.md` and `implementation-flow-guide.md` and `handoff-writing-guide.md` cover authoring specs, executing plans, and writing handoffs; `worktrees.md`, `locating-topics.md`, and `state-md.md` cover the replace flow, `find`/`pr-add`, and STATE.md numbering.
+Under `references/`: `spec-writing-guide.md` and `plan-editing-guide.md` and `implementation-flow-guide.md` and `handoff-writing-guide.md` cover authoring specs, editing plans, executing plans, and writing handoffs; `worktrees.md`, `locating-topics.md`, and `state-md.md` cover the replace flow, `find`/`pr-add`, STATE.md numbering and body writing rules.

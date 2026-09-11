@@ -42,7 +42,7 @@ Code snippets or pseudocode showing the core logic.
 Table listing every state combination and its handling.
 
 ## 4. Acceptance criteria
-Checkable items, grouped by scenario tests / regression / manual verification.
+Numbered stable IDs — `AC-1`, `AC-2`, … — checkable items, grouped by scenario tests / regression / manual verification. Plan tasks reference these ids and `verify` cross-checks the references, so numbering is what makes coverage mechanically checkable. Mandatory for new specs; legacy specs are not backfilled (add numbering opportunistically on the next material revision).
 
 ## 5. Risks and rollback
 Each risk paired with a concrete rollback path.
@@ -152,6 +152,11 @@ Fix: background max 5 sentences; the implementation plan is the body.
 Symptom: a flow with 3+ steps or 2+ branches described in pure prose.
 Fix: any non-trivial flow must have a diagram.
 
+### 6. Progress in the spec
+
+Symptom: checkboxes, completion percentages, or "done" markers in the spec.
+Fix: the spec is the definition of done; progress lives only in the plan (see `plan-editing-guide.md`).
+
 ## Determinism Gate
 
 A spec is a set of **commitments**. Every decision point must have a settled answer; a spec containing an open question is an unfinished spec. Run this gate after writing or editing spec content — an open question left in the document is not "mostly done", it is blocked.
@@ -203,7 +208,7 @@ After writing the spec, verify:
 - [ ] Implementation plan has a flow/sequence diagram?
 - [ ] Core logic has code snippets?
 - [ ] Boundary conditions are a table?
-- [ ] Acceptance criteria are checkable?
+- [ ] Acceptance criteria are checkable and numbered (`AC-N`)?
 - [ ] No "TBD" / "to be confirmed"?
 - [ ] No flat D1–D17 lists?
 - [ ] Diagram labels are short?

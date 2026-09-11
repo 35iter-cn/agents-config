@@ -7,6 +7,33 @@
 - `artifacts:` entries are `{ id, name, type, file }`, where `type` is `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`).
 - Update STATE.md in the same turn progress happens — spec finalized, milestone done, `plan-status` changed — not at session end.
 
+## Body writing rules (dashboard + index)
+
+The body is a dashboard and an index — never a second spec. Knowledge lives in artifacts; STATE.md only points at it. Five zones:
+
+**1. Status table** — one row per spec: `| Spec | Freeze | PR | Next |`. Freeze tracks the user-initiated freeze (`open` / `frozen`); Next holds the per-spec hint (together with Todos, the only places allowed to carry todo semantics).
+
+**2. Worktree bullets** — unchanged, see `worktrees.md`.
+
+**3. Pointers** — navigation only, zero information content: `investigation → see D-01`, `decision → spec 01 Decision record`, `ACs → spec 01 §4`. Delete the pointer when the target goes. `verify` warns on refs to nonexistent files/ids.
+
+**4. Notes** — dated one-line conclusions with no artifact home yet (e.g. "2026-08-16 production data survey impossible, does not block M1"). Settled facts only; open questions are forbidden (`verify` warns on TBD/待定/待确认 — unsettled items get decided with the user, never written down). Grows past 3 lines or gets cited twice → promote to an artifact, leave a pointer.
+
+**5. Todos** — topic-level action queue, hard cap 3, order = priority (adding item 4 means demoting one). Imperative, one line, actionable. Optional `⚡` prefix marks a low-hanging fruit the next session picks up first. Completed items are deleted in the same turn (git remembers).
+
+### Knowledge placement
+
+| Content | Home |
+|---|---|
+| Settled decisions | spec Decision record section |
+| Investigation / analysis | research artifact |
+| Edge conclusions | notes artifact (Notes zone before promotion) |
+| Revision history | git commit + one-line STATE.md body summary |
+
+### Slimming
+
+The continue-flow STATE.md read is the health check: fix contradictions with reality, delete completed Todos, migrate over-long Notes to artifacts — all in the same turn. `verify` prints `warn:` lines for body refs to nonexistent files/ids, TBD wording, Todos > 3, plan AC refs unknown to the spec, and a dirty sessions git repo; treat every warn as the same-turn cleanup list.
+
 ## Numbering
 
 - The spec/plan sequence and the `D-NN` document sequence increment independently and never borrow each other's numbers.

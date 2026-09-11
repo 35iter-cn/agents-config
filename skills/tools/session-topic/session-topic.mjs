@@ -208,6 +208,7 @@ function parseState(content, topic = '') {
           const value = trimmed.slice(colonIndex + 1).trim();
           if (key === 'number') currentPr.number = value;
           if (key === 'branch' && value) currentPr.branch = value;
+          if (key === 'spec' && value) currentPr.spec = value;
         }
         continue;
       }
@@ -254,6 +255,7 @@ function formatArtifact(artifact) {
 function formatPr(pr) {
   let lines = `  - repo: ${pr.repo}\n    number: ${pr.number}`;
   if (pr.branch) lines += `\n    branch: ${pr.branch}`;
+  if (pr.spec) lines += `\n    spec: ${pr.spec}`;
   return lines;
 }
 
@@ -1015,8 +1017,111 @@ function verifyTopic(args) {
     return 1;
   }
 
+  const warnings = collectVerifyWarnings(topic, state, specFiles, planFiles);
+
+  if (issues.length > 0) {
+    console.error(`verify failed for topic ${topic}:`);
+    for (const issue of issues) {
+      console.error(`  - ${issue}`);
+    }
+    for (const warn of warnings) {
+      console.error(`  warn: ${warn}`);
+    }
+    return 1;
+  }
+
   console.log(`ok: ${topic} STATE.md 与 artifact 文件一致`);
+  for (const warn of warnings) {
+    console.log(`warn: ${warn}`);
+  }
   return 0;
+}
+
+function safeReadFile(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function countTodos(body) {
+  const lines = body.split('\n');
+  const idx = lines.findIndex((l) => /^#{1,3}\s*(?:Todos|待办)\b/i.test(l.trim()));
+  if (idx < 0) return 0;
+  let count = 0;
+  for (let i = idx + 1; i < lines.length; i += 1) {
+    if (/^#{1,3}\s/.test(lines[i])) break;
+    if (/^\s*(?:\d+[.)]|[-*+])\s+\S/.test(lines[i])) count += 1;
+  }
+  return count;
+}
+
+function collectVerifyWarnings(topic, state, specFiles, planFiles) {
+  const warns = [];
+  const dir = topicDir(topic);
+
+  const fileRefRe = /\b(?:D-)?\d{2,}-[a-z0-9-]+\.(?:spec|plan|research|handoff|uat-case|notes)\.md\b/g;
+  const seenFiles = new Set();
+  let match;
+  while ((match = fileRefRe.exec(state.body)) !== null) {
+    const ref = match[0];
+    if (seenFiles.has(ref)) continue;
+    seenFiles.add(ref);
+    if (!existsSync(join(dir, ref))) {
+      warns.push(`STATE.md 正文引用的文件 ${ref} 不存在于 topic 目录`);
+    }
+  }
+
+  const dRefRe = /\bD-(\d{2,})\b/g;
+  const seenD = new Set();
+  const knownD = new Set(
+    (state.artifacts || [])
+      .filter((a) => (a.file || '').startsWith('D-'))
+      .map((a) => {
+        const m = (a.file || '').match(/^D-(\d{2,})/);
+        return m ? m[1] : null;
+      })
+      .filter(Boolean),
+  );
+  while ((match = dRefRe.exec(state.body)) !== null) {
+    if (seenD.has(match[1])) continue;
+    seenD.add(match[1]);
+    if (!knownD.has(match[1])) {
+      warns.push(`STATE.md 正文引用 D-${match[1]} 但 artifacts 中无此 D- 编号`);
+    }
+  }
+
+  if (/(TBD|to be decided|待定|待确认)/i.test(state.body)) {
+    warns.push('STATE.md 正文含未决措辞(TBD/待定/待确认)——未决事项应拍板或向用户提出,不落文档');
+  }
+
+  const todos = countTodos(state.body);
+  if (todos > 3) {
+    warns.push(`Todos 区超过 3 条(当前 ${todos});硬上限 3,顺序即优先级`);
+  }
+
+  for (const plan of planFiles) {
+    const spec = specFiles.find((s) => s.id === plan.id);
+    if (!spec) continue;
+    const specContent = safeReadFile(join(dir, spec.file));
+    const planContent = safeReadFile(join(dir, plan.file));
+    if (!specContent || !planContent) continue;
+    const defined = new Set([...specContent.matchAll(/\bAC-(\d+)\b/g)].map((x) => `AC-${x[1]}`));
+    if (defined.size === 0) continue;
+    const referenced = [...planContent.matchAll(/\bAC-(\d+)\b/g)].map((x) => `AC-${x[1]}`);
+    const missing = [...new Set(referenced.filter((r) => !defined.has(r)))];
+    if (missing.length > 0) {
+      warns.push(`${plan.file} 引用了 spec ${spec.file} 中不存在的验收编号:${missing.join(', ')}`);
+    }
+  }
+
+  const gitStatus = runGit(sessionsRoot(), ['status', '--porcelain']);
+  if (gitStatus) {
+    warns.push(`sessions 仓库有未提交的修订(git status 非空)——实质修订必须同 turn git commit`);
+  }
+
+  return warns;
 }
 
 const CANONICAL_PR_RE = /\b([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)\b/g;
@@ -1325,29 +1430,45 @@ function parsePrRef(ref) {
 }
 
 function prAdd(args) {
-  const { positional, flags } = splitFlags(args, ['--branch']);
+  const { positional, flags } = splitFlags(args, ['--branch', '--spec']);
   const [topic, ref] = positional;
   if (!topic || !ref) {
-    throw new Error('usage: session-topic pr-add <topic> <pr-url|owner/repo#N> [--branch <branch>]');
+    throw new Error('usage: session-topic pr-add <topic> <pr-url|owner/repo#N> [--branch <branch>] [--spec <id>]');
   }
   validateTopicName(topic);
   if (!existsSync(topicDir(topic))) throw new Error(`topic not found: ${topicDir(topic)}`);
   const parsed = parsePrRef(ref);
   const state = readState(topic);
+  if (flags['--spec']) {
+    const specId = flags['--spec'];
+    if (!state.specs.some((s) => s.id === specId)) {
+      throw new Error(`spec ${specId} not registered in ${topic}; --spec must reference a registered spec id`);
+    }
+  }
   const existing = state.prs.find(
     (e) => e.repo.toLowerCase() === parsed.repo.toLowerCase() && e.number === parsed.number,
   );
   if (existing) {
-    if (!flags['--branch']) {
+    if (!flags['--branch'] && !flags['--spec']) {
       console.log(`already registered: ${existing.repo}#${existing.number} in ${topic}`);
       return;
     }
-    existing.branch = flags['--branch'];
+    if (flags['--branch']) existing.branch = flags['--branch'];
+    if (flags['--spec']) existing.spec = flags['--spec'];
   } else {
-    state.prs.push({ repo: parsed.repo, number: parsed.number, branch: flags['--branch'] || null });
+    state.prs.push({
+      repo: parsed.repo,
+      number: parsed.number,
+      branch: flags['--branch'] || null,
+      spec: flags['--spec'] || null,
+    });
   }
   writeState(topic, state);
-  console.log(`registered: ${parsed.repo}#${parsed.number}${flags['--branch'] ? ` (branch: ${flags['--branch']})` : ''} -> ${topic}`);
+  const extra = [
+    flags['--branch'] ? `branch: ${flags['--branch']}` : null,
+    flags['--spec'] ? `spec: ${flags['--spec']}` : null,
+  ].filter(Boolean).join(', ');
+  console.log(`registered: ${parsed.repo}#${parsed.number}${extra ? ` (${extra})` : ''} -> ${topic}`);
 }
 
 function help() {
@@ -1366,7 +1487,10 @@ Commands:
                                 append a tombstone line to STATE.md body; specs/plans
                                 are never removable. New docs use D-NN numbering from
                                 D-100; legacy NN docs are grandfathered.
-  verify <topic>                  Verify STATE.md matches artifact files; exit 1 on drift
+  verify <topic>                  Verify STATE.md matches artifact files; exit 1 on drift.
+                                Also prints warn: lines for soft issues (body refs to
+                                nonexistent files/ids, TBD wording, Todos > 3, AC refs
+                                unknown to the spec, dirty sessions git repo)
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
   worktree-check <topic> --repo <main-checkout-path>
                                 Read-only preflight before creating/replacing the worktree:
@@ -1375,8 +1499,9 @@ Commands:
   find <query> [--repo r] [--since d] [--until d]
                                 Locate topics by PR URL, owner/repo#N, bare #N, branch, or keyword;
                                 searches STATE.md files only, prints ranked candidates, exit 1 on no match
-  pr-add <topic> <pr-url|owner/repo#N> [--branch b]
-                                Register a PR in the topic frontmatter prs index (idempotent)
+  pr-add <topic> <pr-url|owner/repo#N> [--branch b] [--spec id]
+                                Register a PR in the topic frontmatter prs index (idempotent);
+                                --spec records which spec the PR fulfills
 `);
 }
 
