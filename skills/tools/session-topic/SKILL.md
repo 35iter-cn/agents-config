@@ -7,7 +7,7 @@ description: Use when creating, editing, or locating session artifacts (specs, p
 
 ## Overview
 
-Session artifacts live under `~/.config/sessions/<topic>/`, never inside a project checkout. The CLI `session-topic.mjs` owns registration; you own content. Topic code changes happen only in the topic worktree. CLI paths are relative to this skill's directory, not the shell cwd.
+Session artifacts live under `~/.config/sessions/<topic>/`, never inside a project checkout. The CLI `session-topic.mjs` owns registration; you own content. CLI paths are relative to this skill's directory, not the shell cwd.
 
 ## When to Use
 
@@ -70,7 +70,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 ## Common Mistakes
 
 - Hand-creating numbered artifacts, editing STATE.md registrations, or letting STATE.md drift — the CLI owns registrations; update the body in the same turn progress happens.
-- Stuffing knowledge (decisions, investigation, regression analysis) into STATE.md — it is a dashboard + index; knowledge lives in artifacts (see `references/state-md.md`).
+- Stuffing knowledge (decisions, investigation) into STATE.md — dashboard + index; knowledge lives in artifacts (see `references/state-md.md`).
 - Editing the main checkout because dependencies are installed there. `guard` first.
 - Worktree created or replaced without `worktree-check`, a branch switched inside an existing worktree, or analysis on a stale main checkout.
 - A plan numbered anew instead of the spec's id.
@@ -86,7 +86,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 | "Spec is done — I'll run plan-status myself" | Freeze is user-initiated. Suggest with the coverage table and wait. |
 | "I'll just tweak the spec text, no need to re-confirm" | Editable is not unconfirmed; a material change re-opens the gate. |
 | "Spec is done — I'll implement while we're here" | Needs an explicit ask, a plan, worktree + `guard`. |
-| "The parked worktree looks empty; checks are ceremony" | `worktree-check` is the only preflight; dirty or unpushed work is lost. |
+| "The parked worktree looks empty; checks are ceremony" | `worktree-check` is the only preflight; dirty/unpushed work is lost. |
 
 ## Red Flags
 
