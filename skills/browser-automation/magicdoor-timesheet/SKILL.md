@@ -1,6 +1,6 @@
 ---
 name: magicdoor-timesheet
-description: Use when the user mentions 日报, 周报, 月报, timesheet, fill missing, 补充, 更新月报, or asks to fill/backfill/sync the monthly MagicDoor Google Sheets timesheet (Hao-YYYY/MM)
+description: Use when the user mentions 日报, 周报, 月报, 写工作报告, timesheet, fill missing, 补充, 更新月报, or asks to fill/backfill/sync the monthly MagicDoor Google Sheets timesheet (Hao-YYYY/MM)
 ---
 
 # MagicDoor Timesheet
@@ -14,6 +14,7 @@ Fill the monthly `Hao-YYYY/MM` sheet via the Sheets API with `mdsheet` (full fla
 - Two write kinds only; never plan around "本周/上周". Data source: `work-summary` skill only (`--cwd ~/code/magicdoor`).
 - Targets detected, never assumed: `structure` maps headers→columns and prints `daily_cols="task_col pr_link_col"` / `weekly_cols="notes_col"`; `find-date '<date>'` resolves a DATE cell's absolute row.
 - 日报 = that day's row, cells `$task_col` (TASK) + `$pr_link_col` (PR LINK). Skip days with no commits/PRs.
+- 「写工作报告」/ 日报周报 without an explicit range = catch-up mode: audit the current month sheet with one batch `get`, then fill EVERY blank cell up to today — each day's TASK/PR LINK where that day had commits/PRs, plus weekly NOTES for every completed week (window ends ≤ today, i.e. S−1 ≤ today) whose NOTES is blank. Dailies first, weekly last. Never touch already-filled cells. Cross-month: create any missing `Hao-YYYY/MM` sheet first, then catch up month by month.
 - 周报 = Saturday S's row, cell `$notes_col`; content window **S−7…S−1 — never written on S−7**. Default S = latest Friday ≤ today, + 1. Before writing, state S / window / target `G{row}`.
 - Sheet naming口径: always `Hao-YYYY/MM` (e.g. `Hao-2026/09`) — for find, audit, and all references.
 - New month: `mdsheet create '2026/09'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). The `create` argument is YYYY/MM, matching the Hao-YYYY/MM naming口径. Any string that is not a date (e.g. `'Hao-2026/09'`) is treated as a bare-spreadsheet title and yields an empty sheet (single 工作表1 tab, structure/get → 400). Trash it and recreate with a date. `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
@@ -34,7 +35,7 @@ D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-da
 2. Render per-cell files matching the sheet's style:
    - TASK: `## project` + `- emoji subject` bullets
    - PR: `# PRs` + `- [MERGED] #N: title — url`
-   - weekly NOTES: Chinese emoji bullets `(#PR)`, no dashes
+   - weekly NOTES: top category header rows — 🚀 需求开发 / 🏗 架构调整 / ⚡ 性能与修复 (max 3, omit empty categories); under each, Chinese short bullets `(#PR)`, no dashes; related cross-repo work merged into one bullet
 3. Write (A1 ranges only; `-t` overrides tab):
    - `mdsheet -s "$SID" set "$task_col$D_ROW" task.txt` / `set "$pr_link_col$D_ROW" prs.txt`
    - weekly last: `set "$notes_col$G_ROW" notes.txt`
