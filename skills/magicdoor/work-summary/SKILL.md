@@ -5,122 +5,56 @@ category: workflow
 date_added: "2026-06-02"
 ---
 
-## Overview
+# Work Summary
 
-Produce a concise, emoji-prefixed, project-grouped Markdown work summary from git history and GitHub PRs for a given date range.
+Scan git history and GitHub PRs for a date range + author, output structured JSON. Used standalone (user asks for 日报/周报/custom-range summary) or as the read-only data source for other skills (e.g. magicdoor-timesheet).
 
-## When to Use
+## Run
 
-- User asks for a daily, weekly, or custom-range work summary
-- User wants current-user filtering, author-date-based counting, project-grouped output, or grouped PR links
-- User implies a time range ("today", "this week", "last week", "June 1–5", "last 3 days")
+```bash
+node "$SKILL_DIR/work-summary.mjs" --start-date YYYY-MM-DD --end-date YYYY-MM-DD [--cwd path] [--author email] [--pr-state all|open|merged|closed]
+```
 
-## When NOT to Use
+- Dates are required, YYYY-MM-DD, inclusive. Derive from natural language:
 
-- The project is not tracked by git
-- The user only wants raw `git log` output, not a synthesized summary
-- The user wants a team-wide summary (this skill filters to a single author by default)
-
-## Quick Reference
-
-### Step 1: Classify Intent and Extract Parameters
-
-| Parameter | Description | Source |
-|---|---|---|
-| `$timeRange` | Time range intent | Natural language: "today" → today, "this week" → week, "last week" → last-week, custom dates → custom |
-| `$startDate` | Start date (YYYY-MM-DD) | Derived from `$timeRange` |
-| `$endDate` | End date (YYYY-MM-DD) | Derived from `$timeRange` |
-| `$cwd` | Project directory to scan | Default: current directory; optional override via `--cwd` |
-| `$author` | Git author email | Default: current user (`git config user.email`); optional override |
-| `$prState` | PR state filter | Default: `all`; optional: `open`, `merged`, `closed` |
-
-**Date Range Inference:**
-
-| Trigger | Logic |
+| Intent | Range |
 |---|---|
-| "today", "今日" | start = end = today |
-| "this week", "本周", "这周" | most recent Saturday → next Friday |
-| "last week", "上周" | previous Saturday → previous Friday |
-| "this month", "本月", "这月" | 1st of this month → today |
-| Exact range (e.g., "June 1 to 5") | Parse directly |
-| "last N days" | N days ago → today |
+| 本周 / this week | F = latest Friday ≤ today; window F−6…F (Sat…Fri, the completed week — on Saturday "most recent Saturday" would wrongly anchor to today) |
+| 上周 / last week | F−13…F−7 |
+| 本月 / this month | 1st → today |
+| today / exact dates / last N days | trivial; pass through |
 
-### Step 2: Execute the Script
+Never anchor weeks on "most recent Saturday": on the reporting day (Saturday) it shifts the window into an empty future week.
 
-The script is located in the same directory as this SKILL.md (symlinked into `~/.claude/skills/work-summary/` by `sync-skills.mjs`):
+- Defaults: `cwd` = current dir (scans one level of git subdirectories); `author` = `git config user.email`; `prState` = all.
+- Non-zero exit → show stderr to the user; don't parse.
 
-```bash
-script="$(dirname "$0")/work-summary.mjs"
-node "$script" --start-date "$startDate" --end-date "$endDate" [--cwd "$cwd"] [--author "$email"] [--pr-state "$prState"]
+## JSON Output
+
+Single JSON object on stdout:
+
+```json
+{
+  "meta": { "generatedAt", "timezone", "prState" },
+  "dateRange": { "start", "end" },
+  "author": { "email", "name" },
+  "warnings": [],
+  "projects": [
+    {
+      "name": "...",
+      "dir": "...",
+      "commits": [{ "date", "subject", "hash" }],
+      "prs": [{ "number", "title", "state", "url", "mergedAt", "createdAt" }]
+    }
+  ]
+}
 ```
 
-On platforms that expose `SKILL_DIR` or `skill_dir`, prefer those over `dirname "$0"`.
+- Empty `projects` → no commits in range.
+- Non-empty `warnings` → surface to user; usually `gh` not authenticated → `prs` missing.
+- Squash-merge PR commits are deduplicated (paired numbered/bare subjects, regression-tested 2026-08); commits use author date.
 
-Use `--cwd` to scan a project directory other than the current one:
+## Rendering (standalone use)
 
-```bash
-node "$script" --start-date "$startDate" --end-date "$endDate" --cwd ~/code/magicdoor
-```
-
-### As a data source for other skills
-
-Other skills invoke `work-summary` with these parameters:
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--start-date` | yes | Start date in YYYY-MM-DD |
-| `--end-date` | yes | End date in YYYY-MM-DD |
-| `--cwd` | no | Project directory to scan. Defaults to current directory. |
-| `--author` | no | Author email override |
-| `--pr-state` | no | `all` (default), `open`, `merged`, `closed` |
-
-It returns Markdown with two sections:
-
-1. Project summaries (suitable for TASK / NOTES cells)
-2. `# PRs` section (suitable for PR LINK cells)
-
-### Step 3: Render the Summary from JSON
-
-The script outputs a single JSON object to stdout. Render it as Markdown:
-
-1. For each project in `projects`:
-   - `## {project.name}`
-   - Up to 3 bullet points, merging related commit subjects semantically
-   - Each bullet: `emoji action + outcome/purpose`
-2. If any project has PRs, append `# PRs` section:
-   - Group by project: `## {project.name}`
-   - List each PR as `- [{state}] #{number}: {title} — {url}`
-3. If `warnings` array is non-empty, prepend a `> ⚠️` note with each warning.
-
-**Emoji reference:**
-- 🚀 Feature / major addition
-- 🛠️ Improvement / refactor
-- 🐛 Bug fix
-- ✅ Task / chore / cleanup
-- 📚 Documentation
-- ⚡ Performance
-
-## Core Flow
-
-```mermaid
-flowchart TD
-    A([User query]) --> B[Classify intent<br/>Extract parameters]
-    B --> C[Execute work-summary.mjs<br/>→ JSON output]
-    C --> D[Render Markdown<br/>from JSON]
-    D --> E([Deliver summary])
-```
-
-## Common Mistakes
-
-- Forgetting to filter by author email, showing team commits
-- Using committer date instead of author date, causing off-by-one-day errors
-- Including squash-merge commits that repackage earlier work in the same range
-- Running the script in a non-git directory without scanning subdirectories
-- Skipping PR query because `gh` CLI is not authenticated, without warning the user
-
-## Red Flags
-
-- `gh` CLI not logged in → PR section missing; always check `warnings` in JSON
-- Empty `projects` array → respond with "No commits found in the specified range"
-- Script exits non-zero → show stderr to the user before attempting to parse JSON
-- Large monorepo scanning too deep → this skill scans only one level of subdirectories
+- Per project: `## {name}` + up to 3 bullets, semantically merged commit subjects, emoji prefix (🚀 feature / 🛠 improvement / 🐛 fix / ✅ chore / 📚 docs / ⚡ perf).
+- PRs: `# PRs` section, grouped by project: `- [{state}] #{number}: {title} — {url}`.
