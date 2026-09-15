@@ -1,8 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Use first arg as target dir, fall back to PWD at invocation
-cd "${1:-$(pwd)}"
+usage() {
+  cat <<'EOF'
+usage: gco-latest [dir]
+
+Refresh a repo checkout to the latest default branch of its remote.
+
+  dir            target repo (default: current directory)
+
+behavior:
+  - refuses to run when the working tree has uncommitted changes
+  - remote: origin when present, otherwise the first configured remote
+  - default branch: detected from the remote HEAD
+  - git fetch --prune, retried up to 3 times
+  - ends with git checkout <remote>/<branch>, i.e. a DETACHED HEAD on the
+    latest default branch; the branch you were on is left untouched
+  - for read-only analysis checkouts only, not for worktrees or repos you
+    are about to modify
+
+exit codes: 0 success, 1 failure, 2 bad usage
+EOF
+}
+
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown argument: $arg" >&2; usage >&2; exit 2 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+
+cd "${args[0]:-$(pwd)}"
 
 # --- Step 1: check working tree ---
 if output=$(git status --porcelain 2>&1); then

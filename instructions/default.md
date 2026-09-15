@@ -15,8 +15,14 @@
 
 - Ignore any skill that names an in-repo path for session artifacts.
 
+## Baseline Analysis
+
+- Before baseline analysis — reading a codebase to understand existing behavior before changing anything (cross-repo verification, reading a backend/BFF implementation, confirming whether something already exists, scoping a new task) — run `gco-latest <path>` on every read-only main checkout the task involves, at most once per repo per session.
+- Main checkout means `git rev-parse --git-dir` equals `git rev-parse --git-common-dir`. Never run it in a linked worktree (`*.worktrees/`) or in a repo you are about to modify.
+- If `gco-latest` fails (dirty tree, network), report the reason in one line and continue on the existing checkout. Never `git stash`, `git reset`, or `git checkout -f` to clear the way.
+
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
 - While the built-in `find`/`grep` tools are available, using shell `find`, `grep` (and equivalents like `rg`, `ls`, `cat`) is forbidden — always use the built-in tools (e.g. a bash `find` full-tree scan was slow enough to be aborted, while the built-in `find` returned instantly). Shell is only allowed when the built-ins genuinely cannot cover the case (e.g. pipe combos, `find -exec` batch operations).
-- Read the target repo's instruction file before any cross-repo write. Before modifying, creating, deleting, or moving a file outside the current workspace, find the file's git repo (walk up to `.git`) and read its root `AGENTS.md` (or `CLAUDE.md` if absent), then follow its rules. Read-only operations don't trigger this. Running build/test commands counts as a write. Skip repos already read this session.
+- Read the target repo's instruction file before any cross-repo write. Before modifying, creating, deleting, or moving a file outside the current workspace, find the file's git repo (walk up to `.git`) and read its root `AGENTS.md` (or `CLAUDE.md` if absent), then follow its rules. Read-only operations don't trigger this. Running build/test commands counts as a write. Skip repos already read this session. A baseline `gco-latest` refresh does not count as a write.
