@@ -7,7 +7,7 @@ description: Use when creating, editing, or locating session artifacts (specs, p
 
 ## Overview
 
-Session artifacts live under `~/.config/sessions/<topic>/`, never inside a project checkout. The CLI `session-topic.mjs` owns registration; you own content. CLI paths are relative to this skill's directory, not the shell cwd.
+Session artifacts live under `~/.config/sessions/<topic>/`, never inside a project checkout. The CLI `session-topic` (on `PATH`, cwd-independent) owns registration; you own content. Paths to this skill's own files (`references/…`) are relative to this skill's directory, not the shell cwd.
 
 ## When to Use
 
@@ -66,7 +66,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`.
 | Plan | `NN-<name>.plan.md` (reuses the spec's number) | same sequence |
 | Research / Handoff / UAT case / Notes | `D-NN-<name>.<type>.md` | `D-NN`, starts at D-01 |
 
-`node session-topic.mjs --help` lists every command and flag. Worktrees: `worktree-<repo>/`; state: `STATE.md`.
+`session-topic --help` lists every command and flag. Worktrees: `worktree-<repo>/`; state: `STATE.md`.
 
 ## Common Mistakes
 

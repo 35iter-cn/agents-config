@@ -81,3 +81,4 @@ scripts/maintain-instructions-symlinks.mjs -h   # Maintain instruction symlinks
 
 - User-facing command scripts live in `cli/` (source basename === PATH command name)
 - `scripts/sync-cli.mjs` flattens them into targets declared in `scripts/cli-symlinks.targets` (currently `~/.local/bin`)
+- A `cli/` entry may be a symlink into `skills/` (`cli/session-topic` → `skills/tools/session-topic/session-topic.mjs`). A skill's bundled CLI goes on PATH this way: harness-specific path variables (`${CLAUDE_SKILL_DIR}`) do not exist across all four targets, and a bare `node <script>.mjs` resolves against the shell cwd

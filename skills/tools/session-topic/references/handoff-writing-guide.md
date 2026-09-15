@@ -57,10 +57,10 @@ Paths/URLs to specs, plans, docs, PRs — referenced, never copied.
 
 ## Procedure
 
-1. Resolve the topic (`session-topic.mjs resolve <topic>`; `init` if none).
+1. Resolve the topic (`session-topic resolve <topic>`; `init` if none).
 2. Create the file via the CLI — never `write` a numbered filename directly:
    ```bash
-   node session-topic.mjs artifact-create <topic> handoff <name>
+   session-topic artifact-create <topic> handoff <name>
    ```
 3. Write the content to the printed path, following the structure above.
 4. Run the self-check below before handing off.

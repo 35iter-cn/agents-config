@@ -682,7 +682,7 @@ function worktreeCheck(args) {
   suggestions.push('Suggested flow (you execute; pick a fresh <branch> name not registered in STATE.md prs):');
   if (registered) suggestions.push(`  git worktree remove "${worktree}"`);
   suggestions.push(`  git worktree add "${worktree}" -b <branch> ${defaultRef || '<default-branch>'}`);
-  suggestions.push(`  node session-topic.mjs guard ${topic}`);
+  suggestions.push(`  session-topic guard ${topic}`);
 
   return printWorktreeCheck(topic, repo, worktree, branch, results, suggestions);
 }

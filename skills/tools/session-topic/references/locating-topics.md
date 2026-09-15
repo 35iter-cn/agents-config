@@ -5,10 +5,10 @@
 To locate an existing topic from a PR link, branch, repo, date, or keyword, always run `find` — never recursive-grep `~/.config/sessions/` (it hits `worktree-*/` build artifacts and takes multiple passes).
 
 ```bash
-node session-topic.mjs find "https://github.com/MagicDoorInc/magic-manager/pull/1"
-node session-topic.mjs find "MagicDoorInc/magic-manager#1"
-node session-topic.mjs find "refactor/chat-upload-sessions"
-node session-topic.mjs find "chat multipart" --since 2026-08-20
+session-topic find "https://github.com/MagicDoorInc/magic-manager/pull/1"
+session-topic find "MagicDoorInc/magic-manager#1"
+session-topic find "refactor/chat-upload-sessions"
+session-topic find "chat multipart" --since 2026-08-20
 ```
 
 - The CLI auto-classifies the query: PR URL / `owner/repo#N` / `short#N` / bare `#N` / branch (contains `/`) / keyword.
@@ -22,7 +22,7 @@ node session-topic.mjs find "chat multipart" --since 2026-08-20
 When topic work produces a PR, register it **in the same turn** so future `find` queries hit the registry directly:
 
 ```bash
-node session-topic.mjs pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
+session-topic pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
 ```
 
 - Frontmatter shape (CLI-owned): `prs:` array of `{ repo: full slug, number, branch? }`. The registry is an **index, not a mirror** — no status/title fields; those stay in the body narrative.

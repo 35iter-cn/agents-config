@@ -4,7 +4,7 @@ Topic code changes happen ONLY inside the topic worktree. The main checkout is n
 
 ## Invariants
 
-- **Path source is authoritative.** The path MUST come from `node session-topic.mjs worktree-path <topic>` — a hand-picked path (project sibling, `/tmp`, anything) is a violation even if it looks reasonable.
+- **Path source is authoritative.** The path MUST come from `session-topic worktree-path <topic>` — a hand-picked path (project sibling, `/tmp`, anything) is a violation even if it looks reasonable.
 - **At most one worktree per repo per topic.** A topic may accumulate several PRs in one repo, never several live worktrees.
 - Starting a new independent spec in a repo whose worktree holds a parked (unmerged) PR is a **replace, not a branch switch**. Never `git checkout` a different branch inside an existing worktree.
 
@@ -12,7 +12,7 @@ Topic code changes happen ONLY inside the topic worktree. The main checkout is n
 
 1. **Preflight (read-only, no git mutations):**
    ```bash
-   node session-topic.mjs worktree-check <topic> --repo <path-to-main-checkout>
+   session-topic worktree-check <topic> --repo <path-to-main-checkout>
    ```
    MUST exit 0: worktree absent, or present and clean. FAIL = stop, resolve, re-run. The report also covers push state, PR registration in STATE.md `prs:`, and an origin baseline snapshot — treat every FAIL item as a blocker.
 2. **Retire:**
@@ -27,7 +27,7 @@ Topic code changes happen ONLY inside the topic worktree. The main checkout is n
    Never reuse a branch already registered in STATE.md `prs:` for that repo, and never base a new spec's branch on another spec's PR branch.
 4. **Write gate:**
    ```bash
-   node session-topic.mjs guard <topic>
+   session-topic guard <topic>
    ```
    Must return `ok` before the first write; re-run on every write-critical action — the shell cwd drifts across a long session.
 
