@@ -18,9 +18,6 @@ agents-for-myself/
 │   ├── private/            # Local-only skills (gitignored)
 │   ├── tools/
 │   └── workflow/
-└── .knowledge/         # Project knowledge (plans, specs)
-    ├── plans/
-    └── notes/specs/
 ```
 
 ## Skill Structure
@@ -63,7 +60,7 @@ node $CLAUDE_SKILL_DIR/session-topic.mjs --help  # Manage session artifacts by t
 - **Sync skills on change:** After adding or removing a skill, run `scripts/sync-skills.mjs`
 - **Sync CLI on change:** After adding or removing a file under `cli/`, run `scripts/sync-cli.mjs`
 - **Private skills:** Put personal/sensitive skills under `skills/private/` (gitignored). Do not commit them.
-- **Knowledge docs:** Design specs go in `.knowledge/notes/specs/`
+- **Knowledge docs:** Session artifacts (specs, plans, handoffs, notes) never live in this repo — use the `session-topic` skill (`~/.config/sessions/<topic>/`).
 - **No build system:** Pure Markdown with occasional scripts — no package.json, no CI
 - **Bash scripts:** Use `set -euo pipefail`, consistent CLI conventions (`--dry-run`, `--help`)
 

@@ -10,7 +10,6 @@ Personal AI agent configuration and skill tree for Claude Code.
 | `cli/` | User CLI scripts (synced via `scripts/sync-cli.mjs` → `~/.local/bin`) |
 | `scripts/` | Tooling: skill/cli sync, instruction symlink management |
 | `instructions/` | Per-host instruction overrides |
-| `.knowledge/` | Design docs, specs, notes |
 
 ## Skill buckets
 
