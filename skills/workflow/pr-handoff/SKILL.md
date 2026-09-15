@@ -7,7 +7,7 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Keep branch fresh, run pre-push checks, analyze diff, then create or update PR with complete body, screenshots, and UAT cases.
+Keep branch fresh, run pre-push checks, analyze diff, then create or update PR with complete body and screenshots.
 
 ## When to Use
 
@@ -60,15 +60,6 @@ Run only when the session already produced UI screenshots (walkthrough/dev captu
 - Alt text follows `#` after the path; up to 50 files per command.
 - On update flows, run after every full body replace — a replaced body wipes previously embedded images unless re-attached in the same command.
 
-### Insert UAT comment
-
-**Goal: publish UAT cases to the PR as a comment.**
-
-1. **Generate** — **REQUIRED SUB-SKILL:** `pr-uat-case-gen`. Creates the UAT case file via `node session-topic.mjs artifact-create <topic> uat-case uat-cases` (yielding `NN-uat-cases.uat-case.md` in the topic dir; resolve `<topic-dir>` via the `session-topic` skill's `session-topic.mjs resolve <topic>`). Never under project `.knowledge/`.
-2. **Post/Patch** — Read the generated file. If non-empty, search PR comments for `<!-- uat-cases -->`; POST if new, PATCH if exists. If empty/missing, skip.
-
-**Must publish.** Do not stop at file generation; `pr-uat-case-gen` alone only writes the file, this step must also publish it.
-
 ### Verify
 
 `gh pr view` to confirm PR is created/updated and visible.
@@ -81,9 +72,8 @@ flowchart TD
     B --> C[Pre-push]
     C --> D[Create or update PR]
     D --> E[Attach screenshots]
-    E --> F[Insert UAT comment]
-    F --> G[Verify]
-    G --> H([Done])
+    E --> F[Verify]
+    F --> H([Done])
 ```
 
 ## Common Mistakes
@@ -93,8 +83,6 @@ flowchart TD
 - Skipping pre-push checks under time pressure.
 - Not fetching remote before computing LMB (stale local).
 - Using wrong LMB when origin HEAD differs from local main.
-- Stopping at file generation after `pr-uat-case-gen` without publishing the UAT comment to the PR.
-- Creating duplicate UAT comments on the same PR instead of patching the existing one.
 - Resetting reviewers on an existing PR — assignment is create-only; update never touches reviewers.
 - Attaching screenshots before the body step — on update flows re-run `--attach` after any full body replace, or pass `--attach` in the same command as `--body-file`.
 - Frontend PR depends on a backend change but ships without the `waiting for backend` label.
@@ -106,5 +94,4 @@ flowchart TD
 - `git push` before pre-push checks.
 - Force-push without checking PR state.
 - Rebasing without fetching origin HEAD first.
-- Skipping UAT with "backend-only" excuse on repos with `.tsx`/`.jsx`.
 - Frontend PR touching a not-yet-deployed backend field/endpoint with no backend PR link in the body and no `waiting for backend` label.

@@ -128,4 +128,3 @@ When the request spans multiple endpoints:
 | Remote/local call, inspect response | **api** (this skill) |
 | Query swagger / generate types | `magicdoor-backend-swagger` |
 | Lookup role / userId | `magicdoor-backend-identity` |
-| File a backend GitHub issue | `magicdoor-backend-issuer` |

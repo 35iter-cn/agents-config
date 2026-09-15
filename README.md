@@ -16,8 +16,6 @@ Personal AI agent configuration and skill tree for Claude Code.
 
 | Bucket | Purpose |
 |---|---|
-| `skills/browser-automation/` | Chrome automation |
-| `skills/companions/` | Companion runners (`runx`, `tune`) |
 | `skills/magicdoor/` | MagicDoor backend / portal / monorepo skills |
 | `skills/workflow/` | Spec → PR workflows, grilling, handoff |
 | `skills/tools/` | General tooling skills |

@@ -14,8 +14,6 @@ agents-for-myself/
 ├── scripts/            # Sync and maintenance scripts
 ├── cli/                # User CLI scripts (synced to ~/.local/bin)
 ├── skills/             # Canonical skill tree (single source of truth)
-│   ├── browser-automation/
-│   ├── companions/
 │   ├── magicdoor/
 │   ├── private/            # Local-only skills (gitignored)
 │   ├── tools/
@@ -42,10 +40,8 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 
 ## Available Skills
 
-- **`skills/browser-automation/`** — Chrome automation (timesheet, Xiaohongshu)
-- **`skills/companions/`** — Companion runners (`runx`, `tune`)
-- **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary
-- **`skills/workflow/`** — Spec shipping, PR handoff/UAT, grilling, handoff, ai-taught-me
+- **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary, timesheet
+- **`skills/workflow/`** — Spec shipping, PR handoff, grilling, handoff, ai-taught-me
 - **`skills/tools/`** — shared-chrome, frontend-design, update-claude
 - **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
 
