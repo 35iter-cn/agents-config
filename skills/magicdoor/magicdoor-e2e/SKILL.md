@@ -19,7 +19,7 @@ portal as that user. No token minting, no URL assembly, no userId lookups.
   PM/tenant/owner/vendor actually sees).
 - Any task needing a browser session in `portal.` / `hoa.` / `{subUrl}.with.` portals.
 
-Not for API-only calls — see `magicdoor-backend-api` (debug tokens, no browser).
+Not for API-only calls.
 
 ## Prerequisites
 
@@ -109,5 +109,4 @@ the client assembles a userId or a host by hand; the Internal Portal reads the c
 |---|---|
 | `shared-chrome` | the CDP browser used for every step |
 | `magicdoor-local-stack` | `md up` / `md host` / `md link`; how the local stack is addressed |
-| `magicdoor-backend-api` | API-only calls (debug token, no browser) |
 | `magicdoor-backend-swagger` | swagger specs, `magicdoor-env` CLI |
