@@ -7,7 +7,7 @@ description: Use when the user asks to force-push a branch to a MagicDoor fronte
 
 ## Overview
 
-Force-pushing `dev` or `staging` on MagicDoor frontend repos is pre-authorized by the user: these branches exist only to trigger environment builds, and both environments allow unconditional overwrite. Preflight is two cheap checks, then push immediately — no second user confirmation, no safety essay.
+Force-pushing `dev` or `staging` on MagicDoor frontend repos is pre-authorized by the user: these branches exist only to trigger environment builds, both environments allow unconditional overwrite, and the backup ref is the only safety net (recovery is on-demand, rarely needed). Preflight is two cheap checks, then push immediately — no second user confirmation, no safety essay.
 
 ## Environment map (company-portal)
 
