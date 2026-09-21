@@ -63,6 +63,5 @@ git push --force-with-lease=origin/<branch>:<old-sha> origin <local-branch>:<bra
 ## Pitfalls
 
 - Do NOT re-litigate the overwrite: no orphan-commit archaeology, no risk essays, no "are you sure". Backup ref is the safety net.
-- Other MagicDoor repos differ: tenant-portal's `dev` is a long-lived integration branch — if the target is not company-portal, still complete steps 1–2 but report the branch's nature in one line.
 - `--force-with-lease` requires the fetched `origin/<branch>`; if someone pushed in between, the lease rejects — refetch, re-backup if head moved, re-push.
 - After deploy, stale tabs on the old bundle may not be reloaded by version ping (known observation, do not block).
