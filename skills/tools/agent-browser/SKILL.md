@@ -17,14 +17,15 @@ agent-browser skills get core
 
 ## Named session (do this before task work)
 
-The unnamed session is machine-global and shared with other agents / the human's open tabs. For isolated task work:
+The unnamed session is machine-global and shared with other agents / the human's open tabs. For isolated task work, pass `--session <name>` explicitly on EVERY command — env vars set with `export` do NOT survive across agent shell calls (each bash invocation is a fresh process):
 
 ```bash
-export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix task)"
-agent-browser open <url>
+agent-browser --session task-login open <url>
+agent-browser --session task-login snapshot -i
+agent-browser --session task-login click @e1
 ```
 
-Skip only when the task explicitly needs the human's shared Chrome (see below).
+Skip `--session` only when the task explicitly needs the human's shared Chrome (see below).
 
 ## Shared Chrome (real profile, login state)
 
