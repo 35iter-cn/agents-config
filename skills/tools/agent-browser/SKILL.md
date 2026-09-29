@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: Operate a browser via the agent-browser CLI (Rust, CDP). Use for any browser task: open pages, click/fill by accessibility refs, extract text, screenshots, E2E smoke tests, or attaching to the shared Chrome instance on CDP port 9222. Preferred over MCP-based browser control per user preference.
+description: "Operate a browser via the agent-browser CLI (Rust, CDP). Use for any browser task - open pages, click/fill by accessibility refs, extract text, screenshots, E2E smoke tests, or attaching to the shared Chrome instance on CDP port 9222. Preferred over MCP-based browser control per user preference."
 ---
 
 # agent-browser
@@ -56,6 +56,14 @@ agent-browser wait --text "Success"   # wait on text/url/fn — never bare sleep
 Refs can be reused across snapshots. After navigation, always re-snapshot.
 
 Prefer `snapshot -i` over full snapshot; prefer refs over `find role/text`; raw CSS selectors are the last fallback.
+
+## Ref discipline (hard rules — skipping these caused real misclicks)
+
+- **Re-snapshot before AND after every click/fill after any page change.** Refs are snapshot-scoped: the page mutating (modal opening, section expanding, data refreshing) silently re-points `@eN` or invalidates it. A click that “worked” last step does not license skipping the next snapshot.
+- **Ambiguous names ⇒ verify ownership before acting.** When multiple elements share the same accessible name (e.g. repeated “Add new override” buttons across cards), never pick by ordering/memorized position. Confirm the ref's actual target first — `eval` on the element's DOM lineage (which card/section contains it) or a full `snapshot` reading the surrounding context lines. Ordering in the snapshot output is not an ownership proof.
+- **Failed/missing ref ⇒ re-snapshot, never retry blind.** “Element not found” or an unexpected result means your mental model is stale, not that the button is gone. Retrying with an old ref under a new assumption compounds the error (two consecutive misclicks in one session came from exactly this).
+- **No-label icon buttons ⇒ go to coordinates.** Pure-icon buttons are invisible in the accessibility tree; guessing CSS classes in `eval` hits siblings. After one verification eval, prefer screenshot + coordinate click over repeated selector-poking.
+- **Cost math:** one snapshot ≪ one misclick (user hand-correction + a dozen recovery rounds). Re-snapshotting is not overhead; it is the cheapest step in the loop.
 
 ## Gotchas (observed in this environment)
 
