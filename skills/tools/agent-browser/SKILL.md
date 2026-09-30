@@ -7,6 +7,28 @@ description: "Operate a browser via the agent-browser CLI (Rust, CDP). Use for a
 
 Browser automation CLI installed globally via pnpm (`agent-browser`, v0.38+). Runs a local daemon over CDP — no Playwright dependency, no MCP context overhead.
 
+## Always use a named session (default-on, not opt-in)
+
+Every command in a task MUST run inside a named session — resolve it once at first use and export it. Do this BEFORE any browser command, including the very first one:
+
+```bash
+export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix agentbrowser)"
+```
+
+Why shell env (not per-command `--session`): the model previously treated `--session <name>` as optional and "forgot" the flag, so different tasks landed in the same unnamed session and hijacked each other. Once exported to the shell, every bare `agent-browser <command>` inherits the right session and cannot collide:
+
+```bash
+agent-browser open <url>
+agent-browser snapshot -i
+agent-browser click @e1
+```
+
+Notes:
+
+- `--scope worktree` hashes the cwd, so parallel tasks in different directories get different sessions automatically. Cross-repo / multi-terminal tasks: add a distinguishing `--prefix`.
+- Skip the isolation ONLY when the task explicitly needs the human's shared Chrome (attach via `connect 9222`, below). Even then, if a second task may run in parallel, switch back by re-exporting.
+- If an `agent-browser` command surprisingly sees the human's tabs or another task's page, the env var was lost (e.g. fresh shell) — re-export, never continue on the unnamed session.
+
 ## First use in a session
 
 Load the authoritative, version-matched workflow guide bundled with the CLI (do not rely on cached copies):
@@ -14,18 +36,6 @@ Load the authoritative, version-matched workflow guide bundled with the CLI (do 
 ```bash
 agent-browser skills get core
 ```
-
-## Named session (do this before task work)
-
-The unnamed session is machine-global and shared with other agents / the human's open tabs. For isolated task work, pass `--session <name>` explicitly on EVERY command — env vars set with `export` do NOT survive across agent shell calls (each bash invocation is a fresh process):
-
-```bash
-agent-browser --session task-login open <url>
-agent-browser --session task-login snapshot -i
-agent-browser --session task-login click @e1
-```
-
-Skip `--session` only when the task explicitly needs the human's shared Chrome (see below).
 
 ## Shared Chrome (real profile, login state)
 
