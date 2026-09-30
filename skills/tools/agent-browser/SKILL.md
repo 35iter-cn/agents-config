@@ -9,10 +9,10 @@ Browser automation CLI installed globally via pnpm (`agent-browser`, v0.38+). Ru
 
 ## Always use a named session (default-on, not opt-in)
 
-Every command in a task MUST run inside a named session. This harness spawns a fresh shell for every bash call — exports do NOT survive across calls. So instead of pass-session-everywhere, RE-DERIVE the session id at the start of each bash invocation (the id is a pure function of cwd + prefix, so every invocation deterministically lands on the same browser session) and export it for the rest of that invocation:
+Every command in a task MUST run inside a named session. This harness spawns a fresh shell for every bash call — exports do NOT survive across calls. So instead of pass-session-everywhere, RE-DERIVE the session id at the start of each bash invocation and export it for the rest of that invocation. The id is a pure function of TWO stable inputs: the cwd AND `$PI_SESSION_ID` (the harness's uuid for the current agent session — identical across all bash calls of one agent session, different for every other agent session). So one agent session deterministically lands on the same browser session across its fresh shells, and two agent sessions in the SAME directory never collide:
 
 ```bash
-export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix agentbrowser)"
+export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix "agentbrowser-${PI_SESSION_ID:0:8}")"
 agent-browser open <url>
 agent-browser snapshot -i
 agent-browser click @e1
@@ -23,12 +23,12 @@ Why derived id + env (not per-command literal `--session <name>`): the model pre
 If all agent-browser work in one call is a single chained command, inline it instead:
 
 ```bash
-agent-browser --session "$(agent-browser session id --scope worktree --prefix agentbrowser)" open <url> && agent-browser snapshot -i
+agent-browser --session "$(agent-browser session id --scope worktree --prefix "agentbrowser-${PI_SESSION_ID:0:8}")" open <url> && agent-browser snapshot -i
 ```
 
 Notes:
 
-- `--scope worktree` hashes the cwd, so parallel tasks in different directories get different sessions automatically. Cross-repo / multi-terminal tasks: add a distinguishing `--prefix`.
+- `--scope worktree` hashes the cwd, and the prefix embeds `$PI_SESSION_ID` (uuid of the current agent session): same agent session across fresh shells → same browser session; two agent sessions in the SAME directory → different prefixes → different browser sessions. For non-pi harnesses, substitute any per-agent-session stable id; without one, use a distinguishing `--prefix` per task.
 - Skip the isolation ONLY when the task explicitly needs the human's shared Chrome (attach via `connect 9222`, below). Even then, if a second task may run in parallel, switch back by re-exporting.
 - If an `agent-browser` command surprisingly sees the human's tabs or another task's page, the derivation was skipped in that invocation — stop, re-derive, and rerun the command; never continue on the unnamed session.
 
