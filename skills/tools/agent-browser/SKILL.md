@@ -9,25 +9,28 @@ Browser automation CLI installed globally via pnpm (`agent-browser`, v0.38+). Ru
 
 ## Always use a named session (default-on, not opt-in)
 
-Every command in a task MUST run inside a named session — resolve it once at first use and export it. Do this BEFORE any browser command, including the very first one:
+Every command in a task MUST run inside a named session. This harness spawns a fresh shell for every bash call — exports do NOT survive across calls. So instead of pass-session-everywhere, RE-DERIVE the session id at the start of each bash invocation (the id is a pure function of cwd + prefix, so every invocation deterministically lands on the same browser session) and export it for the rest of that invocation:
 
 ```bash
 export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix agentbrowser)"
-```
-
-Why shell env (not per-command `--session`): the model previously treated `--session <name>` as optional and "forgot" the flag, so different tasks landed in the same unnamed session and hijacked each other. Once exported to the shell, every bare `agent-browser <command>` inherits the right session and cannot collide:
-
-```bash
 agent-browser open <url>
 agent-browser snapshot -i
 agent-browser click @e1
+```
+
+Why derived id + env (not per-command literal `--session <name>`): the model previously treated an explicit `--session` flag as optional and "forgot" it, so different tasks landed in the same unnamed session and hijacked each other. With the derived-and-exported variable, every bare `agent-browser <command>` in the same invocation inherits the right session and cannot collide — there is no optional flag left to forget.
+
+If all agent-browser work in one call is a single chained command, inline it instead:
+
+```bash
+agent-browser --session "$(agent-browser session id --scope worktree --prefix agentbrowser)" open <url> && agent-browser snapshot -i
 ```
 
 Notes:
 
 - `--scope worktree` hashes the cwd, so parallel tasks in different directories get different sessions automatically. Cross-repo / multi-terminal tasks: add a distinguishing `--prefix`.
 - Skip the isolation ONLY when the task explicitly needs the human's shared Chrome (attach via `connect 9222`, below). Even then, if a second task may run in parallel, switch back by re-exporting.
-- If an `agent-browser` command surprisingly sees the human's tabs or another task's page, the env var was lost (e.g. fresh shell) — re-export, never continue on the unnamed session.
+- If an `agent-browser` command surprisingly sees the human's tabs or another task's page, the derivation was skipped in that invocation — stop, re-derive, and rerun the command; never continue on the unnamed session.
 
 ## First use in a session
 
