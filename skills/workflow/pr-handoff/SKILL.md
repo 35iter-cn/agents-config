@@ -60,6 +60,14 @@ Run only when the session already produced UI screenshots (walkthrough/dev captu
 - Alt text follows `#` after the path; up to 50 files per command.
 - On update flows, run after every full body replace — a replaced body wipes previously embedded images unless re-attached in the same command.
 
+### Merge follow-up (MagicDoor company-portal test env)
+
+After a company-portal PR merges to master, the `Deploy To Test Environment` workflow runs automatically on the master push (test env deploys off master; the `staging` branch is just one deploy object — never force-push `staging` for this, the push to master already covers it). Post-merge:
+
+1. `gh run list --repo MagicDoorInc/company-portal --branch master --workflow "Deploy To Test Environment" --limit 2` to find the run
+2. `gh run watch <run-id> --repo MagicDoorInc/company-portal` until it succeeds
+3. Then verify on `portal.magicdoor-test.com`
+
 ### Verify
 
 `gh pr view` to confirm PR is created/updated and visible.
