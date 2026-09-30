@@ -84,6 +84,10 @@ renames it nor starts a second one. `--stack <name>` targets another; if its wor
 - Refuses to create a stack: OAuth redirect ports are pooled → `md nuke` an unused stack (`md ls`).
 - Stack disagrees with reality, e.g. containers removed by hand: `md prune --apply`.
 - Login fails with no obvious error: `mkcert -install`, then reload.
+- Hosted service unreachable from the stack (stack hostname → 502, stub container logs socat "Connection refused" to `172.x.0.1`), while `curl localhost:<port>` on the host works: the `Stack` launch profile binds `http://localhost:<port>` (loopback only), but the container-side stub connects via `host.docker.internal` — the stack network's bridge gateway. Set `ASPNETCORE_URLS=http://*:<port>` **inside the profile's `environmentVariables`** (a profile value overrides the same variable passed on the command line). `md status` shows "listening" either way; check `ss -tln` for `*:port` vs `127.0.0.1:port`.
+- Starting two hosted services from the CLI at once collides in the shared `.artifacts/bin` output (MSB3248 "file in use by another process"). Start them sequentially, second one delayed — or build once, then run the built binaries.
+- Swagger is group-split, not `/swagger/v1/swagger.json`: docs live at `GET /openapi/<Group>.json` (Maintenance: `Internal.json`; Portal: `InternalApp.json`); the group list is in `GET /swagger/index.js` (`urls` array).
+- Minting an employee token for API testing without a browser: ① `POST https://auth.<stack>.md.test/internal/local-login` form `client_id=internal_portal&return_url=https://portal.<stack>.md.test/login/callback&state=x&email=<magicdoor email>` → 302; ② GET that redirect URL → its 302 carries `?code=…`; ③ `POST /oauth/token` form `grant_type=authorization_code&code=…&client_id=internal_portal` + same `redirect_uri` → `access_token` with `permissions: *`. Only works on stacks (LocalStackSignIn); use the `https://auth.<stack>.md.test` host consistently, never the localhost auth port from `md urls`.
 
 ## Red flags
 
