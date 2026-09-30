@@ -16,6 +16,7 @@ agents-for-myself/
 ├── skills/             # Canonical skill tree (single source of truth)
 │   ├── magicdoor/
 │   ├── private/            # Local-only skills (gitignored)
+│   ├── vendor/             # Third-party skills (e.g. vendor/lark = official lark-cli skills)
 │   ├── tools/
 │   └── workflow/
 ```
@@ -41,6 +42,7 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 - **`skills/workflow/`** — Spec shipping, PR handoff, grilling, handoff, ai-taught-me
 - **`skills/tools/`** — shared-chrome, frontend-design, update-claude
 - **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
+- **`skills/vendor/`** — Third-party skills copied in (not authored here). `skills/vendor/lark/` holds the official lark-cli skills (lark-shared, lark-doc, lark-wiki, lark-markdown, lark-drive) fetched from `https://open.feishu.cn/.well-known/skills/index.json`. Upstream updates: re-fetch, verify sha256 folder hash, diff, then re-sync. sync-skills supports the extra `vendor/lark/` level and registers the skills by their own names.
 
 Each skill directory contains `SKILL.md` with full documentation.
 

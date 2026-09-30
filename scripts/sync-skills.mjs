@@ -115,6 +115,16 @@ function scanSkills(root) {
         if (!childSt.isDirectory()) continue;
         if (existsSync(resolve(childPath, 'SKILL.md'))) {
           registerLink(prefix + child, childPath);
+          continue;
+        }
+        for (const sub of readdirSync(childPath)) {
+          const subPath = resolve(childPath, sub);
+          let subSt;
+          try { subSt = lstatSync(subPath); } catch { continue; }
+          if (!subSt.isDirectory()) continue;
+          if (existsSync(resolve(subPath, 'SKILL.md'))) {
+            registerLink(sub, subPath);
+          }
         }
       }
     }
