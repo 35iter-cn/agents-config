@@ -18,7 +18,7 @@ Fill the monthly `Hao-YYYY/MM` sheet via the Sheets API with `mdsheet` (full fla
 - 周报 = Saturday S's row, cell `$notes_col`; content window **S−7…S−1 — never written on S−7**. Default S = latest Friday ≤ today, + 1. Before writing, state S / window / target `G{row}`.
 - Sheet naming口径: always `Hao-YYYY/MM` (e.g. `Hao-2026/09`) — for find, audit, and all references.
 - New month: `mdsheet create '2026/09'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). The `create` argument is YYYY/MM, matching the Hao-YYYY/MM naming口径. Any string that is not a date (e.g. `'Hao-2026/09'`) is treated as a bare-spreadsheet title and yields an empty sheet (single 工作表1 tab, structure/get → 400). Trash it and recreate with a date. `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
-- Never guess HOURS (D) or KANBAN LINK (E). HOURS acquisition recipe: pull from project memory; if memory lookup misses, ask the user explicitly — never substitute for it. 补充缺失: audit with `get`, write only blanks.
+- Never guess KANBAN LINK (E) — if missing, ask the user explicitly. HOURS (D) are a fixed path, not optional: pull from the `clock-work-hours-report` skill — `fetch-hours.py` over the exact fill range (`--month YYYY-MM` or `--start/--end YYYY-MM-DD`, inclusive) → `adjust-hours.py` (default factor 1.4 / peak 9; user override wins) → write each CSV day's value. Fill only blank HOURS cells (never overwrite), and never invent hours if the fetch fails — stop and ask. 补充缺失: audit with `get`, write only blanks.
 - Batch reads: `get '<range>'` outputs raw API JSON (values rows). Parse rules: row N of range = `values[N]` (empty cell = `[]`, leading/trailing fully-empty rows trimmed); multi-line cells keep `\n` literally.
 - Monthly audit: `timesheet-audit --month 2026/09` cross-checks TASK bullets vs git, PR rows vs gh — one-shot report; WARN lines are merge-day restatements / issue refs, ERROR findings must be fixed before handoff.
 - Verification (per user directive): no per-cell re-read loops. Batch write (setmulti for single-line columns, per-cell set for multi-line) → ONE batch `get` of the same range → local diff against the expected array. Per-cell `get` is for spot checks/diagnosis only.
@@ -31,13 +31,14 @@ eval "$(mdsheet -s "$SID" structure)"
 D_ROW=$(mdsheet -s "$SID" find-date '<date>'); G_ROW=$(mdsheet -s "$SID" find-date '<S>')
 ```
 
-1. Loop `work-summary` (each day + the weekly window) → JSON.
+1. Loop `work-summary` (each day + the weekly window) → JSON; fetch Clock hours for the fill range per the HOURS rule (CSV: `date,hours`, days without data stay blank).
 2. Render per-cell files matching the sheet's style:
    - TASK: `## project` + `- emoji subject` bullets
    - PR: `# PRs` + `- [MERGED] #N: title — url`
    - weekly NOTES: top category header rows — 🚀 需求开发 / 🏗 架构调整 / ⚡ 性能与修复 (max 3, omit empty categories); under each, Chinese short bullets `(#PR)`, no dashes; related cross-repo work merged into one bullet
 3. Write (A1 ranges only; `-t` overrides tab):
    - `mdsheet -s "$SID" set "$task_col$D_ROW" task.txt` / `set "$pr_link_col$D_ROW" prs.txt`
+   - HOURS: per CSV row, `find-date '<day>'` → `set "$hours_col$ROW" <value>` (days without hours stay blank; rows are non-contiguous, so per-cell `set`, no setmulti)
    - weekly last: `set "$notes_col$G_ROW" notes.txt`
 4. Verify: `get` → full-file sha256 (API returns raw newlines). If any day in [S−7,S−1] was filled, refresh `G{S}`.
 

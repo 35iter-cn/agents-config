@@ -4,7 +4,8 @@
 // usage:
 //   timesheet-audit --month YYYY/MM [--cwd <magicdoor root>] [--sheet-id <id>]
 //
-// sources: work-summary.mjs (commits via `git log --all`, PRs via gh),
+// sources: work-summary.mjs (commits via `git log --all`, PRs via gh), Clock API for HOURS
+// (Bearer $CLOCK_API_KEY, work-tagged activities only),
 // sheet via `mdsheet get` (raw API JSON, one request per column).
 //
 // checks:
@@ -12,8 +13,12 @@
 //   2. PR LINK rows: known month PRs OK; unknown ones probed via `gh pr view` (BAD if absent)
 //   3. reverse: month PRs present in gh but never listed in the sheet → MISSED
 //   4. Saturday NOTES rows: (#N) references not in the PR set → advisory (may be issue refs)
+//   5. HOURS consistency (root cause of the 2026-09-19 miss):
+//      day with Clock hours but empty TASK → ERROR (hours without recorded work)
+//      day with TASK but no Clock hours → WARN (verify offline work claim)
+//      day with HOURS written but Clock shows nothing / value mismatch → ERROR/WARN
 //
-// exit code 1 on any ERROR; MISSED/WARN printed but advisory. HOURS (D) is filled and verified at write time from its own source (see project memory) — not re-audited here.
+// exit code 1 on any ERROR; MISSED/WARN printed but advisory.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -62,6 +67,7 @@ const readCol = (letter, n) => {
   return new Array(n).fill('').map((_, i) => (i < values.length && values[i] && values[i][0]) || '');
 };
 const TASK = readCol(task_col, daysInMonth);
+const HRS = readCol(hours_col, daysInMonth).map(v => parseFloat(v));
 const PRLINK = readCol(pr_link_col, daysInMonth);
 const NOTES = readCol(notes_col, daysInMonth);
 
@@ -77,6 +83,26 @@ const wsPrs = {};
 for (const p of ws.projects) for (const pr of p.prs) {
   wsPrs[pr.number] = { repo: p.name, state: pr.state, title: pr.title, createdAt: (pr.createdAt || '').slice(0, 10) };
 }
+
+// ---- facts: Clock daily work hours ----
+const clockKey = process.env.CLOCK_API_KEY || '';
+let clockHours = null;
+if (clockKey) {
+  const z = (i) => new Date(Date.UTC(+YYYY, +MM - 1, i + 1)).toISOString().replace('.000Z', 'Z');
+  const url = `https://focus.35iter.cn/api/periods/daily?start=${z(0)}&end=${z(daysInMonth)}&tz=Asia%2FShanghai`;
+  const r = spawnSync('curl', ['-sS', '-m', '30', '-H', `Authorization: Bearer ${clockKey}`, url], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  try {
+    const days = JSON.parse(r.stdout);
+    if (Array.isArray(days)) {
+      clockHours = new Array(daysInMonth).fill(0);
+      for (const d of days) {
+        const day = +d.date.slice(-2);
+        if (day < 1 || day > daysInMonth) continue;
+        for (const a of d.activities || []) if (a.activityId === 'activity_work_001') clockHours[day - 1] = +(a.duration / 3600000).toFixed(2);
+      }
+    }
+  } catch { console.error('[!] Clock API fetch/parse failed — HOURS consistency check skipped'); }
+} else console.error('[!] CLOCK_API_KEY not set — HOURS consistency check skipped');
 
 // ---- parsing helpers ----
 const norm = (s) => s.toLowerCase().replace(/\(#[\d, ]+\)/g, ' ').replace(/[^a-z0-9/{}._ ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -163,9 +189,23 @@ for (let i = 0; i < daysInMonth; i++) {
   if (unknown.length) warns.push(`NOTES row ${i + startRow}: (#N) refs not in month PR set: ${unknown.join(', ')} — may be issue refs, verify manually`);
 }
 
+// 5. HOURS vs Clock vs TASK consistency (miss of 2026-09-19: hours logged, task lost)
+let hourChecks = 0;
+if (clockHours) {
+  for (let i = 0; i < daysInMonth; i++) {
+    const hasTask = TASK[i].trim().length > 0;
+    const hasHours = HRS[i] > 0;
+    const worked = clockHours[i] > 0;
+    if (worked && !hasTask) errors.push(`HOURS ${dateOf(i)}: Clock recorded ${clockHours[i]}h but TASK is empty — fill the day's TASK/PR or explain`);
+    if (hasTask && !worked) warns.push(`TASK ${dateOf(i)}: TASK filled but no Clock work hours that day — verify manually (offline day?)`);
+    if (hasHours && !worked) warns.push(`HOURS ${dateOf(i)}: sheet has ${HRS[i]}h but Clock shows no work activity`);
+    if (worked) hourChecks++;
+  }
+}
+
 // ---- output ----
 console.log(`# timesheet-audit Hao-${YYYY}/${MM} (sheet ${SHEET_ID})`);
-console.log(`TASK bullets: ${taskBullets} (unmatched: ${taskUnmatched}) | PR rows: ${prRows} (probed ok: ${prProbed}, bad: ${prBad}) | MISSED candidates: ${missed.length}`);
+console.log(`TASK bullets: ${taskBullets} (unmatched: ${taskUnmatched}) | PR rows: ${prRows} (probed ok: ${prProbed}, bad: ${prBad}) | HOURS checked: ${hourChecks} | MISSED candidates: ${missed.length}`);
 if (missed.length) {
   console.log(`\n[MISSED] month PRs never listed in the sheet:`);
   for (const m of missed) console.log(`  - ${m}`);
