@@ -1,4 +1,5 @@
 ---
+name: magicdoor-backend-swagger
 description: >
   Query MagicDoor backend service configs, analyze swagger specs, and generate
   swagger types via the @magicdoorinc/env package (binary: magicdoor-env).

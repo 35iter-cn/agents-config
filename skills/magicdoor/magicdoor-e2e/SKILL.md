@@ -80,12 +80,14 @@ not Hao's. Screenshots and further interaction continue in that tab.
 
 ## Pitfalls
 
-- **A user with no account cannot shadow-log in.** No row, or an inactive one, means no
-  session to hand out. Create/invite first, or pick another user.
+- **A user with no account cannot shadow-log in.** No row, or an truly *inactive*
+  account, means no session to hand out. Create/invite first, or pick another user.
+  (Verified 2026-10-09: a `notInvited` vendor with an active account row CAN be
+  shadow-logged-in from the internal portal — the status alone does not block it.)
 - **`Owner` and `Vendor` shadow login need the Internal Portal's Owners/Vendors tabs.**
-  On `master` only **Property Managers** and **Tenants** exist; Owners/Vendors ship with
-  `feat/internal-owners-vendors-tabs`. On test/older builds, pick a PM or tenant user, or
-  run the branch on a local stack.
+  On `master` those tabs may be hidden, but the company page accepts `?tabId=vendors`
+  / `?tabId=owners` directly in the URL — a hidden tab works as a back door when the
+  tab strip lacks the button (verified on `internal.magicdoor-dev`-style builds).
 - **A row's shadow session is a fresh OAuth login on the target host** — the target portal's
   token store is separate from the internal portal's, so the new tab starts clean.
 - **Do not test with a system token** (`user_type=MagicDoor`) against a business portal:
