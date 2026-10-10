@@ -34,11 +34,13 @@ Not for API-only calls.
 
 | Environment | URL | Sign-in |
 |---|---|---|
-| Local stack | `https://internal.<stack>.md.test/` | Click **Sign In with Google** → lands on a **"Local stack sign-in"** email form → enter **`hao-ruan@magicdoor.com`** |
+| Local stack | `https://internal.<stack>.md.test/` | `internal-portal` must run as a **linked dev server** (`md link`): its container is a static SPA baked with deployed-env config, so the Google button jumps to real `accounts.google.com` and no email form exists; linked, the **"Local stack sign-in"** email form renders → enter **`hao-ruan@magicdoor.com`** |
 | test / dev / demo | `https://internal.magicdoor-test.com/` | Click **Sign In with Google** → real Google OAuth → pick Hao's account |
 
-On a local stack the email form replaces Google, because Google rejects `.test` redirect
-URIs. **Use `hao-ruan@magicdoor.com`** — that address already exists in the stack's
+On a local stack — with `internal-portal` **linked** (see `magicdoor-local-debug`) — the
+email form replaces Google, because Google rejects `.test` redirect URIs. A containerized
+`internal-portal` cannot log in at all: every path starts with a Google jump that cannot
+complete. **Use `hao-ruan@magicdoor.com`** — that address already exists in the stack's
 database, so it signs in as the real employee with `permissions: *`. Any *other* address
 creates a brand-new employee with full permissions, which pollutes the stack.
 
@@ -95,7 +97,7 @@ not Hao's. Screenshots and further interaction continue in that tab.
   exactly why it beats hand-minted tokens.
 - **Local stack: a broken login is usually an addressing problem, not auth.** If the browser
   loads but sign-in fails, or the API 500s/401s, check the stack before the app — see the
-  `magicdoor-local-stack` skill and the `md-cli-stack` knowledge set (proxy network
+  `magicdoor-local-debug` skill and the `md-cli-stack` knowledge set (proxy network
   attachment, FQDN resolution, HTTPS trust chain).
 
 ## Reference: what shadow login actually calls
@@ -110,5 +112,5 @@ the client assembles a userId or a host by hand; the Internal Portal reads the c
 | Skill | Role |
 |---|---|
 | `shared-chrome` | the CDP browser used for every step |
-| `magicdoor-local-stack` | `md up` / `md host` / `md link`; how the local stack is addressed |
+| `magicdoor-local-debug` | `md up` / `md host` / `md link`; how the local stack is addressed |
 | `magicdoor-backend-swagger` | swagger specs, `magicdoor-env` CLI |
