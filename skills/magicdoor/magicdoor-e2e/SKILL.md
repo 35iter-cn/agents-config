@@ -34,7 +34,7 @@ Not for API-only calls.
 
 | Environment | URL | Sign-in |
 |---|---|---|
-| Local stack | `https://internal.<stack>.md.test/` | `internal-portal` must run as a **linked dev server** (`md link`): its container is a static SPA baked with deployed-env config, so the Google button jumps to real `accounts.google.com` and no email form exists; linked, the **"Local stack sign-in"** email form renders → enter **`hao-ruan@magicdoor.com`** |
+| Local stack | `https://internal.<stack>.md.test/` | `internal-portal` must run as a **linked dev server** (`md link`): its container is a static SPA baked with deployed-env config, so the Google button jumps to real `accounts.google.com` and no email form exists. The sign-in page shows **"Sign In with Google" either way** — the check is the click (verified 2026-10-11): linked, it lands on the auth host, which renders the **"Local stack sign-in" email form** at `auth.<stack>.md.test/internal/local-login` (a stack auth has no `GOOGLE_OAUTH_CLIENT_ID`) → enter **`hao-ruan@magicdoor.com`**; a jump to real Google = still containerized, go back to `md link` |
 | test / dev / demo | `https://internal.magicdoor-test.com/` | Click **Sign In with Google** → real Google OAuth → pick Hao's account |
 
 On a local stack — with `internal-portal` **linked** (see `magicdoor-local-debug`) — the

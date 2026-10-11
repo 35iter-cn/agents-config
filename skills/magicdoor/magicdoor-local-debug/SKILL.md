@@ -49,10 +49,16 @@ automatically.
    - **`internal-portal` always** (login entry point): its container is a
      static SPA baked for the deployed test env — its Sign In button jumps
      straight to real Google OAuth and the stack's email form never appears.
-     Only the **linked dev server** carries the stack config that renders the
-     "Local stack sign-in" form (internal-portal went static nginx in
-     2026-09-13 #157). If the sign-in page shows a Google button instead of
-     the email form, internal is still containerized — go back and link it.
+     **The sign-in page always shows a "Sign In with Google" button, linked
+     or not** (`SignIn.tsx` has no email form; internal-portal went static
+     nginx in 2026-09-13 #157). The check is the **click** (verified
+     2026-10-11): clicking it redirects to the auth host — on a stack the
+     linked app hits the local auth, which has no `GOOGLE_OAUTH_CLIENT_ID`
+     and so renders the "Local stack sign-in" email form at
+     `auth.<stack>.md.test/internal/local-login`; a jump to real
+     `accounts.google.com` means internal is still containerized — go back
+     and link it. A Google button on the sign-in page is therefore normal,
+     not a linked-state symptom.
    - **the portal you are working on**: its container is replaced by your dev
      server (`.env.local` written against `*.md.test`); `md unlink` hands it
      back.

@@ -82,10 +82,12 @@ md unlink      # hand it back to the container when done
   2026-09-13 (#157) it is a static nginx SPA with the deployed-env config
   baked at build time; as a container its "Sign In with Google" jumps to
   real `accounts.google.com` (redirect URI = deployed auth) and the stack's
-  email form never appears. The linked dev server injects the stack config,
-  and only then the "Local stack sign-in" form renders (verified 2026-10-10:
-  container → Google jump; linked → form at
-  `auth.<stack>.md.test/internal/local-login`).
+  email form never appears. The sign-in page shows the Google button
+  **regardless of link state** (`SignIn.tsx` has no email form); the
+  linked dev server only changes where the **click** goes (verified
+  2026-10-10, re-verified 2026-10-11: container → Google jump; linked →
+  form at `auth.<stack>.md.test/internal/local-login`, because the stack's
+  auth has no `GOOGLE_OAUTH_CLIENT_ID`).
 - **The portal you are working on** — changes ship through your dev server,
   HMR live against the stack.
 
@@ -107,10 +109,12 @@ Everything else stays as containers. Three notes for the linked ones:
    and the whole internal-portal round has to be redone. Do it before
    signing in.
 1. Open `https://internal.<stack>.md.test`.
-2. **Health check:** you must land on the "Local stack sign-in" **email
-   form**. If you see a "Sign In with Google" button that jumps to real
-   Google, internal-portal is still running as a container — go back to
-   Step 2 and link it before anything else.
+2. **Health check:** the sign-in page always shows **"Sign In with
+   Google"** — that is normal either way. The check is the click: on a
+   stack it must land on the "Local stack sign-in" **email form** at
+   `auth.<stack>.md.test/internal/local-login`. A click that jumps to real
+   `accounts.google.com` means internal-portal is still running as a
+   container — go back to Step 2 and link it before anything else.
 3. Sign in via the email form (stacks replace Google OAuth because `.test`
    redirect URIs are rejected): enter **`hao-ruan@magicdoor.com`**.
 4. Companies list → open the company → tabs for Property Managers /
