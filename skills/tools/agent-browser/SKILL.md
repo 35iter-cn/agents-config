@@ -65,6 +65,15 @@ If the mark is missing, check for a second chrome parent process (`ps aux | grep
 
 **Never salvage a mid-task disconnect with `close`, `pkill agent-browser`, or daemon restarts.** Killing the daemon orphans its last-spawned browser and the next connect re-launches a fresh headless one — the split-instance loop that makes the whole session's work unverifiable (observed 2026-10-11: hours of E2E flow split across two instances, with tokens appearing to reset for no reason). If a reconnect seems necessary, stop, verify what is actually running first, then restart the shared Chrome from its launcher.
 
+**`connect` adopts the shared browser's existing tabs.** After connecting, your session's tab registry includes every tab the shared Chrome already had — other sessions' marker pages, stale local-stack hosts, and the user's own tabs. That makes the implicit "current tab" unreliable: navigation can land on a leftover tab, and a tab opened by an in-page action (a link click, a shadow-login flow) may not appear in your session's `tab list` at all. Reconcile right after connecting:
+
+```bash
+agent-browser tab list                              # what the session sees
+curl -fsS http://127.0.0.1:9222/json | node -e "JSON.parse(require('fs').readFileSync(0)).filter(t=>t.type==='page').forEach(t=>console.log(t.url))"   # what the browser actually has
+```
+
+Leftover tabs from other sessions → ask the user to close them before continuing. Then open a dedicated labeled tab (`tab new --label <task> <url>`) and address it by ref in every subsequent command instead of the implicit current tab. If a tab you just drove "disappears" from your session's `tab list`, that is the same failure — stop and re-derive; never fall back to bare commands (no `AGENT_BROWSER_SESSION`) in a different session's view.
+
 ## Core loop
 
 ```bash
@@ -94,6 +103,7 @@ Prefer `snapshot -i` over full snapshot; prefer refs over `find role/text`; raw 
 - `screenshot` can hang (`Page.captureScreenshot` timeout) on heavy pages (canvas/media-heavy, chrome:// pages). On fallback: retry on a simpler page, or use `--screenshot-format jpeg --screenshot-quality 80` and an existing target directory.
 - Headless launches hide scrollbars by default; shared Chrome via `connect` is headed and unaffected.
 - Avoid `wait --load networkidle` on SSE/WebSocket-heavy pages (e.g. portals) — use `wait --text/--url/--fn` instead.
+- Attached sessions inherit the shared Chrome's tabs: the implicit current tab can be a leftover from another session (stale marker page, dead local-stack host) — navigation and reads silently hit it. Reconcile after `connect` and use explicit tab refs (see Shared Chrome above).
 
 ## Skill escalation
 
