@@ -37,3 +37,4 @@ curl -fsS http://127.0.0.1:9222/json/version || echo "shared Chrome not running"
 - This is a shared resource across sessions. Do not close or restart it unless connection is genuinely unrecoverable and the user has confirmed.
 - Reuse existing tabs and login state. Do not switch to a different profile.
 - If a browser tool cannot connect, notify the user rather than silently launching a second instance.
+- **Beware a second orphan instance.** A browser-automation daemon (e.g. agent-browser) that was killed/restarted mid-task may have spawned its own headless duplicate (`--headless=new --user-data-dir=/tmp/agent-browser-chrome-*`) whose tabs copy the shared Chrome's URLs. If clients connect but the user sees nothing happening, check `ps aux` for a second chrome parent process before assuming the shared Chrome is the one being driven. See the agent-browser skill's attach-verification protocol.

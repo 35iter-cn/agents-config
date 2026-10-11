@@ -54,6 +54,17 @@ Rules inherited from the shared-chrome skill:
 - It is a shared resource: never close/restart it; reuse existing tabs and login state; do not switch profiles.
 - `connect` binds to the daemon, not the process — it survives across CLI invocations.
 
+**Verify the attach actually landed on the shared browser.** A daemon whose session/browser state is stale can silently re-launch its own headless instance instead of attaching, and its tab set clones the shared Chrome's URLs — page contents and URLs look identical, so neither observation nor URL checks reveal the split. After connecting, confirm with a title mark:
+
+```bash
+agent-browser eval "document.title = 'AB-MARK-' + Date.now()"
+curl -fsS http://127.0.0.1:9222/json | grep -c AB-MARK   # 1 = attached to shared Chrome; 0 = driving its own instance
+```
+
+If the mark is missing, check for a second chrome parent process (`ps aux | grep -E 'chrome.*remote-debugging-port=0|agent-browser-chrome'`) — that is the headless instance a previous daemon generation spawned — kill it, and relaunch the shared Chrome (per the shared-chrome skill) rather than re-running more connects.
+
+**Never salvage a mid-task disconnect with `close`, `pkill agent-browser`, or daemon restarts.** Killing the daemon orphans its last-spawned browser and the next connect re-launches a fresh headless one — the split-instance loop that makes the whole session's work unverifiable (observed 2026-10-11: hours of E2E flow split across two instances, with tokens appearing to reset for no reason). If a reconnect seems necessary, stop, verify what is actually running first, then restart the shared Chrome from its launcher.
+
 ## Core loop
 
 ```bash
