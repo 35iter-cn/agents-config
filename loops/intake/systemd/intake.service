@@ -1,0 +1,8 @@
+[Unit]
+Description=intake loop: scan Slack #frontend + Frontend Tasks board (L0 read-only)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/code
+ExecStart=%h/code/agents-config/loops/intake/intake.sh
+TimeoutStartSec=20min

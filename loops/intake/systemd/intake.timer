@@ -1,0 +1,10 @@
+[Unit]
+Description=schedule intake loop every 30min while environment is alive
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=30min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
