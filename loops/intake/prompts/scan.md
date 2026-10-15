@@ -23,5 +23,6 @@
 ## 边界
 
 - 单轮若超过 10 分钟仍未完成步骤 1–4，立即收尾写报告（宁可少报，不可卡死）。
+- 检索文件内容/路径只用内置 grep/find 工具，禁止在 bash 里裸调 grep/rg/ls/find/cat/head/tail/wc/stat——临时 JSONL 的计数/字段提取/截断用 node/python 一步完成，不拆 bash 管道。
 - token 失效 / API 报错：写 daily log 一行 `[error] <来源> <原因>`，正常退出（exit 0），下轮重试。
 - 频道消息 @ 的处理人不是 frontend、或信号属于 backend/devops 域：直接归 `[忽略]`，只写一句归属判断。
