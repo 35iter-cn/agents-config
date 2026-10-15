@@ -14,16 +14,24 @@
     "company-portal#5579",
     "company-portal#5585",
     "frontend-common-module#224",
-    "magicdoor-cli#7",
-    "magicdoor-cli#8",
-    "vendor-portal#41",
-    "internal-portal#188"
+    "vendor-portal#41"
   ],
-  "lastBoardScan": "2026-10-15T03:47:30Z",
   "dm": {
     "channelId": "D0A4YUFK7FC",
-    "watermark": null
+    "watermark": "1792037907.479139"
   },
-  "pending": [],
-  "counter": 0
+  "pending": [
+    {
+      "id": "20261015-1",
+      "dmTs": "1792036658.034679",
+      "source": "https://magicdoor.enterprise.slack.com/archives/C0A51L0GAJ0/p1792029704296329",
+      "note": "Lei 问 Company Portal 端 subscription planName 的展示位置（含是否带价格明细），其建议 name only",
+      "addedAt": "2026-10-15T03:57:28.737Z",
+      "status": "skipped",
+      "resolvedAt": "2026-10-15T04:18:40Z",
+      "resolvedBy": "dm reply 1792036865.704589 (语义=不接, 无协议字面, 按 skip 处理)"
+    }
+  ],
+  "counter": 1,
+  "lastBoardScan": "2026-10-15T08:10:25.000Z"
 }
