@@ -64,7 +64,7 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 ## Close out
 
 1. **Suggest the freeze — do not run it.** Freeze is user-initiated: present the AC×task coverage table (every AC covered by a completed task, every task verified) and the command `plan-status <topic> <spec-id> implemented`, then wait. A declined or silent user leaves the spec `open` (status is truth); a later session re-offers the freeze before editing that spec.
-2. Update the STATE.md body in the same turn (progress, PRs, worktree status) and commit the material revisions to the sessions git repo.
+2. Update the STATE.md body in the same turn (progress, PRs, worktree status) and commit the material revisions to the topicbox git repo.
 3. PR handoff via the `pr-handoff` skill (rebase, pre-push checks, PR, UAT) and register PRs with `pr-add` (`--spec <id>` when the PR belongs to one spec).
 
 ## Anti-patterns

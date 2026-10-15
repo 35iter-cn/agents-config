@@ -6,7 +6,7 @@
 - **The body is LLM-owned and actively maintained.** Keep a `# Session State` summary (spec progress, worktree status, artifacts) plus durable conclusions — decisions, milestones, architecture notes worth carrying across sessions. The CLI preserves the body when it rewrites STATE.md.
 - `artifacts:` entries are `{ id, name, type, file }`, where `type` is `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`).
 - Update STATE.md in the same turn progress happens — spec finalized, milestone done, `plan-status` changed — not at session end.
-- **Body revisions are committed in the same turn.** Material changes to the body land in the sessions git repo with a one-line commit message; the diff carries the detail. The sessions root is a git repo; worktrees are gitignored.
+- **Body revisions are committed in the same turn.** Material changes to the body land in the topicbox git repo with a one-line commit message; the diff carries the detail. The topicbox root is a git repo; worktrees are gitignored.
 
 ## Body writing rules (dashboard + index)
 
@@ -33,7 +33,7 @@ The body is a dashboard and an index — never a second spec. Knowledge lives in
 
 ### Slimming
 
-The continue-flow STATE.md read is the health check: fix contradictions with reality, delete completed Todos, migrate over-long Notes to artifacts — all in the same turn. `verify` prints `warn:` lines for body refs to nonexistent files/ids, TBD wording, Todos > 3, plan AC refs unknown to the spec, and a dirty sessions git repo; treat every warn as the same-turn cleanup list.
+The continue-flow STATE.md read is the health check: fix contradictions with reality, delete completed Todos, migrate over-long Notes to artifacts — all in the same turn. `verify` prints `warn:` lines for body refs to nonexistent files/ids, TBD wording, Todos > 3, plan AC refs unknown to the spec, and a dirty topicbox git repo; treat every warn as the same-turn cleanup list.
 
 ## Numbering
 

@@ -1,6 +1,6 @@
 # Handoff Writing Guide
 
-Distilled from Matt Pocock's `handoff` skill (mattpocock/skills), adapted to the session-topic artifact system. The original writes to the OS temp directory; here the handoff is a topic artifact with a standard name.
+Distilled from Matt Pocock's `handoff` skill (mattpocock/skills), adapted to the topicbox artifact system. The original writes to the OS temp directory; here the handoff is a topic artifact with a standard name.
 
 ## Core Principle
 
@@ -57,10 +57,10 @@ Paths/URLs to specs, plans, docs, PRs — referenced, never copied.
 
 ## Procedure
 
-1. Resolve the topic (`session-topic resolve <topic>`; `init` if none).
+1. Resolve the topic (`topicbox resolve <topic>`; `init` if none).
 2. Create the file via the CLI — never `write` a numbered filename directly:
    ```bash
-   session-topic artifact-create <topic> handoff <name>
+   topicbox artifact-create <topic> handoff <name>
    ```
 3. Write the content to the printed path, following the structure above.
 4. Run the self-check below before handing off.

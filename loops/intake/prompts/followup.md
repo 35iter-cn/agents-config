@@ -15,7 +15,7 @@
      b. `gh issue edit --add-assignee @me`
      c. `addProjectV2ItemById` 上 Frontend Tasks 看板，`Status = Todo - 待办事项`（配方：task-radar `references/graphql-recipes.md`）
      d. task-intake Phase 3 第 4 步：候选源是 Slack 消息 → 在**其 thread**（thread_ts = 消息本尊）回复领取通报（issue 链接 + 板上状态；根因尚无，等 spec 阶段）
-     e. Phase 4：`session-topic init "<hint>"` → `artifact-create <topic> spec <name>` → 对要读的仓跑 `gco-latest` → 读码定根因（硬性要求）→ 按 spec-writing-guide 写 spec，过 Determinism Gate（含 AC 编号）→ **停在 spec，不建 plan、不 freeze**
+     e. Phase 4：`topicbox init "<hint>"` → `artifact-create <topic> spec <name>` → 对要读的仓跑 `gco-latest` → 读码定根因（硬性要求）→ 按 spec-writing-guide 写 spec，过 Determinism Gate（含 AC 编号）→ **停在 spec，不建 plan、不 freeze**
      f. `self-DM` 汇报一行：`<id> 已领取 → <issue url> | spec: <路径>`；pending 置 `status:"claimed"`，回填 `issue` 字段
      g. 单个 go 超过 18 分钟仍未完成 e：停在做完的步骤，DM 汇报中断点与原因，pending 置回 `open`（下轮重试）
    - **skip 命中**：pending 置 `status:"skipped"`，self-DM 一行确认。

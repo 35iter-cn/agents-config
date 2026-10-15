@@ -14,7 +14,7 @@ const NON_SPEC_ARTIFACT_TYPES = ['research', 'handoff', 'uat-case', 'notes'];
 
 function sessionsRoot() {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(base, 'sessions');
+  return join(base, 'topicbox');
 }
 
 function topicDir(topic) {
@@ -379,7 +379,7 @@ function titleFromSemantic(semantic) {
 }
 
 function init(args) {
-  if (args.length < 1) throw new Error('usage: session-topic init <semantic-hint>');
+  if (args.length < 1) throw new Error('usage: topicbox init <semantic-hint>');
   const semantic = normalizeSemantic(args[0]);
   const topic = `${today()}-${semantic}-${generateSuffix()}`;
   const dir = topicDir(topic);
@@ -400,7 +400,7 @@ function init(args) {
 }
 
 function resolveTopic(args) {
-  if (args.length < 1) throw new Error('usage: session-topic resolve <topic>');
+  if (args.length < 1) throw new Error('usage: topicbox resolve <topic>');
   const topic = args[0];
   validateTopicName(topic);
   console.log(topicDir(topic));
@@ -460,7 +460,7 @@ function createOtherArtifact(topic, type, name) {
 }
 
 function artifactCreate(args) {
-  if (args.length < 3) throw new Error('usage: session-topic artifact-create <topic> <type> <name-or-spec-id>');
+  if (args.length < 3) throw new Error('usage: topicbox artifact-create <topic> <type> <name-or-spec-id>');
   const [topic, type, nameOrId] = args;
   validateTopicName(topic);
   if (!ARTIFACT_TYPES.includes(type)) throw new Error(`invalid artifact type: ${type}`);
@@ -478,7 +478,7 @@ function artifactCreate(args) {
 }
 
 function planStatus(args) {
-  if (args.length < 3) throw new Error('usage: session-topic plan-status <topic> <spec-id> <status>');
+  if (args.length < 3) throw new Error('usage: topicbox plan-status <topic> <spec-id> <status>');
   const [topic, id, status] = args;
   validateTopicName(topic);
   if (!PLAN_STATUSES.includes(status)) throw new Error(`invalid plan status: ${status}`);
@@ -494,7 +494,7 @@ function planStatus(args) {
 }
 
 function worktreePath(args) {
-  if (args.length < 1) throw new Error('usage: session-topic worktree-path <topic> [dir]');
+  if (args.length < 1) throw new Error('usage: topicbox worktree-path <topic> [dir]');
   const [topic, dir] = args;
   validateTopicName(topic);
   const repo = resolveRepo(dir || process.cwd());
@@ -502,7 +502,7 @@ function worktreePath(args) {
 }
 
 function guardTopic(args) {
-  if (args.length < 1) throw new Error('usage: session-topic guard <topic> [dir]');
+  if (args.length < 1) throw new Error('usage: topicbox guard <topic> [dir]');
   const [topic, dir] = args;
   validateTopicName(topic);
   const repo = resolveRepo(dir || process.cwd());
@@ -560,7 +560,7 @@ function worktreeCheck(args) {
   const { positional, flags } = splitFlags(args, ['--repo']);
   const [topic] = positional;
   if (!topic || !flags['--repo']) {
-    throw new Error('usage: session-topic worktree-check <topic> --repo <main-checkout-path>');
+    throw new Error('usage: topicbox worktree-check <topic> --repo <main-checkout-path>');
   }
   validateTopicName(topic);
   if (!existsSync(topicDir(topic))) throw new Error(`topic not found: ${topicDir(topic)}`);
@@ -650,7 +650,7 @@ function worktreeCheck(args) {
       results.push({
         status: 'FAIL',
         label: 'pr registered',
-        detail: `branch ${branch} not in STATE.md prs — run: session-topic pr-add ${topic} <owner/${repo}#N> --branch ${branch}`,
+        detail: `branch ${branch} not in STATE.md prs — run: topicbox pr-add ${topic} <owner/${repo}#N> --branch ${branch}`,
       });
     }
   }
@@ -682,7 +682,7 @@ function worktreeCheck(args) {
   suggestions.push('Suggested flow (you execute; pick a fresh <branch> name not registered in STATE.md prs):');
   if (registered) suggestions.push(`  git worktree remove "${worktree}"`);
   suggestions.push(`  git worktree add "${worktree}" -b <branch> ${defaultRef || '<default-branch>'}`);
-  suggestions.push(`  session-topic guard ${topic}`);
+  suggestions.push(`  topicbox guard ${topic}`);
 
   return printWorktreeCheck(topic, repo, worktree, branch, results, suggestions);
 }
@@ -719,7 +719,7 @@ function artifactRemove(args) {
   const [topic, idArg] = positional;
   if (!topic || !idArg) {
     throw new Error(
-      'usage: session-topic artifact-remove <topic> <id> [--type spec|plan|research|handoff|uat-case|notes] [--reason <text>] [--confirmed]\n' +
+      'usage: topicbox artifact-remove <topic> <id> [--type spec|plan|research|handoff|uat-case|notes] [--reason <text>] [--confirmed]\n' +
         '当 id 同时命中 spec 和 artifact 两个命名空间时，--type 必填，绝不猜。',
     );
   }
@@ -778,7 +778,7 @@ function artifactRemove(args) {
     if (spec.plan) {
       throw new Error(
         `spec ${spec.id} (${spec.name}) 还有已登记的 plan，先删 plan 再删 spec：\n` +
-          `  session-topic artifact-remove ${topic} ${spec.id} --type plan`,
+          `  topicbox artifact-remove ${topic} ${spec.id} --type plan`,
       );
     }
     if (!flags['--confirmed']) {
@@ -850,7 +850,7 @@ function addTombstone(state, entry) {
   appendTombstone(state, `> ${entry.kind} ${entry.id}${label} removed ${entry.removed}: ${entry.reason}`);
 }
 function verifyTopic(args) {
-  if (args.length < 1) throw new Error('usage: session-topic verify <topic>');
+  if (args.length < 1) throw new Error('usage: topicbox verify <topic>');
   const [topic] = args;
   validateTopicName(topic);
   const dir = topicDir(topic);
@@ -885,7 +885,7 @@ function verifyTopic(args) {
     if (parsed.kind === 'invalid') {
       issues.push(
         `${file} 编号文件名不符合 NN-<name>.<type>.md 格式(类型须为 spec/plan/research/handoff/uat-case/notes)。` +
-          `修复:保存内容后删除该文件,再 session-topic artifact-create ${topic} <type> <name> 重建并写回;误建则删除该文件`,
+          `修复:保存内容后删除该文件,再 topicbox artifact-create ${topic} <type> <name> 重建并写回;误建则删除该文件`,
       );
       continue;
     }
@@ -906,7 +906,7 @@ function verifyTopic(args) {
     if (!reg) {
       issues.push(
         `${spec.file} 未注册到 STATE.md(手动创建,未走 artifact-create)。` +
-          `修复:内容需保留则先保存内容,再 session-topic artifact-create ${topic} spec ${spec.name} 重建并写回;误建则删除该文件`,
+          `修复:内容需保留则先保存内容,再 topicbox artifact-create ${topic} spec ${spec.name} 重建并写回;误建则删除该文件`,
       );
       continue;
     }
@@ -925,7 +925,7 @@ function verifyTopic(args) {
     if (!specFile) {
       issues.push(
         `${plan.file} 无对应 spec 文件(${plan.id}-${plan.name}.spec.md 缺失或未注册)。` +
-          `修复:session-topic artifact-create ${topic} spec ${plan.name} 创建对应 spec,或删除该 plan 文件`,
+          `修复:topicbox artifact-create ${topic} spec ${plan.name} 创建对应 spec,或删除该 plan 文件`,
       );
     }
   }
@@ -935,7 +935,7 @@ function verifyTopic(args) {
     if (!specFile) {
       issues.push(
         `spec ${reg.id} (${reg.name}) 已注册但 ${reg.id}-${reg.name}.spec.md 不存在。` +
-          `修复:session-topic artifact-create ${topic} spec ${reg.name} 重建`,
+          `修复:topicbox artifact-create ${topic} spec ${reg.name} 重建`,
       );
     }
     const plan = state.specs.find((s) => s.id === reg.id)?.plan;
@@ -954,7 +954,7 @@ function verifyTopic(args) {
     if (!reg) {
       issues.push(
         `${artifact.file} 未注册到 STATE.md(手动创建,未走 artifact-create)。` +
-          `修复:内容需保留则先保存内容,再 session-topic artifact-create ${topic} ${artifact.type} ${artifact.name} 重建并写回;误建则删除该文件`,
+          `修复:内容需保留则先保存内容,再 topicbox artifact-create ${topic} ${artifact.type} ${artifact.name} 重建并写回;误建则删除该文件`,
       );
       continue;
     }
@@ -990,7 +990,7 @@ function verifyTopic(args) {
     if (!artifactFile) {
       issues.push(
         `artifact ${reg.id} (${reg.name}, type:${reg.type}) 已注册但 ${reg.file || `${reg.file && reg.file.startsWith('D-') ? 'D-' : ''}${reg.id}-${expectedArtifactFilename(reg.name, reg.type)}`} 不存在。` +
-          `修复:内容已并走则 session-topic artifact-remove ${topic} ${reg.id} 清理注册,内容仍需要则 session-topic artifact-create ${topic} ${reg.type} ${reg.name} 重建`,
+          `修复:内容已并走则 topicbox artifact-remove ${topic} ${reg.id} 清理注册,内容仍需要则 topicbox artifact-create ${topic} ${reg.type} ${reg.name} 重建`,
       );
       continue;
     }
@@ -1118,7 +1118,7 @@ function collectVerifyWarnings(topic, state, specFiles, planFiles) {
 
   const gitStatus = runGit(sessionsRoot(), 'status --porcelain');
   if (gitStatus) {
-    warns.push(`sessions 仓库有未提交的修订(git status 非空)——实质修订必须同 turn git commit`);
+    warns.push(`topicbox 仓库有未提交的修订(git status 非空)——实质修订必须同 turn git commit`);
   }
 
   return warns;
@@ -1382,7 +1382,7 @@ function repoFilterMatches(topic, data, repoArg) {
 function findTopics(args) {
   const { positional, flags } = splitFlags(args, ['--repo', '--since', '--until']);
   if (positional.length < 1) {
-    throw new Error('usage: session-topic find <query> [--repo <repo>] [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>]');
+    throw new Error('usage: topicbox find <query> [--repo <repo>] [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>]');
   }
   for (const flag of ['--since', '--until']) {
     if (flags[flag] && !/^\d{4}-\d{2}-\d{2}$/.test(flags[flag])) {
@@ -1433,7 +1433,7 @@ function prAdd(args) {
   const { positional, flags } = splitFlags(args, ['--branch', '--spec']);
   const [topic, ref] = positional;
   if (!topic || !ref) {
-    throw new Error('usage: session-topic pr-add <topic> <pr-url|owner/repo#N> [--branch <branch>] [--spec <id>]');
+    throw new Error('usage: topicbox pr-add <topic> <pr-url|owner/repo#N> [--branch <branch>] [--spec <id>]');
   }
   validateTopicName(topic);
   if (!existsSync(topicDir(topic))) throw new Error(`topic not found: ${topicDir(topic)}`);
@@ -1472,7 +1472,7 @@ function prAdd(args) {
 }
 
 function help() {
-  console.log(`Usage: session-topic <command> [args]
+  console.log(`Usage: topicbox <command> [args]
 
 Commands:
   init <semantic-hint>              Create a new topic and print its name
@@ -1482,15 +1482,17 @@ Commands:
                                     Types: spec | plan | research | handoff | uat-case | notes
                                     For plan, <name-or-spec-id> is the spec id (reuses spec number/name)
   plan-status <topic> <spec-id> <status>  Update plan status (open|implemented)
-  artifact-remove <topic> <id> [--reason <text>]
-                                Hard-delete a non-spec artifact (file + registration),
-                                append a tombstone line to STATE.md body; specs/plans
-                                are never removable. New docs use D-NN numbering from
-                                D-100; legacy NN docs are grandfathered.
+  artifact-remove <topic> <id> [--type t] [--reason <t>] [--confirmed]
+                                Hard-delete an artifact (file + registration) and append
+                                a tombstone line to STATE.md body. Doc numbering runs from
+                                D-01. Specs/plans are removable via --type only under hard
+                                gates: implemented plan records are never removable; spec
+                                removal requires --confirmed (explicit user instruction)
+                                plus --reason, with any registered plan removed first.
   verify <topic>                  Verify STATE.md matches artifact files; exit 1 on drift.
                                 Also prints warn: lines for soft issues (body refs to
                                 nonexistent files/ids, TBD wording, Todos > 3, AC refs
-                                unknown to the spec, dirty sessions git repo)
+                                unknown to the spec, dirty topicbox git repo)
   worktree-path <topic> [dir]   Print the worktree path for the repo at $PWD or [dir]
   worktree-check <topic> --repo <main-checkout-path>
                                 Read-only preflight before creating/replacing the worktree:

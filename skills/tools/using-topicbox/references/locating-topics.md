@@ -2,13 +2,13 @@
 
 ## find
 
-To locate an existing topic from a PR link, branch, repo, date, or keyword, always run `find` — never recursive-grep `~/.config/sessions/` (it hits `worktree-*/` build artifacts and takes multiple passes).
+To locate an existing topic from a PR link, branch, repo, date, or keyword, always run `find` — never recursive-grep `~/.config/topicbox/` (it hits `worktree-*/` build artifacts and takes multiple passes).
 
 ```bash
-session-topic find "https://github.com/MagicDoorInc/magic-manager/pull/1"
-session-topic find "MagicDoorInc/magic-manager#1"
-session-topic find "refactor/chat-upload-sessions"
-session-topic find "chat multipart" --since 2026-08-20
+topicbox find "https://github.com/MagicDoorInc/magic-manager/pull/1"
+topicbox find "MagicDoorInc/magic-manager#1"
+topicbox find "refactor/chat-upload-sessions"
+topicbox find "chat multipart" --since 2026-08-20
 ```
 
 - The CLI auto-classifies the query: PR URL / `owner/repo#N` / `short#N` / bare `#N` / branch (contains `/`) / keyword.
@@ -22,7 +22,7 @@ session-topic find "chat multipart" --since 2026-08-20
 When topic work produces a PR, register it **in the same turn** so future `find` queries hit the registry directly:
 
 ```bash
-session-topic pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
+topicbox pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
 ```
 
 - Frontmatter shape (CLI-owned): `prs:` array of `{ repo: full slug, number, branch? }`. The registry is an **index, not a mirror** — no status/title fields; those stay in the body narrative.

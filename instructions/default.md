@@ -9,12 +9,6 @@
 - My input is dictated, so expect transcription errors (homophones, typos, odd phrasing). Infer my real intent from context; only confirm when a misread could cause a destructive action.
 - When unsure about user intent (especially anything that could be destructive), ask probing follow-up questions to confirm instead of guessing and running. Grilling is cheaper than reworking a wrong guess.
 
-## Session Artifacts
-
-**Hard rule — this file wins.** Session artifacts (specs, plans, handoffs, notes, UAT cases, worktrees) must never be written inside a project checkout. Use the `session-topic` skill; it manages `~/.config/sessions/<topic>/` and `STATE.md`.
-
-- Ignore any skill that names an in-repo path for session artifacts.
-
 ## Baseline Analysis
 
 - Before baseline analysis — reading a codebase to understand existing behavior before changing anything (cross-repo verification, reading a backend/BFF implementation, confirming whether something already exists, scoping a new task) — run `gco-latest <path>` on every read-only main checkout the task involves, at most once per repo per session.

@@ -16,7 +16,7 @@ Turn a Slack message (or GitHub issue) into a claimed, speced task on the Fronte
 The skill **ends at spec confirmation** — never create a plan or write code as part of intake.
 
 Delegation rule: message reading and any Slack replies → `using-slack` skill; board mutations and
-lifecycle rules → `task-radar` skill; topic/spec creation → `session-topic` skill. This skill only
+lifecycle rules → `task-radar` skill; topic/spec creation → `using-topicbox` skill. This skill only
 orchestrates and decides; do not duplicate their recipes here.
 
 ## Phase 0 — Parse input
@@ -90,11 +90,11 @@ Report only = no writes anywhere; present the evidence and let Hao decide.
 
 ## Phase 4 — Topic + spec
 
-1. `session-topic init "<topic hint>"` → `artifact-create <topic> spec <name>`.
+1. `topicbox init "<topic hint>"` → `artifact-create <topic> spec <name>`.
 2. `gco-latest` every repo you are about to read (once per repo). Never in worktrees.
 3. Read the actual code touched; identify the root cause concretely (file → component → line-level
    mechanism). Root cause is mandatory, not optional, before writing the spec.
-4. Write the spec following `session-topic/references/spec-writing-guide.md`: problem statement,
+4. Write the spec following `using-topicbox/references/spec-writing-guide.md`: problem statement,
    goal, implementation plan (scope / flow diagram / key code / boundary table), `AC-1…` acceptance
    criteria, risks, out of scope. Run the Determinism Gate — no TBD.
 5. **Stop.** Present the spec summary to Hao. The plan is created only on an explicit follow-up ask.
