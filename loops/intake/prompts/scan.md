@@ -16,7 +16,7 @@
 6. 报告写入当日 memory daily log（`memory_write target=daily`），头部一行 `## intake loop <YYYY-MM-DD HH:MM>`：
    - 零新信号：一行 `sweep clean (<inspected> msgs, board unchanged)`，仍推进水位。
    - 有候选：每条一行 `[候选 <id>] 一句依据 — permalink`。
-7. 若存在候选且 `dm.channelId` 非空：向 self-DM 发一条汇总（≤6 行）：
+7. 若存在候选且 `dm.channelId` 非空：向 self-DM 发一条汇总（≤6 行）。**消息以固定前缀 `🤖 intake:` 开头——self-DM 双方同作者，前缀是用户区分 loop 消息和他本人消息的唯一锚点，所有 loop 发出的 self-DM 一律携带**：
 
    ```
    intake loop 发现候选（可回 go/skip）:
