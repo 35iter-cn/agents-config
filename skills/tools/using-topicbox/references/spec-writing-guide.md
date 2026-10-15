@@ -4,7 +4,7 @@
 
 A spec is an **implementation plan**, not a discussion record.
 
-A spec stays editable until its plan is `implemented` — see Spec Lifecycle in `SKILL.md`. Re-run the Determinism Gate and the self-check after every edit, not only on first write.
+A spec stays editable until its plan is `implemented` — spec editability rules are in `SKILL.md` (Core Flow). Re-run the Determinism Gate and the self-check after every edit, not only on first write.
 
 | Discussion record (❌) | Implementation plan (✅) |
 |---|---|

@@ -78,4 +78,4 @@ If any gate fails or you are unsure, stop and produce a task brief with the revi
 - Running `plan-status` without an explicit user instruction
 - Marking a task complete without running its verification
 - Skipping the review gate because the user seems impatient
-- Opening a new numbered spec for a task whose spec is still `plan: open`; editing a spec whose plan is `implemented` (see Spec Lifecycle in `SKILL.md`)
+- Opening a new numbered spec for a task whose spec is still `plan: open`; editing a spec whose plan is `implemented` (spec editability rules: `SKILL.md` Core Flow)

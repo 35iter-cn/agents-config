@@ -22,8 +22,8 @@ topicbox find "chat multipart" --since 2026-08-20
 When topic work produces a PR, register it **in the same turn** so future `find` queries hit the registry directly:
 
 ```bash
-topicbox pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>]
+topicbox pr-add <topic> <pr-url-or-owner/repo#N> [--branch <branch>] [--spec <id>]
 ```
 
-- Frontmatter shape (CLI-owned): `prs:` array of `{ repo: full slug, number, branch? }`. The registry is an **index, not a mirror** — no status/title fields; those stay in the body narrative.
+- Frontmatter shape (CLI-owned): `prs:` array of `{ repo: full slug, number, branch?, spec? }`. The registry is an **index, not a mirror** — no status/title fields; those stay in the body narrative.
 - Idempotent: re-registering an existing repo+number only updates `branch`.
