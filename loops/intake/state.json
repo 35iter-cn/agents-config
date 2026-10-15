@@ -1,6 +1,24 @@
 {
-  "channels": {},
-  "lastBoardKnownIssues": [],
-  "lastBoardScan": null,
+  "channels": {
+    "C0A51L0GAJ0": "1792032442.775869"
+  },
+  "lastBoardKnownIssues": [
+    "company-portal#5554",
+    "company-portal#5560",
+    "company-portal#5567",
+    "company-portal#5568",
+    "company-portal#5569",
+    "company-portal#5571",
+    "company-portal#5572",
+    "company-portal#5574",
+    "company-portal#5579",
+    "company-portal#5585",
+    "frontend-common-module#224",
+    "magicdoor-cli#7",
+    "magicdoor-cli#8",
+    "vendor-portal#41",
+    "internal-portal#188"
+  ],
+  "lastBoardScan": "2026-10-15T03:47:30Z",
   "dm": null
 }

@@ -9,5 +9,8 @@ flock -n 9 || exit 0
 
 cd ~/code
 
-exec pi --mode json --print "$(cat "$ROOT/prompts/scan.md")" \
+PROMPT="$(cat "$ROOT/prompts/scan.md")
+
+运行实例根目录（本轮所有读写均以它为准）: $ROOT"
+exec pi --mode json --print "$PROMPT" \
   >> "$ROOT/logs/$(date +%F-%H%M).jsonl" 2>&1
