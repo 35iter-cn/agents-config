@@ -20,5 +20,10 @@
     "internal-portal#188"
   ],
   "lastBoardScan": "2026-10-15T03:47:30Z",
-  "dm": null
+  "dm": {
+    "channelId": "D0A4YUFK7FC",
+    "watermark": null
+  },
+  "pending": [],
+  "counter": 0
 }

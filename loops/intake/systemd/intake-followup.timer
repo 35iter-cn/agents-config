@@ -1,0 +1,10 @@
+[Unit]
+Description=schedule intake followup every 10min while environment is alive
+
+[Timer]
+OnStartupSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
