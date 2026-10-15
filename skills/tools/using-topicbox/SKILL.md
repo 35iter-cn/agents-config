@@ -26,6 +26,7 @@ A **topic** is one unit of work with a durable home: `~/.config/topicbox/<topic>
 | Write or edit project code | `topicbox guard <topic>` returns `ok` in the topic worktree |
 | Create a numbered artifact | `topicbox artifact-create` — never `write` |
 | Edit the STATE.md body — any change | read `references/state-md-writing-guide.md` first |
+| End a turn of topic work — milestone, decision, PR push, blocker, or any break | STATE.md body updated **and committed in the same turn** |
 | Continue an existing topic | `topicbox verify <topic>` passes |
 | Create a plan | Determinism Gate passed + user accepted the spec |
 | Freeze a spec | explicit user instruction only — never run unprompted |
@@ -69,6 +70,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`. Specs/plans: `NN-<name>.{spec,
 | "Spec is done — I'll run plan-status myself" | Freeze is user-initiated; suggest with the coverage table and wait. |
 | "I'll just tweak the spec text, no re-confirm" | A material change re-opens the confirmation gate. |
 | "Skip verify, I'm in a hurry" | That is the failure the check exists for. |
+| "STATE.md can wait until the session ends" | The session may not end cleanly — a break or crash is exactly what STATE.md exists for; uncommitted progress is evaporated knowledge. Real user pain: agents stalled mid-topic left the next session blind. |
 | "Main is probably fine / just a dirty tree" | Stale/dirty main is not a baseline; `gco-latest` first, exit 1 = stop. |
 
 ## Red Flags
