@@ -9,6 +9,8 @@ flock -n 9 || exit 0
 
 cd ~/code
 
+export PATH="$HOME/.volta/bin:$HOME/.bun/bin:$PATH"
+
 PI="${PI:-$HOME/.bun/bin/pi}"
 PROMPT="$(cat "$ROOT/prompts/scan.md")
 
