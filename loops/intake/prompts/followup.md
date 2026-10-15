@@ -6,7 +6,7 @@
 
 1. 读 state.json（运行实例根目录见 prompt 末尾）。收集 `status === "open"` 的 pending。
 2. 对每个 open pending：`dmTs` 为空的项先补发 DM（从 note/source 按 scan 轮步骤 7 的格式组装，含 go/skip 指令行），发送成功后回填 `dmTs` 并推送 `dm.watermark`，本轮不判定该项；其余项用 `conversations_replies(channel_id=state.dm.channelId, thread_ts=<dmTs>, limit="7d")` 读其 DM thread 的回复（loop 自己发出的 DM 不算回复，靠作者判定：本 loop 发的 DM 消息也是 Hao 的 user token——**判定只认协议文本**）。
-   协议：`^(go|skip)\s\S*$`（大小写不敏感），末词匹配 pending id（大小写不敏感，允许只回 `go` 一次处理最早 pending）。
+   协议：`^(go|skip)\s\S*$`（大小写不敏感），末词匹配 pending id（大小写不敏感，允许只回 `go` 一次处理最早 pending）。**同一 thread 同一 item 存在多条协议回复时（如先 go 后 skip 反悔），以 ts 最大的协议回复为准；仅对 status=open 的 item 受理，终局项的任何后续回复一律无视**。
 3. 判定分支：
    - **go 命中**：按 task-intake 技能 Phase 3–4 执行：
      a. 候选无 issue 则 `gh issue create`（body = 一段话 digest + permalink + triage 依据；标题一句话英文）——允许直接创建
