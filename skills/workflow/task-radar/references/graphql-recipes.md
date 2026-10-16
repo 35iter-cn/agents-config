@@ -89,6 +89,20 @@ delete restored the board. The add mutation also proves "issue sync to board".
 mutation { deleteProjectV2Item(input: { projectId: "PVT_kwDOB_z4Bc4Aatxq", itemId: "<PVTI_...>" }) { deletedItemId } }
 ```
 
+## Scan sources 1+2 (fetch script)
+
+Board paging, @me strays, backend off-board issues and open-PR matching all run
+through one read-only script — never hand-roll these calls:
+
+```bash
+skills/workflow/task-radar/scripts/scan-github.sh
+```
+
+One compact JSON out. If editing its queries: `gh api graphql --input -` body
+must nest cursor variables under `"variables"`; top-level keys are silently
+ignored (cursor stalls, infinite pagination), and `as $v |` bindings restore the
+original input while a direct pipe keeps the bound expression's output.
+
 ## Lookup single task (issue side)
 
 ```graphql

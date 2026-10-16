@@ -11,11 +11,13 @@ cd ~/code
 
 export PATH="$HOME/.volta/bin:$HOME/.bun/bin:$PATH"
 PI="${PI:-$HOME/.bun/bin/pi}"
-PENDING=$(node -e "const s=require('$ROOT/state.json');process.stdout.write(String((s.pending||[]).filter(p=>p.status==='open').length))")
+STATE="${TASKRADAR_STATE:-$HOME/.config/taskradar/state.json}"
+PENDING=$(node -e "const s=require('$STATE');process.stdout.write(String((s.pending||[]).filter(p=>p.status==='open').length))")
 [ "$PENDING" -gt 0 ] || exit 0
 
 PROMPT="$(cat "$ROOT/prompts/followup.md")
 
-运行实例根目录（本轮所有读写均以它为准）: $ROOT"
+运行实例根目录（本轮所有读写均以它为准）: $ROOT
+外置 state 文件（唯一读写目标）: $STATE"
 exec "$PI" --mode json --print "$PROMPT" \
   >> "$ROOT/logs/followup-$(date +%F-%H%M).jsonl" 2>&1

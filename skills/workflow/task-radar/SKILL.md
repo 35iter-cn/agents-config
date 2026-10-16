@@ -1,78 +1,57 @@
 ---
 name: task-radar
 description: >-
-  Manage the personal GitHub task lifecycle on the MagicDoorInc org project board
-  (Frontend Tasks, projectV2 #1). The board is the single source of task state;
-  issues and pull requests are artifacts attached to board tasks. Use when the
-  user mentions 任务扫描, 任务对账, 领任务, 上板, 更新看板, 看板状态, stale 任务,
-  assigned issues, board sync, update board status, or asks to scan/check/claim
-  tasks, or to reconcile issue/PR status against the board.
+  Use when scanning, triaging, claiming, or reconciling MagicDoor tasks from
+  the GitHub side (Frontend Tasks board, MagicDoorInc/backend issues) or from
+  Slack messages. Triggers: 任务扫描, 任务对账, 领任务, 上板, 更新看板, 看板状态,
+  stale 任务, assigned issues, board sync, update board status, scan/check/claim
+  tasks, reconcile issue/PR status, 扫后端 issue, 消息转任务, 接这个活,
+  领这条消息的任务, 自动接需求, claim a Slack message as a task,
+  评估这个任务我们能不能做, or a user-pasted Slack message / GitHub issue link.
 ---
 
 # Task Radar
 
-## Model
+Manage the MagicDoor task intake lifecycle with ONE skill: scan three sources
+read-only, triage candidates, claim after human approval, reconcile board state.
+A companion loop (`loops/intake`) is a pure trigger: it calls scan on a timer and
+runs the DM go/skip protocol; manual invocations decide on the spot and never go
+through pending/DM.
 
-- **Board** = single source of task state. MagicDoorInc org `projectV2` number 1
-  ("Frontend Tasks"), 176+ items, assignee-filtered via `ProjectV2ItemFieldUserValue`.
-- **Issue** = the task's factual source attached to a board item (the "paper trail").
-- **PR** = progress evidence attached via cross-reference (PR body containing
-  `Fixes #N` auto-creates the association — never hand-maintain links).
+State lives ONLY at `~/.config/taskradar/state.json` (watermarks, known board
+issues, `backendKnownCandidates`, pending queue) — shared atomic read-write with
+the loop; never write state under `loops/intake/`.
 
-## Lifecycle
-
-1. **Create task**: open an issue, then add it to the board
-   (`addProjectV2ItemById`). Task now exists as a board item ("领任务 / 上板").
-2. **Track progress**: board item `Status` field is updated directly on the board
-   (`updateProjectV2ItemFieldValue`). GitHub issue state is secondary.
-3. **PR stage**: the PR body must reference the issue (`Fixes #N`). This creates
-   a timeline `CrossReferencedEvent` with `willCloseTarget`, visible from the
-   board item's issue.
-4. **Closure**: PR merges → issue auto-closes → set board `Status` to Done.
-   Closing on GitHub alone does NOT move the board column.
-
-## Hard rules
-
-- **Shared team board**: never batch-change statuses without a user-confirmed
-  per-item mapping. Present an evidence table (item / current status / evidence /
-  suggestion) and let the user decide.
-- **gh GraphQL**: always send `-f query` as a single line, or use `--input`
-  with a JSON body. Multiline `-f query=` values get mangled by gh and fail to parse.
-- **IDs**: project/field/option IDs live in
-  `references/graphql-recipes.md` (registry section). Re-check there first; they
-  are stable per project and field, not per session.
-- **Pagination**: board scans are paged (100 per page, `pageInfo.endCursor` loop).
-  Filtered counts (assignee) are computed client-side after collecting all pages.
-- **Verification before writing**: status updates must be backed by evidence —
-  issue activity dates, open/closed PRs with their draft/review/merge state, or
-  repo code inspection. A bare issue `updatedAt` does not prove board correctness.
+The board (MagicDoorInc projectV2 #1 "Frontend Tasks") is the single source of
+task state; issues and pull requests are artifacts attached to board tasks.
 
 ## Workflows
 
-### Scan / audit ("对账")
+| 调用 | 做什么 | 细节 |
+|---|---|---|
+| `scan` | 只读取数三源，产出带证据列的候选表 | `references/graphql-recipes.md`、`scripts/scan-github.sh`、`references/slack-scan.md` |
+| `triage` | 三问：未被占领 / 能做 / 值得做 | `references/triage-and-claim.md` |
+| `claim` | 人批后按候选形态三选一落地 | `references/triage-and-claim.md` |
+| `reconcile` | 看板状态对账、单任务 lookup | `references/graphql-recipes.md` |
 
-1. Page through board items, collect items assigned to user (Status + Priority + item id).
-2. Cross against `gh search issues --assignee @me` (catches tasks not on the board)
-   and open/draft PR state (`reviewDecision`, `mergeStateStatus`, `isDraft`).
-3. Flag stale items: e.g. `In Progress` with no associated PR and no issue movement
-   for 5+ weeks, or issues closed while board shows non-Done.
-4. Report; user confirms changes; apply mutations one mutation call per item.
+## Hard rules
 
-### Update status
+- `scan` is strictly read-only: gh/GraphQL reads only; writes (assign, board,
+  issue create, Slack) happen exclusively in `claim` after human approval.
+- 贴单条 Slack permalink 不再是 intake 入口：按增量消息处理，或等人工直接给 issue 链接。
+- Backend-domain candidates: report and enqueue only; claim paths C1–C3 (see
+  triage/claim reference) apply after approval, never from scan.
+- GitHub sources 1+2 (board two columns + assigned strays) fetch through
+  `scripts/scan-github.sh` — never hand-roll GraphQL paging (cursor/variables
+  gotchas are fixed there). Slack source 3 follows `references/slack-scan.md`.
+- Every reported candidate carries five evidence columns: 是否在板上 / assignee /
+  最后活动日 / open PR 引用 / labels. Empty assignee alone never proves claimable.
 
-Requires: board item id (from scan or lookup) + target option id. Single
-`updateProjectV2ItemFieldValue` mutation per item. See recipes.
+## References
 
-### Add issue to board
-
-`addProjectV2ItemById` with projectId + the issue's node id
-(fetch via `repository(owner:name){issue(number:){id}}`).
-Marked UNVERIFIED in recipes — smoke-test on a disposable item before relying on
-it in a real run; remove the test item with `deleteProjectV2Item` afterwards.
-
-### Lookup single task
-
-Given issue/PR number: check board presence/Status, its cross-referenced PRs
-(`timelineItems(CROSS_REFERENCED_EVENT)`), and PR execution state
-(draft/approved/mergeable). Answers "what's the real status of this task and
-what is missing to close it".
+- `references/graphql-recipes.md` — board registry, mutations, lookup, backend
+  scan recipe delegating to the fetch script.
+- `references/slack-scan.md` — source-3 watermark reading, thread context,
+  participant resolution, digest shape.
+- `references/triage-and-claim.md` — three questions, decision table, claim
+  three-ways (board item / off-board issue / Slack candidate), state protocol.
