@@ -2,7 +2,7 @@
 
 除下列三处外允许写操作：state.json、memory daily log、对 self-DM（D0A4YUFK7FC / state.dm.channelId）发消息。领取候选（go 命中）时额外允许：创建/assign issue、加看板、在**候选源消息的 thread** 内回复。
 
-**本轮所有 self-DM 消息一律以固定前缀 `🤖 intake:` 开头**（self-DM 双方同作者，这是用户辨认 loop 消息的唯一锚点）。
+**本轮所有 self-DM 消息一律以固定前缀 `🤖 intake:` 开头**（self-DM 双方同作者，这是用户辨认 loop 消息的唯一锚点）。**凡消息内容属于某个具体 pending（claim 汇报、中断告知、skip 确认、expired 通知、nudge 追问），一律作为线程回复发送——`conversations_add_message(channel_id=state.dm.channelId, thread_ts=<该 item 的 dmTs>)`，不另开独立 DM**；仅候选首条通报（新建 thread）是独立消息。用户回 go/skip 也发生在该线程内，回 thread 才能保持一任务一线程。
 
 ## 步骤
 
@@ -12,11 +12,11 @@
 3. 判定分支：
    - **go 命中**：按 task-radar 技能 `claim` workflow（`references/triage-and-claim.md` C1/C2/C3 三态表）执行——无 issue 的 Slack 候选走 C3、板外 issue 走 C2、板上已有走 C1；claim 后建 topic + spec、停在建 spec：
      e. `topicbox init "<hint>"` → `artifact-create <topic> spec <name>` → 对要读的仓跑 `gco-latest` → 读码定根因（硬性要求）→ 按 spec-writing-guide 写 spec，过 Determinism Gate（含 AC 编号）→ **停在 spec，不建 plan、不 freeze**
-     f. `self-DM` 汇报一行：`<id> 已领取 → <issue url> | spec: <路径>`；pending 置 `status:"claimed"`，回填 `issue` 字段
-     g. 单个 go 超过 18 分钟仍未完成 e：停在做完的步骤，DM 汇报中断点与原因，pending 置回 `open`（下轮重试）
-   - **skip 命中**：pending 置 `status:"skipped"`，self-DM 一行确认。
-   - **72h 无回复**（addedAt 距今）：置 `status:"expired"`，self-DM 一行通知。
-   - **回复含糊**：如果 DM thread 有新回复但不匹配协议：self-DM 追问一次（"回 `go <id>` 或 `skip <id>`"），该项标记 `nudge:<date>`（状态仍 open）；已有 nudge 记录再遇含糊 → 按 skip 处理并 DM 通知。
+     f. `self-DM`（回复该 item 的 thread，`thread_ts=dmTs`）汇报一行：`<id> 已领取 → <issue url> | spec: <路径>`；pending 置 `status:"claimed"`，回填 `issue` 字段
+     g. 单个 go 超过 18 分钟仍未完成 e：停在做完的步骤，在该 item thread 内汇报中断点与原因，pending 置回 `open`（下轮重试）
+   - **skip 命中**：pending 置 `status:"skipped"`，在该 item thread 内一行确认。
+   - **72h 无回复**（addedAt 距今）：置 `status:"expired"`，在该 item thread 内一行通知。
+   - **回复含糊**：如果 DM thread 有新回复但不匹配协议：在该 item thread 内追问一次（"回 `go <id>` 或 `skip <id>`"），该项标记 `nudge:<date>`（状态仍 open）；已有 nudge 记录再遇含糊 → 按 skip 处理并在该 thread 通知。
 4. 写 memory daily log：一行 `followup <id> → <claimed|skipped|expired|nudge|error> <一句话>`。
 5. state.json 原子替换写回（同 scan 轮规则），`dm.watermark` 推进到本轮见到的最大 DM ts。
 
@@ -26,6 +26,6 @@ DM 与报告用中文；链接、代码、标识符逐字保留。
 
 ## 边界
 
-- go 执行链里任何一步失败（建 issue 403 等）：已完成的步骤保留，中断点写 daily log `[error]` + self-DM 通知，pending 保持 open；`state.errors.<id>` 计数，连续 3 次 → 置 `status:"stale"` 停止重试并 DM 报障。
+- go 执行链里任何一步失败（建 issue 403 等）：已完成的步骤保留，中断点写 daily log `[error]` + 在该 item thread 内通知（`dmTs` 为空时才发独立 DM），pending 保持 open；`state.errors.<id>` 计数，连续 3 次 → 置 `status:"stale"` 停止重试并在该 thread 报障。
 - followup 轮内**不改动** intake 轮产出的 pending 以外的任何 state 字段。
 - 队列里 claimed/skipped/expired 项保留 30 天后可由主扫描轮归档清理（简单起见：保留即可，不实现清理）。
