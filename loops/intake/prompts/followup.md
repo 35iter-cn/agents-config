@@ -6,16 +6,12 @@
 
 ## 步骤
 
-1. 读 state.json（运行实例根目录见 prompt 末尾）。收集 `status === "open"` 的 pending。
+1. 读外置 state.json（`~/.config/taskradar/state.json`，路径以 prompt 末尾注入为准）。收集 `status === "open"` 的 pending。
 2. 对每个 open pending：`dmTs` 为空的项先补发 DM（从 note/source 按 scan 轮步骤 7 的格式组装，含 go/skip 指令行，带 `🤖 intake:` 前缀），发送成功后回填 `dmTs` 并推送 `dm.watermark`，本轮不判定该项；其余项用 `conversations_replies(channel_id=state.dm.channelId, thread_ts=<dmTs>, limit="7d")` 读其 DM thread 的回复。
    协议：`^(go|skip)\s\S*$`（大小写不敏感），末词匹配 pending id（大小写不敏感，允许只回 `go` 一次处理最早 pending）。**扫回复时先排除带 `🤖 intake:` 前缀的消息（必是 loop 自身发出），再判**：语义明确可判（接受/拒绝）即为有效判定——判接受按 `go` 分支、判拒绝按 `skip` 分支，`resolvedBy` 记录消息 ts + 判定依据原文短语；语义模糊则按步骤 3 的回复含糊分支处理。**同一 thread 同一 item 存在多条有效判定时（如先同意后拒绝反悔），以 ts 最大的为准；仅对 status=open 的 item 受理，终局项的任何后续回复一律无视**。
 3. 判定分支：
-   - **go 命中**：按 task-intake 技能 Phase 3–4 执行：
-     a. 候选无 issue 则 `gh issue create`（body = 一段话 digest + permalink + triage 依据；标题一句话英文）——允许直接创建
-     b. `gh issue edit --add-assignee @me`
-     c. `addProjectV2ItemById` 上 Frontend Tasks 看板，`Status = Todo - 待办事项`（配方：task-radar `references/graphql-recipes.md`）
-     d. task-intake Phase 3 第 4 步：候选源是 Slack 消息 → 在**其 thread**（thread_ts = 消息本尊）回复领取通报（issue 链接 + 板上状态；根因尚无，等 spec 阶段）
-     e. Phase 4：`topicbox init "<hint>"` → `artifact-create <topic> spec <name>` → 对要读的仓跑 `gco-latest` → 读码定根因（硬性要求）→ 按 spec-writing-guide 写 spec，过 Determinism Gate（含 AC 编号）→ **停在 spec，不建 plan、不 freeze**
+   - **go 命中**：按 task-radar 技能 `claim` workflow（`references/triage-and-claim.md` C1/C2/C3 三态表）执行——无 issue 的 Slack 候选走 C3、板外 issue 走 C2、板上已有走 C1；claim 后建 topic + spec、停在建 spec：
+     e. `topicbox init "<hint>"` → `artifact-create <topic> spec <name>` → 对要读的仓跑 `gco-latest` → 读码定根因（硬性要求）→ 按 spec-writing-guide 写 spec，过 Determinism Gate（含 AC 编号）→ **停在 spec，不建 plan、不 freeze**
      f. `self-DM` 汇报一行：`<id> 已领取 → <issue url> | spec: <路径>`；pending 置 `status:"claimed"`，回填 `issue` 字段
      g. 单个 go 超过 18 分钟仍未完成 e：停在做完的步骤，DM 汇报中断点与原因，pending 置回 `open`（下轮重试）
    - **skip 命中**：pending 置 `status:"skipped"`，self-DM 一行确认。
