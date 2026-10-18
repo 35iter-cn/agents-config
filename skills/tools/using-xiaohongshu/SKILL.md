@@ -48,7 +48,7 @@ magick -size 1080x1440 gradient:'#0b1020-#1b2440' \
 
 Conventions:
 
-- **Vertical centering of the text block is the default.** Place the first line so the whole block (kicker + title lines + subtitle) is optically centered in the 1080×1440 canvas; do not push it to the top and do not fill the leftover space with filler lines.
+- **The text block is vertically centered — house rule, not a suggestion.** Place the first line so the whole block (kicker + title lines + subtitle) is optically centered in the 1080×1440 canvas. Do not top-align it, and do not fill the leftover space with filler lines.
 - No decorative disclaimers ("自制封面 · 个人实测"). They are written for the platform, not the reader, and they cost a line of attention. Put caveats in the body instead.
 - If a subtitle earns its place, make it carry information (a number, a date, the sample size), not a restatement of the title.
 - Read the PNG back (`read /tmp/xhs/cover.png`) and look at it before uploading — annotation offsets are easy to get wrong.
