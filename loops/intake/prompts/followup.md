@@ -7,7 +7,7 @@
 ## 步骤
 
 1. 读外置 state.json，取 `status === "open" || status === "hold"` 的 pending。为空则直接结束。
-2. **锚点回捞**：`conversations_history(channel_id="C0C9N6SSH39", limit="7d")` 拿一次，按消息文本中的 `[<id>]` 建 `id → MsgID` 映射（一条父消息可含多个候选）。锚点缺失的项写 daily log `[skip] no-anchor <id>` 并跳过，状态不动。
+2. **锚点回捞**：`conversations_history(channel_id="C0C9N6SSH39", limit="7d")` 拿一次，按消息文本中的 `[<id>]` 建 `id → MsgID` 映射（一条父消息可含多个候选）。**同一个 id 出现在多条消息时取 ts 最大（最新）的那条**，并在 daily log 记一行 `[warn] duplicate-anchor <id> @<旧ts>`。锚点缺失的项写 daily log `[skip] no-anchor <id>` 并跳过，状态不动。
 3. **判定**：对每个含 open/hold 项的父消息，`conversations_replies(channel_id="C0C9N6SSH39", thread_ts=<MsgID>, limit="7d")`；只保留 `UserID === "U0A5T8AR9EU"` 且 ts 大于 `judged[<MsgID>]`（无则全留）的消息。没有新消息则不判定，直接进步骤 5 的过期检查。
    判定输入 = 该父消息内候选的 `{id, note, status}` + 新消息原文（逐条带 ts）。输出 JSON 数组：
 
