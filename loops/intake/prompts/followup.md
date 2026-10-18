@@ -2,7 +2,7 @@
 
 写操作白名单：外置 state.json（路径见 prompt 末尾注入）、memory daily log、`#agent-intake`（`C0C9N6SSH39`）的 webhook 推送与线程回复。`go` 命中时额外允许：创建/assign issue、加看板、在**候选源消息的 thread** 内回复、建 topic + spec。
 
-**回复一律回候选父消息的 thread**：候选父消息由 webhook 发出（作者 = app），你在其 thread 内回复；loop 的判断与回话也回同一 thread，一问一线程。所有 loop 发出的频道消息**必须带 `<@U0A5T8AR9EU>`**（否则私有频道不弹通知）。
+**回复一律回候选父消息的 thread，且一律用 webhook 发**（`curl` + `thread_ts=<父消息ts>`，URL 从 `~/.config/taskradar/webhook.url` 读）：作者必须落为 app，否则消息作者变成 Hao 本人 → 不弹通知，且下一轮会被当成用户发言喂进判定。**禁止用 MCP/用户 token 发频道消息**。所有 loop 发出的频道消息**必须带 `<@U0A5T8AR9EU>`**（否则私有频道不弹通知）。
 
 ## 步骤
 
@@ -16,12 +16,12 @@
      "prefs": "<一句话或 null>", "quote": "<原话中支撑判定的短语>"}]
    ```
 
-   闸门（任一不过即降级，绝不猜）：① `id` 必须在该父消息的候选白名单内且 `status` 为 `open`/`hold`；② `go` 与 `hold` 必须给出 `quote`，且原话能读出对**该 id** 的明确接受或暂缓——`go` 会被执行成 assign + 上板 + 建 topic/spec，误判代价远高于 skip；③ 只对用户本人消息判定，其它作者（含 webhook 自身，`UserID` 为空）既不作输入也不触发追问。
+   闸门（任一不过即降级，绝不猜）：① `id` 必须在该父消息的候选白名单内且 `status` 为 `open`/`hold`；② `go` 与 `hold` 必须给出 `quote`，且原话能读出对**该 id** 的明确接受或暂缓——`go` 会被执行成 assign + 上板 + 建 topic/spec，误判代价远高于 skip；③ 只对用户本人消息判定，其它作者（含 webhook 自身，`UserID` 为空）既不作输入也不触发追问。历史 loop 回复若以用户身份误发（含 `→ expired` / `→ skipped` 等自述文本），一律不入判定。
 4. 落地判定：
-   - `pending.decision` 已存在的项**不再重判**，只重试执行动作。
+   - `pending.decision` 已存在的项**不再重判**，只重试执行动作。任何判定落地都必须写 `decision` 对象（**不要只写自由文本 `resolvedBy`**）：`{"ts":"<用户消息ts>","action":"go|skip|hold","prefs":"<一句话|null>","quote":"<原话短语>"}`。
    - **go**：写 `pending.decision = {ts, action:"go", prefs, quote}` → 按 task-radar 技能 `claim` workflow（C1 板上已有 / C2 板外 issue / C3 无 issue 的 Slack 候选）执行：建 issue（如需）→ assign @me → 上板 → 源消息 thread 回复 → `topicbox init` + `gco-latest` + 读码定根因 → 写 spec（`prefs` 作为约束段）→ 停 spec（不建 plan、不 freeze）→ 在该父消息 thread 内一行汇报 `<id> 已领取 → <issue url> | spec: <路径>`；`status:"claimed"`。
-   - **skip**：`status:"skipped"`，同一 thread 内一行确认。
-   - **hold**：`status:"hold"`，同一 thread 内一行确认（写清 7 天后会自动过期）。
+   - **skip**：`status:"skipped"`，写 `decision`，同一 thread 内一行确认。
+   - **hold**：`status:"hold"`，写 `decision`（`action:"hold"`，`prefs` 装暂缓原因），同一 thread 内一行确认（写清 7 天后会自动过期）。
    - **unclear**：同一 thread 内追问一次（问它到底做不做，允许自然语言）；标 `nudge:<date>`，状态不变；已有 nudge 记录再含糊 → 按 skip 处理并在该 thread 通知。
    - 他人消息 / 与任何 id 无关的发言：忽略，不追问。
 5. **过期**：对仍 `open` 的项，基线 = 该 thread 内你最后一条发言 ts（thread 内无发言则 `addedAt`），`now - 基线 > 72h` → `status:"expired"`。`hold` 项不吃 72h，只在 `addedAt + 7d` 到期时置 `expired`。同一父消息内多条同期过期**合并成一条** thread 回复。
@@ -40,3 +40,4 @@
 - webhook URL 缺失或非 2xx：本轮不推送，daily log `[error]`；判定与状态照常落地，不重发。
 - 不动 intake 轮产出的 pending 以外的任何 state 字段。
 - 检索文件内容/路径只用内置 grep/find 工具；临时数据的字段提取/计数用 node/python 一步完成。
+- `conversations_history` / `conversations_replies` 返回的是 CSV 且 `Text` 内含换行：**按行首 `^\d{10}\.\d{6},` 切记录**，不要按行数/逗号硬切列，否则锚点与作者字段全错位。
