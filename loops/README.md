@@ -18,7 +18,7 @@ loops/<slug>/
 └── systemd/<slug>[.followup].{service,timer}
 ```
 
-通用红线写进 prompt：写操作按 Level 分层（L0 只允许 state 水位 / daily log / DM），报告先于水位提交。
+通用红线写进 prompt：写操作按 Level 分层（L0 只允许 state 水位 / daily log / 专用通知频道推送），报告先于水位提交。外部凭据（如 webhook URL）放 `~/.config/taskradar/`，不入库。
 
 ## Timer 安装（per slug）
 
