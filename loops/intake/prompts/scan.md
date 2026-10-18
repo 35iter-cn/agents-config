@@ -1,6 +1,6 @@
 # Intake loop — 主扫描轮（L0 + 候选入队，无人在场）
 
-除下列四处外禁止任何写操作：外置 state.json（路径见 prompt 末尾注入）、memory daily log、对自己（self-DM）发 DM、轮次日志。
+除下列四处外禁止任何写操作：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
 
 **绝对禁止**：修改/创建 issue、改看板状态、assign、建 topic/spec、对 #frontend 或任何 thread 发消息。
 
@@ -15,27 +15,35 @@
 4. 每个新候选按 task-radar `triage` workflow 三问（`references/triage-and-claim.md`：未被占领 / 能做 / 值得做），输出五列证据（是否在板上 / assignee / 最后活动日 / open PR / labels）。**任何情况下不执行 claim**——领取只发生在 followup 轮收到 `go` 之后。
 5. 候选入队：
    - `counter += 1`，id = `YYYYMMDD-<counter>`
-   - pending 追加 `{"id","dmTs":null,"source":"<#frontend permalink 或 issue url>","note":"<一句依据>","addedAt":"<ISO>","status":"open"}`
+   - pending 追加 `{"id","source":"<#frontend permalink 或 issue url>","note":"<一句依据>","addedAt":"<ISO>","status":"open"}`（**不写任何消息 ts**，锚点每轮现查）
    - backend 板外 issue 入队时把其 url 追加进 `backendKnownCandidates`（防重报）。
 6. 报告写入当日 memory daily log（`memory_write target=daily`），头部一行 `## intake loop <YYYY-MM-DD HH:MM>`：
    - 零新信号：一行 `sweep clean (<inspected> msgs, board unchanged, backend 无新候选)`，仍推进水位。
    - 有候选：每条一行 `[候选 <id>] 一句依据 — permalink`。
-7. 若存在候选且 `dm.channelId` 非空：向 self-DM 发一条汇总（≤6 行）。**消息以固定前缀 `🤖 intake:` 开头**（self-DM 双方同作者，前缀是用户区分 loop 消息的锚点，所有 loop 发出的 self-DM 一律携带）：
+7. 若存在候选：**一轮只发一条父消息**到 `#agent-intake`（`C0C9N6SSH39`），内含本轮全部候选。用 webhook 发，URL 从 `~/.config/taskradar/webhook.url` 读（勿打印到日志）：
+
+   ```bash
+   curl -sS -X POST -H 'Content-type: application/json' \
+     --data "$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1]}))' "<payload>")" \
+     "$(cat ~/.config/taskradar/webhook.url)"
+   ```
+
+   `text` 形如（**mention 与 `[<id>]` 都是硬要求**：mention 保证私有频道弹通知，`[<id>]` 是 followup 轮唯一的线程锚点）：
 
    ```
-   intake loop 发现候选（可回 go/skip）:
+   <@U0A5T8AR9EU> intake loop 发现 <N> 个候选（在该消息的 thread 内回复，自然语言也行）
    [<id1>] <一句依据>
      <permalink>
-   [<id2>] ...
-   回复 `go <id>` 我就领取它并建 topic/spec；`skip <id>` 忽略；72h 不回自动过期。
+   [<id2>] <一句依据>
+     <permalink>
    ```
 
-   记录本条 DM 的 ts 回填所涉 pending 项的 `dmTs`，并推进 `dm.watermark`。`dm.channelId` 为空时跳过 DM（pending 保持 open，DM 环节后补），不打扰。
-8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = ISO 时间。**写盘前写临时文件再 `mv` 原子替换**。失败/出错时水位可推进但必须把异常写进 daily log。
+   一条消息装全部候选，不要拆成多条。webhook 失败（URL 缺失/非 2xx）时降级：候选照常入队、daily log 一行 `[error] webhook <原因>`，本轮不重试；过期计时仍自 `addedAt` 起算。发送后**不回写任何 ts**。
+8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = ISO 时间。**不新增 `dm` 键、pending 项不带 ts**。**写盘前写临时文件再 `mv` 原子替换**。失败/出错时水位可推进但必须把异常写进 daily log。
 
 ## 语言
 
-报告与 DM 用中文；消息原文里的链接、代码、标识符逐字保留，不翻译。
+报告与频道消息用中文；消息原文里的链接、代码、标识符逐字保留，不翻译。
 
 ## 边界
 
