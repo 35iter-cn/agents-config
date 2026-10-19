@@ -28,17 +28,17 @@ set +o noclobber; export AGENT_BROWSER_SESSION="$TASK"; printf 'task=%s\n' "$TAS
 Never run a bare `agent-browser` command: the unnamed session is shared by every agent on this machine and persists across conversations, so a bare command can hijack another task's page. Exports die with each shell, so re-run all three steps at the top of EVERY call:
 
 1. **set** the task name into `AGENT_BROWSER_SESSION`
-2. **print** it, so a wrong binding is visible in the log
+2. **read it back** with `agent-browser session`, so a wrong binding is visible in the log
 3. **gate** — abort unless that name is registered
 
 ```bash
 REG="${XDG_RUNTIME_DIR:-/tmp/agent-browser-$UID}/agent-browser-tasks"
-export AGENT_BROWSER_SESSION='<task-name>'; printf 'session=%s\n' "$AGENT_BROWSER_SESSION"
+export AGENT_BROWSER_SESSION='<task-name>'; agent-browser session
 test -f "$REG/$AGENT_BROWSER_SESSION" || { echo "abort: '<task-name>' is not registered — run the Start a task block"; exit 1; }
 agent-browser open <url>
 ```
 
-Only the `test` stops anything — the shell keeps going after `echo`. A forgotten export aborts, and so does a mistyped name. Bare commands below are shorthand — wrap them.
+Only the `test` stops anything — the shell keeps going after the read-back. A forgotten export aborts, and so does a mistyped name. Bare commands below are shorthand — wrap them.
 
 Never satisfy the gate by creating the marker inline (`|| : > "$REG/$AGENT_BROWSER_SESSION"`): that silently takes a name another task owns. Collision-safe registration exists only in Start a task.
 

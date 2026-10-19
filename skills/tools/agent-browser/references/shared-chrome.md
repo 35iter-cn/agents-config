@@ -14,7 +14,7 @@ Rules inherited from the shared-chrome skill:
 ```bash
 REG="${XDG_RUNTIME_DIR:-/tmp/agent-browser-$UID}/agent-browser-tasks"
 TASK='<task-name>'
-export AGENT_BROWSER_SESSION="$TASK"; printf 'session=%s\n' "$AGENT_BROWSER_SESSION"
+export AGENT_BROWSER_SESSION="$TASK"; agent-browser session
 test -f "$REG/$AGENT_BROWSER_SESSION" || { echo "abort: task '$AGENT_BROWSER_SESSION' not registered"; exit 1; }
 agent-browser connect 9222
 agent-browser snapshot -i
