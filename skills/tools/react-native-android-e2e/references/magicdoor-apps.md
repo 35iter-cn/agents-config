@@ -1,9 +1,26 @@
+# MagicDoor React Native apps on the emulator
+
+Two apps share this shape: **magic-resident** (tenant, `MagicDoorInc/magic-resident`) and **magic-manager**
+(property manager, `MagicDoorInc/magic-manager`). Both are Expo development builds with an `android/` project,
+an `env.json` per environment, and an npm lockfile.
+
+| | magic-resident | magic-manager |
+| --- | --- | --- |
+| Bundle id | `com.magicdoor.magicresident` | `com.magicdoor.magicmanager` |
+| Dev API base | `https://app-dev.magicdoor.io/tenant` | `https://app-dev.magicdoor.io/company` |
+| Other dev hosts | `auth-dev.magicdoor.io`, `files.magicdoor.dev`, `pay.magicdoor.dev`, `services.magicdoor.dev` | `auth-dev.magicdoor.io` |
+| Extra env keys | `payBaseUrl`, `stripePublishableKey`, `maintenanceBaseUrl`, `filesServiceBase` | none |
+| Windows build doc | `docs/windows-android.md` | same pattern, no doc |
+
+AVD used for both: `expo-device` (API 35, google_apis, x86_64). One emulator hosts both apps; the dev launcher
+distinguishes them by the server entry.
+
 # Getting a tenant session in dev
 
-The app has no bypass: it signs in with `email + password` against `{apiBaseUrl}/auth/password`. So a test
+magic-resident only. The app has no bypass: it signs in with `email + password` against `{apiBaseUrl}/auth/password`. So a test
 tenant needs a known password, set from the property-manager side.
 
-## 1. Pick a tenant that can reach the screen
+## 1. Pick a tenant that can reach the screen (magic-resident)
 
 The app's pay surface is gated by the company feature flag, read at login as
 `user.companyInfo.features.includes('centralizedPayments')` (`src/use-cases/payment/initializePaymentModeUseCase.ts`).
