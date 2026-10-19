@@ -1517,6 +1517,11 @@ function main(argv) {
 
   if (!COMMANDS.includes(command)) throw new Error(`unknown command: ${command}`);
 
+  if (args.includes('-h') || args.includes('--help')) {
+    help();
+    return 0;
+  }
+
   let code = 0;
   switch (command) {
     case 'init': init(args); break;
