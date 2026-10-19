@@ -13,6 +13,6 @@ agent-browser network unroute "**/api/**"                                       
 agent-browser network har start / stop /tmp/trace.har                                           # record
 ```
 
-- **Daemon exits after ~1h idle** and re-spawns on the next command; headless browser state is discarded unless the session used `--restore`. Attached (human-launched) browsers are exempt. Tune with `--idle-timeout`.
+- **Daemon exits after ~1h idle** and re-spawns on the next command; headless browser state is discarded unless the session used `--restore`. A shared Chrome reachable over CDP survives that exit — but a `connect` binding does not: the next command silently launches its own headless Chrome. That is why every command carries `--cdp 9222` (`references/shared-chrome.md`). Tune the idle window with `--idle-timeout`.
 - **Backgrounded Chrome Memory-Saver tabs** get their renderer dropped: switching reloads the page and discards in-page state (`revived: true`) — treat prior state as gone, re-snapshot.
 - **A tab with an open dialog** switches with `dialogBlocked: true`; resolve with `dialog accept` / `dialog dismiss` first. Native dialogs are not DOM, so `snapshot` never shows them.

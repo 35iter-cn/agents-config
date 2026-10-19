@@ -15,13 +15,12 @@ Re-derive the session in **every** bash call (a fresh shell does not keep export
 
 ```bash
 export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix "agentbrowser-${PI_SESSION_ID:0:8}")"
-agent-browser connect 9222
-agent-browser eval "document.title = 'AB-MARK-' + Date.now()"
+agent-browser --cdp 9222 eval "document.title = 'AB-MARK-' + Date.now()"
 curl -fsS http://127.0.0.1:9222/json | grep -c AB-MARK   # 1 = attached to the shared browser
-agent-browser eval "navigator.userAgent"                  # must NOT contain HeadlessChrome
+agent-browser --cdp 9222 eval "navigator.userAgent"       # must NOT contain HeadlessChrome
 ```
 
-Then open a labeled tab: `agent-browser tab new --label xhs "https://creator.xiaohongshu.com/publish/publish?source=official"`.
+Then open a labeled tab: `agent-browser --cdp 9222 tab new --label xhs "https://creator.xiaohongshu.com/publish/publish?source=official"`.
 
 ## 2. Confirm the account before writing anything
 
@@ -60,16 +59,16 @@ Two traps, both silent:
 1. **The 图文 tab must be active first.** On the publish page the only `input[type=file]` initially accepts video (`.mp4,.mov,...`). Click the 「上传图文」 tab, then re-check:
 
    ```bash
-   agent-browser eval "JSON.stringify([...document.querySelectorAll('input[type=file]')].map(i=>i.accept))"
+   agent-browser --cdp 9222 eval "JSON.stringify([...document.querySelectorAll('input[type=file]')].map(i=>i.accept))"
    # must show .jpg,.jpeg,.png,.webp before uploading
    ```
 
 2. **The title field is not the first `input` on the page.** Address it by placeholder via the snapshot ref (`填写标题会有更多赞哦`); the body is a `contenteditable`, not a textarea.
 
 ```bash
-agent-browser upload "input[type=file]" /tmp/xhs/cover.png
-agent-browser fill @<title-ref> "标题文本"
-agent-browser fill @<body-ref> "$(cat /tmp/xhs/body.txt)"
+agent-browser --cdp 9222 upload "input[type=file]" /tmp/xhs/cover.png
+agent-browser --cdp 9222 fill @<title-ref> "标题文本"
+agent-browser --cdp 9222 fill @<body-ref> "$(cat /tmp/xhs/body.txt)"
 ```
 
 ## 6. Verify before publishing
@@ -77,7 +76,7 @@ agent-browser fill @<body-ref> "$(cat /tmp/xhs/body.txt)"
 Read the fields back — `fill` can land truncated:
 
 ```bash
-agent-browser eval "(() => { const b=document.querySelector('[contenteditable=true]'); const t=b.innerText;
+agent-browser --cdp 9222 eval "(() => { const b=document.querySelector('[contenteditable=true]'); const t=b.innerText;
   return JSON.stringify({len:t.length, head:t.slice(0,40), tail:t.slice(-60)}); })()"
 ```
 
@@ -91,7 +90,7 @@ Click 「发布」, then confirm in **two** places — the success page alone is
 # 1) success page
 #    https://creator.xiaohongshu.com/publish/success
 # 2) note manager — status must show 审核中 (or 已发布)
-agent-browser open "https://creator.xiaohongshu.com/new/note-manager"
+agent-browser --cdp 9222 open "https://creator.xiaohongshu.com/new/note-manager"
 ```
 
 Report the resulting status and timestamp back to the user.

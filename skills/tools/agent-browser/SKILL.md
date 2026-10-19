@@ -35,7 +35,7 @@ Never run a bare `agent-browser` command: the unnamed session is shared by every
 REG="${XDG_RUNTIME_DIR:-/tmp/agent-browser-$UID}/agent-browser-tasks"
 export AGENT_BROWSER_SESSION='<task-name>'; agent-browser session
 test -f "$REG/$AGENT_BROWSER_SESSION" || { echo "abort: '<task-name>' is not registered — run the Start a task block"; exit 1; }
-agent-browser open <url>
+agent-browser --cdp 9222 open <url>
 ```
 
 Only the `test` stops anything — the shell keeps going after the read-back. A forgotten export aborts, and so does a mistyped name. Bare commands below are shorthand — wrap them.
@@ -51,7 +51,13 @@ Never satisfy the gate by creating the marker inline (`|| : > "$REG/$AGENT_BROWS
 
 ## Shared Chrome
 
-`agent-browser connect 9222` attaches to the human's real Chrome inside the task binding. Never "fix" a disconnect with `close` / `pkill` / restarts. Procedure: `references/shared-chrome.md`.
+Every command carries `--cdp 9222`, on the same line as the gate: the attach is re-established per invocation, so no daemon-memory binding exists to lose. Inside the task binding it reaches the human's real Chrome — real profile, real logins, their tabs.
+
+- A command that cannot attach exits 1 with `All CDP discovery methods failed`. That is the outcome you want: stop and report it.
+- A session with no attach does **not** error. The CLI silently launches a headless Chrome under `/tmp/agent-browser-chrome-*` and every later command in that session runs there — invisible to the human, wrong profile, wrong logins.
+- `agent-browser connect 9222` also attaches, but keeps the binding in daemon memory only, and prints a misleading `[agent-browser] launched browser` while launching nothing.
+
+Never "fix" a disconnect with `close` / `pkill` / restarts. Procedure and measurements: `references/shared-chrome.md`.
 
 ## Gotchas
 
