@@ -1,6 +1,6 @@
 ---
 name: using-topicbox
-description: Use before editing files in any repo for a task or fix (any size), and when advancing a claimed task or producing anything the user will revisit or act on later — a spec, plan, guide/攻略/travel plan, investigation, research, handoff — whether work or personal. Also use when resuming, locating, or handing over previous work from a PR link, branch, repo, date, or keyword. When any trigger matches, load this body before the first edit — deferring the read for a "trivial" job is the exact failure this skill exists to prevent.
+description: Locating, resuming, or reporting on past work by PR, branch, repo, date, or keyword — read-only lookups included, anything the user calls a "topic" counts — always starts with `topicbox find`, never manual grep/ls. Also required before editing files for any task (any size) and for recoverable output (spec, plan, report, handoff). Load before the first tool call.
 ---
 
 # Using Topic Box
