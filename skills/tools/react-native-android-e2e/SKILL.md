@@ -1,6 +1,6 @@
 ---
 name: react-native-android-e2e
-description: Use when a React Native / Expo app change must be seen working on the real Android emulator instead of jest — building the dev APK in WSL, installing it through Windows adb, serving JS from a local Metro, injecting crafted API responses, and driving screens with adb. Triggers: "run the app on the emulator", 手机端冒烟, AVD/adb install, dev client keeps connecting, red screen `Property 'MessageQueue' doesn't exist`, "works in jest but needs live evidence".
+description: Use when a React Native / Expo app change must be seen working on the real Android emulator instead of jest — building the dev APK in WSL, installing it through Windows adb, serving JS from a local Metro, injecting crafted API responses, and driving screens with adb. Triggers — "run the app on the emulator", 手机端冒烟, AVD/adb install, dev client keeps connecting, red screen `Property 'MessageQueue' doesn't exist`, "works in jest but needs live evidence".
 category: workflow
 date_added: "2026-10-19"
 ---
