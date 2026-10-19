@@ -38,7 +38,7 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 
 ## Available Skills
 
-- **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary, timesheet
+- **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary, timesheet, resident app on the Android emulator
 - **`skills/workflow/`** — Spec shipping, PR handoff, grilling, handoff, ai-taught-me
 - **`skills/tools/`** — shared-chrome, frontend-design, update-claude
 - **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
