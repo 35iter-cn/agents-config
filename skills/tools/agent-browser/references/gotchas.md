@@ -1,6 +1,5 @@
 # Gotchas (observed in this environment)
 
-- **403 on every document page while static files load** (robots.txt fine) is usually `HeadlessChrome` UA rejection, not a network problem. Check `navigator.userAgent` and which instance you are actually driving before blaming proxies.
 - **`screenshot` can hang** (`Page.captureScreenshot` timeout) on canvas/media-heavy pages and chrome:// pages. Retry on a simpler page, or use `--screenshot-format jpeg --screenshot-quality 80` into an existing directory.
 - **Avoid `wait --load networkidle`** on SSE/WebSocket-heavy pages (portals, dashboards); use `wait --text`, `--url`, or `--fn`.
 - **Headless hides scrollbars**; the shared Chrome over `connect` is headed and unaffected.
