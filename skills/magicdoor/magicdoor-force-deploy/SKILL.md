@@ -49,10 +49,12 @@ Skip creating the backup branch only if an equivalent ref for the current origin
 Checks passed → push at once, no further user confirmation:
 
 ```bash
-git push --force-with-lease=origin/<branch>:<old-sha> origin <local-branch>:<branch>
+git push --force-with-lease=<branch>:<old-sha> origin <local-branch>:<branch>
 ```
 
 `<local-branch>` is usually the topic worktree's feature branch or a rebase result. `--force-with-lease` pins the sha seen during preflight.
+
+The lease refname is the **remote** ref (`<branch>` or `refs/heads/<branch>`), never `origin/<branch>`: a `refs/remotes/*` name matches no pushed ref, so the lease entry is dropped silently and the push loses its force authorization entirely.
 
 ### 4. Confirm deploy
 
@@ -63,5 +65,5 @@ git push --force-with-lease=origin/<branch>:<old-sha> origin <local-branch>:<bra
 ## Pitfalls
 
 - Do NOT re-litigate the overwrite: no orphan-commit archaeology, no risk essays, no "are you sure". Backup ref is the safety net.
-- `--force-with-lease` requires the fetched `origin/<branch>`; if someone pushed in between, the lease rejects — refetch, re-backup if head moved, re-push.
+- Read the rejection type before acting. `stale info` = a real lease mismatch (someone pushed in between) → refetch, re-backup if head moved, re-push. `non-fast-forward` = the lease matched nothing, so refetching will not help — fix the refname (`<branch>`, not `origin/<branch>`).
 - After deploy, stale tabs on the old bundle may not be reloaded by version ping (known observation, do not block).
