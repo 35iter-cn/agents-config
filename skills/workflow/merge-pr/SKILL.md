@@ -40,7 +40,7 @@ Merge one or more GitHub pull requests with `gh`, then clean up linked worktrees
 | CI failed | Self-fix + push, max **2** rounds; still red → hard stop (no `--admin`) |
 | CI pending | Wait until checks finish, then re-check — do not ask |
 | Missing approval | MagicDoor: **hard stop** unless explicit force-merge request (see Review gate). Other repos: ignore |
-| Conflicts / `mergeable=false` | Hard stop (not a CI-fix path) |
+| Conflicts / `mergeable=false` | Hard stop for the merge — never `--admin`. Hand off to `keep-branch-fresh` to rebase, then merge once it is clean and still approved |
 | After merge | Remove **linked** worktree only (no `--force`); **never delete local branch**; leave main worktree in place |
 
 ## Procedure

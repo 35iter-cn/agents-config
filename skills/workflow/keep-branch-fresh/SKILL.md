@@ -1,6 +1,12 @@
 ---
 name: keep-branch-fresh
-description: Use when rebasing, syncing branch, or updating to latest main. Rebase a feature branch onto the latest main branch with safety guarantees.
+description: >-
+  Rebase a branch onto the latest main safely. Use when work touches rebasing or
+  syncing with main (`rebase`, `git pull --rebase`, "update branch", "sync with main",
+  "keep branch fresh", resolve conflicts, force-with-lease push), and whenever a PR is
+  stuck on conflicts — `mergeable=CONFLICTING`, `mergeStateStatus=DIRTY`, GitHub's
+  "This branch has conflicts that must be resolved", an "Update branch"/"Resolve
+  conflicts" button, or a merge blocked in a merge-PR flow.
 category: workflow
 date_added: "2026-05-27"
 ---
@@ -12,6 +18,8 @@ Rebase feature branch onto latest main (LMB) safely: dry-run → resolve conflic
 **LMB** — remote tracking branch after fetch (e.g. `origin/main`). Always fetch first.
 
 **FEATURE_BRANCH** — branch to rebase (default: `HEAD`)
+
+A PR reporting `CONFLICTING`/`DIRTY` is the trigger to run the dry-run and report the conflict plan. Asking whether to rebase first is not a step: the rebase is reversible (`--force-with-lease`, local branch kept) and is the only way out of that stop.
 
 **$dry_run_script_path** — current skill dir + `scripts/dry-run-conflicts.mjs`
 **$verify_script_path** — current skill dir + `scripts/verify-no-conflicts.mjs`
