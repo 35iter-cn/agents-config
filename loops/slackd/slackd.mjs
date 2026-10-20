@@ -370,6 +370,7 @@ async function start(thread, msg) {
   const state = liveState(thread);
   const entry = threadEntry(thread);
   const session = sessionName(thread);
+  if (entry.rootText === null || entry.rootText === undefined) await rootTextFor(thread);
   const root = entry.rootText ?? null;
   const full = !hasSession(session) || root === null;
   const prompt = full
