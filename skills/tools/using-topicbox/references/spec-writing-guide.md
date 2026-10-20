@@ -6,6 +6,8 @@ A spec is an **implementation plan**, not a discussion record.
 
 A spec stays editable until its plan is `implemented` — spec editability rules are in `SKILL.md` (Core Flow). Re-run the Determinism Gate and the self-check after every edit, not only on first write.
 
+A spec's facts come from the code and the written conventions, never from the ticket that pointed at the problem.
+
 | Discussion record (❌) | Implementation plan (✅) |
 |---|---|
 | Lists options A/B/C and says "B was chosen" | Describes how B is implemented directly |
@@ -57,6 +59,31 @@ Explicit list of what is not done.
 - **Decision record**: only when multiple alternatives existed and the "why" needs explaining
 - **Dependencies / prerequisites**: only when implementation depends on external systems or teams
 - **Deployment strategy**: only when deployment has special requirements
+
+## Claims and sources
+
+A spec is a set of commitments, so every factual claim carries a source, and that source is where you check it — never the ticket that pointed at the problem.
+
+| Claim about | Source of truth | If it disagrees |
+|---|---|---|
+| Code behaviour — line numbers, defaults, callers, which cache a path reads | the repo at a named commit | the spec is wrong; fix it |
+| Production behaviour — the error actually seen, counts, timings | the log, database or metric query, quoted in the spec | the spec is wrong; fix it |
+| Library or framework behaviour — caching, serialization, ordering | the library source, or a probe you run | run the probe before designing around it |
+| Rules and conventions — "our house rule", "the standard here" | the project's written convention file | an issue, a chat message or an external doc is **not** a convention |
+
+- **Issues, tickets, chat threads and other documents are pointers, not evidence.** Copy none of their assertions into the spec before checking the code or the written convention. When the check contradicts the source, say so in one line and follow the source.
+- When no written convention exists for a claimed rule, demote it: state that no entry was found and treat the rule as a preference, not a constraint. This changes what is in scope and what counts as a conflict.
+- A claim you cannot settle now has exactly two homes: an **Assumption check** section, or Out of scope. "Verify during implementation" as a loose sentence is not one of them.
+
+### Assumption check
+
+When a decision depends on behaviour you have not verified, add a numbered section that names the probe and writes the disposition for **both** outcomes:
+
+1. The probe, concretely: which call, which input, what to look at.
+2. Disposition if it holds, and disposition if it does not — both settled, both actionable.
+3. The probe runs before the first edit; its observation goes into the plan and the PR description.
+
+An Assumption check does not violate the Determinism Gate: the **decision** is settled, only the observation is pending. A section that says "we will find out and then decide" does.
 
 ## Diagram Rules
 
@@ -157,6 +184,11 @@ Fix: any non-trivial flow must have a diagram.
 Symptom: checkboxes, completion percentages, or "done" markers in the spec.
 Fix: the spec is the definition of done; progress lives only in the plan (see `plan-editing-guide.md`).
 
+### 7. Borrowed conclusion
+
+Symptom: the spec asserts "the house rule says X" or "the cache caches nulls" because the issue said so.
+Fix: check the code and the written conventions first; a claim that cannot be settled becomes an Assumption check with both dispositions, or moves to Out of scope (see `Claims and sources`).
+
 ## Determinism Gate
 
 A spec is a set of **commitments**. Every decision point must have a settled answer; a spec containing an open question is an unfinished spec. Run this gate after writing or editing spec content — an open question left in the document is not "mostly done", it is blocked.
@@ -188,6 +220,16 @@ Resolve it in the same pass: make the call (if evidence supports it) or move it 
 | "The section is marked 'under review'" | A status marker is not a conclusion. A whole section of discussion = violation. |
 | "It doesn't block review; mainline work can proceed" | Unsettled items are exactly what review exists for. Review reads conclusions, not problem lists. |
 
+## Consistency pass
+
+Run this over the **whole file** after every edit, not over the region you touched. A contradiction is usually created by the edit, not found in the draft.
+
+1. Section numbers are continuous (`3.1 … 3.n`) and every cross-reference (`§3.4`, `§6`) still points at a section that exists.
+2. Every id sequence (`AC-N`, `D-NN`) has no gaps and no duplicates.
+3. One name per concept everywhere: the same method, file path, flag and field name.
+4. Re-read every statement the last edit added against the sections it touches.
+5. Delete sentences describing the old design. Do not leave them standing beside the new one.
+
 ## From Discussion to Spec
 
 When converting discussion notes or chat context into a spec:
@@ -213,3 +255,7 @@ After writing the spec, verify:
 - [ ] No flat D1–D17 lists?
 - [ ] Diagram labels are short?
 - [ ] Out of scope is explicit?
+- [ ] Every code claim checked against repo at the named commit, not against the issue text?
+- [ ] Every rule or convention claim cites a written convention file, or is demoted to a preference?
+- [ ] Unverifiable behaviour is an Assumption check with both dispositions, not a "verify later" line?
+- [ ] Consistency pass run over the whole file after the final edit (numbers, cross-references, ids, names)?
