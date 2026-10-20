@@ -412,7 +412,10 @@ async function start(thread, msg) {
     killGroup(child);
   }, TURN_TIMEOUT_MS);
 
-  child.on("close", (code) => {
+  let finished = false;
+  const finish = (code, spawnError) => {
+    if (finished) return;
+    finished = true;
     clearTimeout(state.timer);
     state.timer = null;
     state.child = null;
@@ -426,11 +429,17 @@ async function start(thread, msg) {
     }
     log("done", thread, `exit=${code}`, workerLog);
     const text = stdout.trim();
-    if (state.note) post(thread, state.note);
+    if (spawnError) post(thread, `worker 起不来：${spawnError}`);
+    else if (state.note) post(thread, state.note);
     else if (!text) post(thread, `[无输出] exit=${code}\n${stderr.trim().split("\n").slice(-20).join("\n")}`.trim());
     else post(thread, truncate(text, workerLog));
     state.note = null;
     pump();
+  };
+  child.on("close", (code) => finish(code, null));
+  child.on("error", (e) => {
+    log("error", "spawn", thread, String(e));
+    finish(null, String(e));
   });
 }
 
