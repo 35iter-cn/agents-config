@@ -1,8 +1,0 @@
-[Unit]
-Description=intake followup: process pending go/skip verdicts (L1.5 gated executor)
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/code
-ExecStart=%h/code/agents-config/loops/intake/followup.sh
-TimeoutStartSec=25min
