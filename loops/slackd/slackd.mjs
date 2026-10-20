@@ -40,6 +40,7 @@ const LOG_RETENTION_MS = 72 * 3_600_000;
 const THREAD_RETENTION_MS = 30 * 86_400_000;
 const REPLY_LIMIT = 3500;
 const PRUNE_INTERVAL_MS = 86_400_000;
+const CONNECTION_REFRESH_MS = Number(process.env.SLACKD_REFRESH_MS ?? 50 * 60_000);
 const PASSING_SUBTYPES = ["thread_broadcast", "file_share"];
 const STOP_WORDS = ["停", "stop"];
 
@@ -520,24 +521,14 @@ function handle(event) {
 function listen(url) {
   return new Promise((resolve) => {
     const ws = new WebSocket(url);
-    let lastPong = Date.now();
-    let pingId = 0;
-    const heartbeat = setInterval(() => {
-      if (Date.now() - lastPong > 90_000) {
-        log("warn", "pong-timeout");
-        try {
-          ws.close();
-        } catch (e) {
-          log("warn", "close", String(e));
-        }
-        return;
-      }
+    const refresh = setTimeout(() => {
+      log("info", "refresh-connection");
       try {
-        ws.send(JSON.stringify({ type: "ping", id: `p${(pingId += 1)}` }));
+        ws.close();
       } catch (e) {
-        log("warn", "ping", String(e));
+        log("warn", "close", String(e));
       }
-    }, 30_000);
+    }, CONNECTION_REFRESH_MS);
 
     ws.addEventListener("message", (frame) => {
       let envelope;
@@ -547,11 +538,7 @@ function listen(url) {
         return log("warn", "frame", String(e));
       }
       if (envelope.envelope_id) ws.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
-      if (envelope.type === "pong") {
-        lastPong = Date.now();
-        return;
-      }
-      if (envelope.type === "hello") return log("info", "hello");
+      if (envelope.type === "hello") return log("info", "hello", `${envelope.num_connections ?? 1} conn`);
       if (envelope.type === "disconnect") {
         log("warn", "disconnect", envelope.reason ?? "");
         try {
@@ -566,7 +553,7 @@ function listen(url) {
     });
     ws.addEventListener("error", (event) => log("warn", "ws-error", String(event?.message ?? event)));
     ws.addEventListener("close", () => {
-      clearInterval(heartbeat);
+      clearTimeout(refresh);
       resolve();
     });
   });
