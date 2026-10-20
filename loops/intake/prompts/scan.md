@@ -2,13 +2,12 @@
 
 写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
 
-运行实例根目录（prompt 末尾注入的那个目录）**只读**：只用来读本提示词与 `scripts/`，禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。扫描脚本的原始输出等中间产物一律写到系统临时目录，用后即删：
+运行实例根目录（prompt 末尾注入的那个目录）**只读**：只用来读本提示词与 `scripts/`，禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。扫描脚本的原始输出等中间产物一律写到系统临时目录里的固定子目录，每轮覆盖、不做清理：
 
 ```bash
-OUT="$(mktemp -d "${TMPDIR:-/tmp}/taskradar-intake-XXXXXX")"
+OUT="${TMPDIR:-/tmp}/taskradar-intake"
+mkdir -p "$OUT"
 bash ~/.pi/agent/skills/task-radar/scripts/scan-github.sh > "$OUT/scan.json" 2> "$OUT/scan.err"
-# 后续读取 $OUT/scan.json
-rm -rf "$OUT"
 ```
 
 **绝对禁止**：修改/创建 issue、改看板状态、assign、建 topic/spec、对 #frontend 或任何 thread 发消息、claim。
