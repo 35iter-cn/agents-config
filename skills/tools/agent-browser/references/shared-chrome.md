@@ -7,17 +7,13 @@ Attach to the human's real Chrome (real profile, real logins) instead of spawnin
 `--cdp 9222` re-attaches on the invocation, so nothing depends on daemon memory:
 
 ```bash
-REG="${XDG_RUNTIME_DIR:-/tmp/agent-browser-$UID}/agent-browser-tasks"
-TASK='<task-name>'
-export AGENT_BROWSER_SESSION="$TASK"; agent-browser session
-test -f "$REG/$AGENT_BROWSER_SESSION" || { echo "abort: task '$AGENT_BROWSER_SESSION' not registered"; exit 1; }
-agent-browser --cdp 9222 snapshot -i
+AGENT_BROWSER_SESSION='<task-name>' agent-browser --cdp 9222 snapshot -i
 ```
 
 Prove the attach once per task; every command after it inherits the same target:
 
 ```bash
-agent-browser --cdp 9222 get cdp-url | grep -q ':9222/devtools/browser/' || { echo "abort: not on the shared Chrome"; exit 1; }
+AGENT_BROWSER_SESSION='<task-name>' agent-browser --cdp 9222 get cdp-url | grep -q ':9222/devtools/browser/' || { echo "abort: not on the shared Chrome"; exit 1; }
 ```
 
 ## Why not `connect`

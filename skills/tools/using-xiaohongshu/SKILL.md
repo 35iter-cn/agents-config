@@ -5,33 +5,24 @@ description: Publish a note (图文/长文) to Xiaohongshu / 小红书 through t
 
 # Using Xiaohongshu
 
-Publishing goes through the creator backend `creator.xiaohongshu.com` in the **shared Chrome** (CDP 9222) — the account is already logged in there. Never spin up a fresh headless instance: the login state only exists in the shared profile.
+Publishing goes through the creator backend `creator.xiaohongshu.com` in the **shared Chrome** — the account is already logged in there. Never spin up a fresh headless instance: the login state only exists in the shared profile. If the instance is not running, start it with the `shared-chrome` skill.
 
-Companion skills: `shared-chrome` (start/verify the instance), `agent-browser` (browser CLI rules — named session, attach verification, ref discipline).
+Every browser action goes through the `agent-browser` skill: it owns the session, the attach, selectors, refs and snapshots. This file lists only *what* to do on the page, never *how* to drive the browser — invoke `agent-browser` and let that skill choose the calls.
 
-## 1. Attach to the shared Chrome
+## 1. Open the publish page
 
-Re-derive the session in **every** bash call (a fresh shell does not keep exports), then attach and prove it:
-
-```bash
-export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix "agentbrowser-${PI_SESSION_ID:0:8}")"
-agent-browser --cdp 9222 eval "document.title = 'AB-MARK-' + Date.now()"
-curl -fsS http://127.0.0.1:9222/json | grep -c AB-MARK   # 1 = attached to the shared browser
-agent-browser --cdp 9222 eval "navigator.userAgent"       # must NOT contain HeadlessChrome
-```
-
-Then open a labeled tab: `agent-browser --cdp 9222 tab new --label xhs "https://creator.xiaohongshu.com/publish/publish?source=official"`.
+Have `agent-browser` open a new labeled tab, label `xhs`, at `https://creator.xiaohongshu.com/publish/publish?source=official`.
 
 ## 2. Confirm the account before writing anything
 
-`snapshot -i -c` shows the logged-in handle in the top bar. Report it to the user if the draft will be published publicly — publishing to the wrong account is not recoverable by an edit.
+The logged-in handle sits in the top bar of the publish page. Read it and report it to the user if the draft will be published publicly — publishing to the wrong account is not recoverable by an edit.
 
 ## 3. Draft the note
 
 - **Title**: ≤ 20 characters on Xiaohongshu. Concrete beats clever; name the finding, not the topic area.
 - **Body**: hard limit 1000 characters. Xiaohongshu style — short lines, blank line between blocks, `①②③` for sections, no external links (they are suppressed), hashtags as a trailing line (`#AI #大模型 ...`).
 - **Credibility**: include the sample size / date / method caveat in the body. Readers discount unqualified "I tested it" claims, and a stated limitation is what survives being challenged in comments.
-- Keep the draft in a file (`/tmp/xhs/body.txt`) and pass it with `fill "$(cat ...)"` — inlining long Chinese text through the shell invites quoting damage.
+- Keep the draft in a file (`/tmp/xhs/body.txt`) and have it filled from that file — pasting long Chinese text through a shell argument invites quoting damage.
 
 ## 4. Cover image (generated locally, not a screenshot)
 
@@ -56,29 +47,14 @@ Conventions:
 
 Two traps, both silent:
 
-1. **The 图文 tab must be active first.** On the publish page the only `input[type=file]` initially accepts video (`.mp4,.mov,...`). Click the 「上传图文」 tab, then re-check:
+1. **The 图文 tab must be active first.** On the publish page the only `input[type=file]` initially accepts video (`.mp4,.mov,...`). Click 「上传图文」, then have `agent-browser` read back the `accept` attribute of every `input[type=file]` on the page — it must list `.jpg,.jpeg,.png,.webp` before the cover is uploaded.
+2. **The title field is not the first `input` on the page.** Address it by placeholder (`填写标题会有更多赞哦`), not by position. The body is a `contenteditable`, not a textarea.
 
-   ```bash
-   agent-browser --cdp 9222 eval "JSON.stringify([...document.querySelectorAll('input[type=file]')].map(i=>i.accept))"
-   # must show .jpg,.jpeg,.png,.webp before uploading
-   ```
-
-2. **The title field is not the first `input` on the page.** Address it by placeholder via the snapshot ref (`填写标题会有更多赞哦`); the body is a `contenteditable`, not a textarea.
-
-```bash
-agent-browser --cdp 9222 upload "input[type=file]" /tmp/xhs/cover.png
-agent-browser --cdp 9222 fill @<title-ref> "标题文本"
-agent-browser --cdp 9222 fill @<body-ref> "$(cat /tmp/xhs/body.txt)"
-```
+Then, through `agent-browser`: upload `/tmp/xhs/cover.png` into the file input, fill the title, fill the body from `/tmp/xhs/body.txt`.
 
 ## 6. Verify before publishing
 
-Read the fields back — `fill` can land truncated:
-
-```bash
-agent-browser --cdp 9222 eval "(() => { const b=document.querySelector('[contenteditable=true]'); const t=b.innerText;
-  return JSON.stringify({len:t.length, head:t.slice(0,40), tail:t.slice(-60)}); })()"
-```
+Read the body back — `fill` can land truncated. Have `agent-browser` return the `contenteditable` element's `innerText` length, first 40 characters and last 60 characters.
 
 Check: character count under 1000, tail ends with the hashtag line, title shows the intended text.
 
@@ -86,12 +62,8 @@ Check: character count under 1000, tail ends with the hashtag line, title shows 
 
 Click 「发布」, then confirm in **two** places — the success page alone is not proof:
 
-```bash
-# 1) success page
-#    https://creator.xiaohongshu.com/publish/success
-# 2) note manager — status must show 审核中 (or 已发布)
-agent-browser --cdp 9222 open "https://creator.xiaohongshu.com/new/note-manager"
-```
+1. the success page at `https://creator.xiaohongshu.com/publish/success`
+2. the note manager at `https://creator.xiaohongshu.com/new/note-manager` — status must show 审核中 (or 已发布); open it through `agent-browser`
 
 Report the resulting status and timestamp back to the user.
 
