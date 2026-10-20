@@ -1,6 +1,15 @@
 # Intake loop — 主扫描轮（只读取数 + 候选推送）
 
-除下列四处外禁止任何写操作：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
+写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
+
+运行实例根目录（prompt 末尾注入的那个目录）**只读**：只用来读本提示词与 `scripts/`，禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。扫描脚本的原始输出等中间产物一律写到系统临时目录，用后即删：
+
+```bash
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/taskradar-intake-XXXXXX")"
+bash ~/.pi/agent/skills/task-radar/scripts/scan-github.sh > "$OUT/scan.json" 2> "$OUT/scan.err"
+# 后续读取 $OUT/scan.json
+rm -rf "$OUT"
+```
 
 **绝对禁止**：修改/创建 issue、改看板状态、assign、建 topic/spec、对 #frontend 或任何 thread 发消息、claim。
 
@@ -36,7 +45,7 @@
    ```
 
    一条消息装全部候选，不要拆成多条。webhook 失败（URL 缺失/非 2xx）时降级：daily log 一行 `[error] webhook <原因>`，本轮不重试。发送后**不回写任何 ts**。
-8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = 本轮 ISO 时间；报过的板外 issue url 追加进 `backendKnownCandidates`。**只允许「脚本内 read → 改这几个键 → tmp + mv」一步完成**（node/python 一行式），**禁止用 write 工具把整份快照盖回去**。失败/出错时水位可推进但必须把异常写进 daily log。
+8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = 本轮 ISO 时间；报过的板外 issue url 追加进 `backendKnownCandidates`。**只允许「脚本内 read → 改这几个键 → tmp + mv」一步完成**（node/python 一行式），**禁止用 write 工具把整份快照盖回去**。临时文件必须与 state.json **同目录**（`mv` 才是原子 rename，跨文件系统会退化成拷贝），不得写到运行实例根目录。失败/出错时水位可推进但必须把异常写进 daily log。
 
 ## 语言
 
@@ -46,6 +55,7 @@
 
 - 单轮超过 10 分钟未完成步骤 1–4，立即收尾写报告（宁可少报，不可卡死）。
 - 检索文件内容/路径只用内置 grep/find 工具，禁止 bash 裸调 grep/rg/ls/find/cat/head/tail/wc/stat——临时 JSONL 的计数/字段提取/截断用 node/python 一步完成，不拆 bash 管道。
+- 任何写入落在运行实例根目录下（含 `.tmp/`、`.cache/`）都算违规：立即删除，并在 daily log 记一行 `[error] stray write <path>`。
 - token 失效 / API 报错：daily log 一行 `[error] <来源> <原因>`，正常退出，下轮重试。
 - 消息 @ 的处理人不是 frontend、或属 devops/infra 域：`[忽略]`，写一句归属判断。
 - 手动调用 task-radar 技能与本轮共享外置 state：同样只走「读 → 改单键 → tmp + mv」，后写胜，最坏重复报一条候选。
