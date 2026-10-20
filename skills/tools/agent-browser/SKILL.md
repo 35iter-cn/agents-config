@@ -10,16 +10,18 @@ Command reference: `agent-browser skills get core` (authoritative). This file ca
 ## Invoking the CLI
 
 ```bash
-AGENT_BROWSER_SESSION='<task-name>' agent-browser --cdp 9222 <command> [args]
+AGENT_BROWSER_SESSION='<task-name>' agent-browser --cdp 9222 --pin-tab <command> [args]
 ```
 
-Two arguments, on every command, on the same line:
+Three arguments, on every command, on the same line:
 
 - `<task-name>` — the current task's name. Reuse it while its goal is undelivered and this call serves it; a new name only for a new goal (different site, different deliverable, or the last one shipped).
 - `--cdp 9222` — the human's real Chrome: real profile, real logins, their tabs. Re-established per invocation.
+- `--pin-tab` — bind this session to its own tab. Sticky after the first command, but pass it every time anyway: without it a command acts on whichever tab is currently active, which may belong to another agent or to the human. With it, a closed binding fails loudly as `tab_gone` instead of silently acting on someone else's tab.
 
 ## Common mistakes
 
+- Omitting `--pin-tab` while any other session shares the same Chrome — your `open` navigates the shared active tab and your `tab close` closes it, so you silently rewrite or destroy another task's page. The victim sees `tab_gone`; you see success.
 - `export` on its own line or in an earlier shell — the name is gone by the time the command runs, and the CLI uses the shared `default` session: other tasks' tabs. No error, no warning.
 - Omitting `--cdp 9222` — the session silently launches headless Chrome under `/tmp/agent-browser-chrome-*` and every later command stays there, invisible to the human, wrong profile, wrong logins. A command that cannot attach exits 1 with `All CDP discovery methods failed`: that is the outcome you want — stop and report.
 - A misspelled or freshly invented name — a different session, with no tabs and a cold login. Not an error message.
