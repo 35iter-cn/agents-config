@@ -54,7 +54,7 @@ gh pr list -R "$BACKEND" --state open --limit 200 \
 known='[]'
 [ -r "$STATE_FILE" ] && known="$(jq -c '.backendKnownCandidates // []' "$STATE_FILE")"
 
-jq -n -c \
+json="$(jq -n -c \
   --slurpfile B "$tmpd/pages.jsonl" \
   --slurpfile A "$tmpd/assigned.json" \
   --slurpfile BI "$tmpd/bissues.json" \
@@ -117,4 +117,15 @@ jq -n -c \
     ] as $bi
   | {board: {current: $current, assignedOpen: $assigned},
      backendIssues: $bi}
-'
+')"
+
+if [ "${1:-}" = "-" ]; then
+  printf '%s\n' "$json"
+  exit 0
+fi
+
+out="${1:-}"
+[ -n "$out" ] || out="${TMPDIR:-/tmp}/taskradar-intake/scan.json"
+mkdir -p "$(dirname "$out")"
+printf '%s\n' "$json" >"$out"
+printf '%s\n' "$out"

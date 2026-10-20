@@ -2,20 +2,14 @@
 
 写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
 
-运行实例根目录（prompt 末尾注入的那个目录）**只读**：只用来读本提示词与 `scripts/`，禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。扫描脚本的原始输出等中间产物一律写到系统临时目录里的固定子目录，每轮覆盖、不做清理：
-
-```bash
-OUT="${TMPDIR:-/tmp}/taskradar-intake"
-mkdir -p "$OUT"
-bash ~/.pi/agent/skills/task-radar/scripts/scan-github.sh > "$OUT/scan.json" 2> "$OUT/scan.err"
-```
+运行实例根目录（prompt 末尾注入的那个目录）**只读**：禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。
 
 **绝对禁止**：修改/创建 issue、改看板状态、assign、建 topic/spec、对 #frontend 或任何 thread 发消息、claim。
 
 ## 步骤
 
 1. 读外置 state.json（`~/.config/taskradar/state.json`）。只有四个字段：`channels`（频道 → 已处理到的最大 message ts）、`lastBoardKnownIssues`（看板两列上一轮的 issue 编号）、`lastBoardScan`（上一轮扫描的 ISO 时间）、`backendKnownCandidates`（已报过的板外 issue url）。文件不存在时按空对象初始化（`channels` 从"最近 24 小时"起扫）。
-2. **源 1+2（GitHub）**：运行 task-radar 技能的取数脚本 `scripts/scan-github.sh`（技能路径：`~/.pi/agent/skills/task-radar/`），一次拿到 `board.current`（两列）、`board.assignedOpen`（兜漏）、`backendIssues`（板外比对 + open PR 命中 + known 标记）。
+2. **源 1+2（GitHub）**：运行 `~/.pi/agent/skills/task-radar/scripts/scan-github.sh`。它把结果写到 `$TMPDIR/taskradar-intake/scan.json`，只打印这个路径；用 read 工具分批读，不要整份灌进上下文。一次拿到 `board.current`（两列）、`board.assignedOpen`（兜漏）、`backendIssues`（板外比对 + open PR 命中 + known 标记）。
    - `board.current` 与 `lastBoardKnownIssues` 找看板新条目；`assignedOpen` 里 `updatedAt` 晚于 `lastBoardScan` 的直接入报告（不重复分析）。
    - 源 2 候选 = `backendIssues` 里 `onBoard=false` 且 `known=false` 的；`onBoard=false` 但 `known=true` 的跳过不重报；`assignees` 非空则不构成可认领候选（入报告并标谁占着）。
    - backend 源零新增 → 报告一行"backend 源无新候选"。候选指向 backend/devops 之外域（infra）→ 标归属后只报告，不推送。
