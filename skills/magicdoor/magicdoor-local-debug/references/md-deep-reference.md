@@ -41,23 +41,27 @@ Frontends join the stack from their own checkout (`md link`, see
 `md urls` prints the real hostnames and ports — never invent them, or hand-set
 DNS, `/etc/hosts`, mkcert or ports.
 
-- `portal.<stack>.md.test`, `internal.<stack>.md.test`
-- `<company>.with.<stack>.md.test`, with `/tenants` and `/owners` for
+- `portal.hao-local-debug.md.test`, `internal.hao-local-debug.md.test`
+- `<company>.with.hao-local-debug.md.test`, with `/tenants` and `/owners` for
   tenant/owner portals
-- `services.<stack>.md.test/<service>`
+- `services.hao-local-debug.md.test/<service>`
 
 HTTPS is required, not cosmetic: login needs `crypto.subtle`. Stacks start
 with company site `hogwarts`; `md add-website <company>` adds more.
-Stack names come from the git branch at creation and are then fixed;
-`--stack <name>` targets another; `md ls` lists, `md nuke <name>` destroys.
+The stack is `hao-local-debug` and is named explicitly on every command
+(`--stack hao-local-debug`); `md ls` lists stacks, `md down` stops one while
+keeping its databases, `md nuke <name>` destroys one.
 
 ## Troubleshooting
 
 - Anything odd: `md doctor`, then `md reset`.
 - Service missing: unpullable images are skipped → `docker login`, `md up`.
 - Containers dying or OOM: raise Docker memory, or `md up --only a,b,c`.
-- Refuses to create a stack: OAuth redirect ports are pooled → `md nuke` an
-  unused stack (`md ls`).
+- Refuses to run: OAuth redirect ports are pooled → `md nuke` a leftover
+  stack from before the single-stack convention (`md ls`).
+- A service starts and fails on a missing column or table: the reused
+  database is behind the code → `md migrate --stack hao-local-debug`, run
+  from the checkout carrying that migration. Still broken → `md reset --data`.
 - Stack disagrees with reality: `md prune --apply`.
 - Login fails with no obvious error: `mkcert -install`, then reload.
 - Hosted service unreachable from the stack (502, stub logs socat
@@ -74,18 +78,23 @@ Stack names come from the git branch at creation and are then fixed;
   `Internal.json`; Portal: `InternalApp.json`); groups in
   `GET /swagger/index.js` (`urls` array).
 - Minting an employee token for API testing without a browser:
-  ① `POST https://auth.<stack>.md.test/internal/local-login` form
-  `client_id=internal_portal&return_url=https://portal.<stack>.md.test/login/callback&state=x&email=<magicdoor email>`
+  ① `POST https://auth.hao-local-debug.md.test/internal/local-login` form
+  `client_id=internal_portal&return_url=https://portal.hao-local-debug.md.test/login/callback&state=x&email=<magicdoor email>`
   → 302; ② GET that redirect URL → its 302 carries `?code=…`;
   ③ `POST /oauth/token` form `grant_type=authorization_code&code=…&client_id=internal_portal`
   + same `redirect_uri` → `access_token` with `permissions: *`. Only works on
-  stacks (LocalStackSignIn); use the `https://auth.<stack>.md.test` host
+  stacks (LocalStackSignIn); use the `https://auth.hao-local-debug.md.test` host
   consistently, never the localhost auth port from `md urls`.
 
 ## Red flags
 
 - Editing `~/.magicdoor/src` — point `MD_CLI_SOURCE` at a clone instead.
-- `md migrate` on a master checkout; or assuming `md up` needs the .NET SDK
-  (only migrate does).
+- Any `md` command without `--stack hao-local-debug` — it creates or adopts a
+  branch-named stack instead, and the next `md up` re-pulls images and
+  re-restores databases.
+- `md nuke hao-local-debug` as cleanup; `md down` is the way to end a session.
+- `md migrate` from a checkout that does not carry the migration (it applies
+  that checkout's EF projects, nothing else); or assuming `md up` needs the
+  .NET SDK (only migrate does).
 - `md host` on a frontend.
 - An `md up` with no `--only` when the intent is a single module.
