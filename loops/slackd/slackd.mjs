@@ -40,7 +40,14 @@ const LOG_RETENTION_MS = 72 * 3_600_000;
 const THREAD_RETENTION_MS = 30 * 86_400_000;
 const REPLY_LIMIT = 3500;
 const PRUNE_INTERVAL_MS = 86_400_000;
-const CONNECTION_REFRESH_MS = Number(process.env.SLACKD_REFRESH_MS ?? 50 * 60_000);
+const PING_MS = Number(process.env.SLACKD_PING_MS ?? 10_000);
+const SERVER_PING_TIMEOUT_MS = Number(process.env.SLACKD_SERVER_PING_TIMEOUT_MS ?? 30_000);
+const PONG_TIMEOUT_MS = Number(process.env.SLACKD_PONG_TIMEOUT_MS ?? 10_000);
+const REFRESH_MS_OVERRIDE = Number(process.env.SLACKD_REFRESH_MS ?? 0);
+const MIN_REFRESH_MS = 60_000;
+const HELLO_TIMEOUT_MS = 15_000;
+const ALERT_COOLDOWN_MS = Number(process.env.SLACKD_ALERT_COOLDOWN_MS ?? 30 * 60_000);
+const HEARTBEAT_LOG_EVERY = 3;
 const PASSING_SUBTYPES = ["thread_broadcast", "file_share"];
 const STOP_WORDS = ["停", "stop"];
 
@@ -150,6 +157,19 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function heartbeatVerdict(state, now, cfg = {}) {
+  const serverPingTimeoutMs = cfg.serverPingTimeoutMs ?? SERVER_PING_TIMEOUT_MS;
+  const pongTimeoutMs = cfg.pongTimeoutMs ?? PONG_TIMEOUT_MS;
+  if (now - state.lastServerPingAt > serverPingTimeoutMs) return "no-server-ping";
+  if (state.lastPongAt && now - state.lastPongAt > pongTimeoutMs) return "no-pong";
+  return null;
+}
+
+function alertAllowed(alerts, kind, now, cooldownMs = ALERT_COOLDOWN_MS) {
+  const last = Date.parse(alerts?.[kind] ?? "");
+  return !Number.isFinite(last) || now - last > cooldownMs;
+}
+
 function runSelftest() {
   const { strictEqual, deepStrictEqual, ok } = assert;
   strictEqual(stripMentions("<@U0A5T8AR9EU> 帮我扫一下"), "帮我扫一下");
@@ -173,6 +193,19 @@ function runSelftest() {
   const reply = truncate("x".repeat(4000), "/tmp/worker.log");
   ok(reply.length <= REPLY_LIMIT, `truncate length ${reply.length}`);
   ok(reply.endsWith("完整内容见 /tmp/worker.log"));
+
+  const beat0 = { lastServerPingAt: 0, lastPongAt: 0 };
+  const cfg = { serverPingTimeoutMs: 30_000, pongTimeoutMs: 10_000 };
+  strictEqual(heartbeatVerdict({ ...beat0, lastServerPingAt: 1_000_000 }, 1_029_000, cfg), null);
+  strictEqual(heartbeatVerdict({ ...beat0, lastServerPingAt: 1_000_000 }, 1_031_000, cfg), "no-server-ping");
+  strictEqual(heartbeatVerdict({ lastServerPingAt: 1_030_000, lastPongAt: 0 }, 1_030_000, cfg), null, "no pong yet is not stale");
+  strictEqual(heartbeatVerdict({ lastServerPingAt: 1_030_000, lastPongAt: 1_000_000 }, 1_011_000, cfg), "no-pong");
+  strictEqual(heartbeatVerdict({ lastServerPingAt: 1_030_000, lastPongAt: 1_025_000 }, 1_031_000, cfg), null);
+
+  ok(alertAllowed({}, "stale", 1_000_000), "first alert always allowed");
+  ok(!alertAllowed({ stale: new Date(1_000_000).toISOString() }, "stale", 1_000_000 + 60_000));
+  ok(alertAllowed({ stale: new Date(1_000_000).toISOString() }, "stale", 1_000_000 + 31 * 60_000));
+  ok(alertAllowed({ stale: new Date(1_000_000).toISOString() }, "link_disabled", 1_000_000 + 60_000), "kinds are independent");
 
   const ring = [];
   const push = (ts) => {
@@ -272,6 +305,7 @@ log("info", "start", `channel=${CHANNEL}`, `state=${STATE_PATH}`, `root=${ROOT}`
 const db = readJsonOr(SLACKD_FILE, { dedup: [], threads: {} });
 db.dedup = Array.isArray(db.dedup) ? db.dedup.slice(-200) : [];
 db.threads = db.threads ?? {};
+db.alerts = db.alerts && typeof db.alerts === "object" && !Array.isArray(db.alerts) ? db.alerts : {};
 for (const [thread, entry] of Object.entries(db.threads)) {
   if (entry?.running) {
     log("warn", "orphan", thread, entry.session ?? sessionName(thread));
@@ -403,11 +437,25 @@ async function start(thread, msg) {
 
   let stdout = "";
   let stderr = "";
+  const appendWorkerLog = (chunk) => {
+    try {
+      appendFileSync(workerLog, chunk);
+    } catch (e) {
+      log("warn", "worker-log", String(e));
+    }
+  };
+  try {
+    writeFileSync(workerLog, `start=${new Date().toISOString()} ts=${msg.ts} prompt=${full ? "full" : "raw"}\n`);
+  } catch (e) {
+    log("warn", "worker-log", String(e));
+  }
   child.stdout.on("data", (chunk) => {
     stdout += chunk;
+    appendWorkerLog(chunk);
   });
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
+    appendWorkerLog(chunk);
   });
   state.timer = setTimeout(() => {
     state.note = "本轮超过 20 分钟，已被终止";
@@ -425,7 +473,7 @@ async function start(thread, msg) {
     entry.running = false;
     saveSlackd();
     try {
-      writeFileSync(workerLog, `exit=${code}\n\n--- stderr ---\n${stderr}\n--- stdout ---\n${stdout}\n`);
+      appendFileSync(workerLog, `\n--- exit=${code} ---\n`);
     } catch (e) {
       log("warn", "worker-log", String(e));
     }
@@ -518,43 +566,164 @@ function handle(event) {
   enqueue(thread, { ts: event.ts, text });
 }
 
-function listen(url) {
-  return new Promise((resolve) => {
-    const ws = new WebSocket(url);
-    const refresh = setTimeout(() => {
-      log("info", "refresh-connection");
+function newConnection(url) {
+  const ws = new WebSocket(url);
+  const conn = {
+    ws,
+    hello: null,
+    why: null,
+    closed: false,
+    settled: false,
+    lifetimeMs: 0,
+    lastServerPingAt: Date.now(),
+    lastPongAt: 0,
+    pingSentAt: 0,
+    beatTimer: null,
+    refreshTimer: null,
+    onHello: null,
+    waitClosed: null,
+    shutdown: null,
+  };
+  conn.waitClosed = new Promise((resolve) => {
+    conn.settle = (why) => {
+      if (conn.settled) return;
+      conn.settled = true;
+      resolve(why);
+    };
+  });
+
+  const stale = (reason) => {
+    if (conn.why) return;
+    conn.why = `stale:${reason}`;
+    log("warn", "ping-timeout", reason);
+    try {
+      ws.terminate();
+    } catch (e) {
+      log("warn", "terminate", String(e));
+      try {
+        ws.close();
+      } catch (e2) {
+        log("warn", "close", String(e2));
+      }
+    }
+  };
+
+  conn.shutdown = (why) => {
+    conn.why = conn.why ?? why;
+    clearInterval(conn.beatTimer);
+    clearTimeout(conn.refreshTimer);
+    try {
+      ws.close();
+    } catch (e) {
+      log("warn", "close", String(e));
+    }
+    setTimeout(() => {
+      if (conn.closed) return;
+      log("warn", "close-timeout", why);
+      try {
+        ws.terminate();
+      } catch (e) {
+        log("warn", "terminate", String(e));
+      }
+    }, 5_000).unref();
+  };
+
+  let beats = 0;
+  conn.beatTimer = setInterval(() => {
+    const now = Date.now();
+    const verdict = heartbeatVerdict(conn, now);
+    if (verdict) return stale(verdict);
+    beats += 1;
+    if (beats % HEARTBEAT_LOG_EVERY === 0) {
+      log("heartbeat", `rtt=${conn.lastRttMs ?? "-"}ms`, `server-ping-age=${now - conn.lastServerPingAt}ms`);
+    }
+    try {
+      conn.pingSentAt = now;
+      ws.ping();
+    } catch (e) {
+      log("warn", "ping", String(e));
+      stale("ping-failed");
+    }
+  }, PING_MS);
+
+  ws.addEventListener("open", () => {
+    conn.lastServerPingAt = Date.now();
+  });
+  ws.addEventListener("ping", () => {
+    conn.lastServerPingAt = Date.now();
+  });
+  ws.addEventListener("pong", () => {
+    conn.lastPongAt = Date.now();
+    if (conn.pingSentAt) conn.lastRttMs = conn.lastPongAt - conn.pingSentAt;
+  });
+
+  ws.addEventListener("message", (frame) => {
+    let envelope;
+    try {
+      envelope = JSON.parse(frame.data);
+    } catch (e) {
+      return log("warn", "frame", String(e));
+    }
+    if (envelope.envelope_id) ws.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
+    if (envelope.type === "hello") {
+      conn.hello = envelope;
+      conn.lastServerPingAt = Date.now();
+      conn.lifetimeMs = Number(envelope.debug_info?.approximate_connection_time ?? 0) * 1_000;
+      const refreshIn = REFRESH_MS_OVERRIDE || Math.max(Math.round(conn.lifetimeMs * 0.8), MIN_REFRESH_MS);
+      log(
+        "info",
+        "hello",
+        `${envelope.num_connections ?? 1} conn`,
+        `lifetime=${Math.round(conn.lifetimeMs / 1_000)}s`,
+        `refresh=${Math.round(refreshIn / 1_000)}s`,
+      );
+      conn.refreshTimer = setTimeout(() => conn.settle("refresh"), refreshIn);
+      conn.onHello?.();
+      return;
+    }
+    if (envelope.type === "disconnect") {
+      const reason = envelope.reason ?? "";
+      conn.why = `disconnect:${reason}`;
+      log("warn", "disconnect", reason);
+      if (reason === "link_disabled") {
+        alertOnce("link_disabled", "slackd: Slack 侧已关闭 Socket Mode（link_disabled），需要人工回 app 设置重新开启，事件暂时收不到");
+      }
       try {
         ws.close();
       } catch (e) {
         log("warn", "close", String(e));
       }
-    }, CONNECTION_REFRESH_MS);
+      return;
+    }
+    if (envelope.type !== "events_api") return log("ignore", "envelope", envelope.type ?? "");
+    handle(envelope.payload?.event);
+  });
 
-    ws.addEventListener("message", (frame) => {
-      let envelope;
-      try {
-        envelope = JSON.parse(frame.data);
-      } catch (e) {
-        return log("warn", "frame", String(e));
-      }
-      if (envelope.envelope_id) ws.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
-      if (envelope.type === "hello") return log("info", "hello", `${envelope.num_connections ?? 1} conn`);
-      if (envelope.type === "disconnect") {
-        log("warn", "disconnect", envelope.reason ?? "");
-        try {
-          ws.close();
-        } catch (e) {
-          log("warn", "close", String(e));
-        }
-        return;
-      }
-      if (envelope.type !== "events_api") return log("ignore", "envelope", envelope.type ?? "");
-      handle(envelope.payload?.event);
-    });
-    ws.addEventListener("error", (event) => log("warn", "ws-error", String(event?.message ?? event)));
-    ws.addEventListener("close", () => {
-      clearTimeout(refresh);
-      resolve();
+  ws.addEventListener("error", (event) => log("warn", "ws-error", String(event?.message ?? event)));
+  ws.addEventListener("close", () => {
+    conn.closed = true;
+    clearInterval(conn.beatTimer);
+    clearTimeout(conn.refreshTimer);
+    conn.settle(conn.why ?? "closed");
+  });
+
+  return conn;
+}
+
+function connect(url) {
+  const conn = newConnection(url);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      conn.shutdown("hello-timeout");
+      reject(new Error("hello timeout"));
+    }, HELLO_TIMEOUT_MS);
+    conn.onHello = () => {
+      clearTimeout(timer);
+      resolve(conn);
+    };
+    conn.waitClosed.then((why) => {
+      clearTimeout(timer);
+      reject(new Error(`closed before hello: ${why}`));
     });
   });
 }
@@ -571,30 +740,62 @@ async function openSocket() {
 }
 
 let authAlerts = 0;
-let lastAuthAlert = 0;
+
+function alertOnce(kind, text) {
+  const now = Date.now();
+  if (!alertAllowed(db.alerts, kind, now)) return log("info", "alert-suppressed", kind);
+  db.alerts = db.alerts ?? {};
+  db.alerts[kind] = new Date(now).toISOString();
+  saveSlackd();
+  log("warn", "alert", kind);
+  post(null, text).catch((e) => log("error", "alert", String(e)));
+}
 
 async function serve() {
   let backoff = 1_000;
+  let conn = null;
   for (;;) {
-    let url;
-    try {
-      url = await openSocket();
-    } catch (e) {
-      log("error", "connections.open", String(e));
-      const authFailure = String(e).includes("invalid_auth") || String(e).includes("not_authed");
-      authAlerts = authFailure ? authAlerts + 1 : 0;
-      if (authFailure && authAlerts >= 3 && Date.now() - lastAuthAlert > 30 * 60_000) {
-        lastAuthAlert = Date.now();
-        post(null, `slackd 收不到事件：app token 鉴权失败（${e}）。检查 ${join(CFG_DIR, "slack-app.env")}`);
+    if (!conn) {
+      try {
+        conn = await connect(await openSocket());
+      } catch (e) {
+        log("error", "connect", String(e));
+        const authFailure = String(e).includes("invalid_auth") || String(e).includes("not_authed");
+        authAlerts = authFailure ? authAlerts + 1 : 0;
+        if (authFailure && authAlerts >= 3) {
+          alertOnce("auth", `slackd 收不到事件：app token 鉴权失败（${e}）。检查 ${join(CFG_DIR, "slack-app.env")}`);
+        }
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, 60_000);
+        continue;
       }
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 60_000);
+      backoff = 1_000;
+      authAlerts = 0;
+    }
+
+    const why = await conn.waitClosed;
+    log("warn", "connection-lost", why);
+    if (why.startsWith("stale:")) {
+      alertOnce("stale", `slackd: 与 Slack 的连接已失效（${why.slice(6)}），正在自动重连，期间的消息可能延迟`);
+    }
+
+    if (why === "refresh") {
+      try {
+        const next = await connect(await openSocket());
+        const old = conn;
+        conn = next;
+        old.shutdown("rotated");
+        log("info", "rotated", "refresh");
+      } catch (e) {
+        log("error", "rotate", String(e));
+        conn.shutdown("rotate-failed");
+        conn = null;
+        await sleep(1_000);
+      }
       continue;
     }
-    backoff = 1_000;
-    authAlerts = 0;
-    await listen(url);
-    log("warn", "socket closed, reconnecting");
+
+    conn = null;
     await sleep(1_000);
   }
 }
