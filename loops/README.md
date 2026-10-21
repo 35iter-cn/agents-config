@@ -43,6 +43,26 @@ systemctl --user show -p ExecStart slackd.service
 
 只链 `.service`、不启用 timer：事件由 Slack Socket Mode 推来。`ExecStart` 必须解析成 `%h/.bun/bin/bun %h/code/agents-config/loops/<slug>/<slug>.mjs`；日志看 `journalctl --user -u slackd -n 50` 与 `~/.config/taskradar/logs/slackd/`。
 
+## 常驻型安装（`tgd`）
+
+Telegram 版：Bot API 长轮询（无 WebSocket，心跳/连接轮转/断连告警全部不需要）。凭据 `~/.config/taskradar/telegram.env`（`TELEGRAM_BOT_TOKEN`、`TELEGRAM_ALLOWED_USER` 必填，`TELEGRAM_CHAT_ID` 是频道关联的讨论组、`TELEGRAM_CHANNEL_ID` 是频道，由 `probe` 拿到后回填），chmod 600；状态 `~/.config/taskradar/tgd.json`（`offset` 游标 + 会话表 + `channelPosts` 镜像映射 + alias），日志 `~/.config/taskradar/logs/tgd/`。
+
+频道是唯一入口：频道里每个 Post 都是一条独立会话（键 `ch<帖id>`，session `tg-ch<帖id>`），频道关联的讨论组只作为评论区——Post 下的评论凭 `message_thread_id` 归到该 Post 的会话，讨论组里不属于任何 Post 的消息一律忽略。tgd 从讨论组的自动转发镜像学习 `帖id → 镜像id` 映射（重启后由下一条评论补齐），bot 的回帖 reply 到该 Post 的镜像消息、对用户评论的回复再 reply 该评论，因此始终落在同一评论线程里；镜像可能比 Post 晚几秒到达，回帖前会等它出现。单条 4096 字符自动切分成多条连续消息。
+
+`notify` 直接把候选推到频道（`TELEGRAM_CHANNEL_ID`），推送本身就是一条 Post，用户在评论区的发言即开新会话。
+
+```bash
+ln -sf "$(pwd)/loops/tgd/systemd/tgd.service" ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now tgd.service
+```
+
+手工命令：`--selftest` 跑纯函数自测；`probe` 打印最近一条消息的 chat id / 发送者 user id（首次配置用）；`notify "<文本>"` 把候选推到频道，供 intake 轮次推送用。
+
+讨论组不能用带话题的群（forum），否则无法被频道选为关联讨论组。
+
+超时与信号：单轮 worker 硬超时 `TGD_TIMEOUT_MS`（默认 90 分钟，超时对整个进程组 SIGKILL，回帖只说已终止，部分输出只在 `logs/tgd/worker-*.log`）；排队等待超时 `TGD_WAIT_MS`（默认 90 分钟，超时报「当前繁忙」）。worker 在跑期间每 `TGD_TYPING_MS`（默认 4 秒）发一次 `sendChatAction(typing)`，按 chat 共享一个定时器、多 topic 轮转，把调用压在群 20 次/分钟限额内；发送失败只记 warn，不影响本轮。
+
 ## 新增一个循环
 
 1. `cp -r intake/<new-slug>` 后重命名 sh/unit 文件里的 slug
