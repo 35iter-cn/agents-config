@@ -11,6 +11,10 @@ A **topic** is one unit of work with a durable home: `~/.config/topicbox/<topic>
 
 **The test is recoverability, never size or kind.** "Tiny fix", "not code", "personal not work" are not exemptions. Violating the letter of these rules is violating the spirit.
 
+## Language
+
+Write every topic document in Chinese — the `STATE.md` body and all artifacts. Code, paths, identifiers, commands and quoted source stay as they are.
+
 ## When to Use
 
 - **Before the first edit** of any fix or feature as part of a task — the trigger is the edit, not the size.
