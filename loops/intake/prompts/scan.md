@@ -1,11 +1,10 @@
 # Intake loop — 主扫描轮（只读取数 + 候选推送）
 
-写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 `#agent-intake`（`C0C9N6SSH39`）的 webhook 推送、轮次日志。
+写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 Telegram（`tgd.mjs notify`）推送候选、轮次日志。
 
 运行实例根目录（prompt 末尾注入的那个目录）**只读**：禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。
 
 **绝对禁止**：修改/创建 issue、改看板状态、assign、建 topic/spec、对 #frontend 或任何 thread 发消息、claim。
-
 ## 步骤
 
 1. 读外置 state.json（`~/.config/taskradar/state.json`）。只有四个字段：`channels`（频道 → 已处理到的最大 message ts）、`lastBoardKnownIssues`（看板两列上一轮的 issue 编号）、`lastBoardScan`（上一轮扫描的 ISO 时间）、`backendKnownCandidates`（已报过的板外 issue url）。文件不存在时按空对象初始化（`channels` 从"最近 24 小时"起扫）。
@@ -15,29 +14,27 @@
    - backend 源零新增 → 报告一行"backend 源无新候选"。候选指向 backend/devops 之外域（infra）→ 标归属后只报告，不推送。
 3. **源 3（Slack）**：`#frontend`（`C0A51L0GAJ0`）按 task-radar `references/slack-scan.md` 水位增量拉取与过滤（bug 报告、需求请求、@ frontend 求助；忽略闲聊、部署通知）。判定"零新消息 = 既有水位即全量结果的 max ts"。
 4. 每个新候选按 task-radar `triage` workflow 三问（`references/triage-and-claim.md`：未被占领 / 能做 / 值得做），输出五列证据（是否在板上 / assignee / 最后活动日 / open PR / labels）。**不执行 claim**——领取只发生在 thread session 收到用户表态之后。
-5. 候选编号：本轮内 `YYYYMMDD-HHMM-<n>`（`n` 从 1 递增，`HHMM` 取本轮开始时间）。**不写任何台账**：候选的 id、一句依据、五列证据、permalink 全部只出现在频道消息里，thread 就是它的上下文。
+5. 候选编号：本轮内 `YYYYMMDD-HHMM-<n>`（`n` 从 1 递增，`HHMM` 取本轮开始时间）。**不写任何台账**：候选的 id、一句依据、五列证据、permalink 全部只出现在频道消息里，该 Post 的评论区线程就是它的上下文。
 6. 报告写入当日 memory daily log（`memory_write target=daily`），头部一行 `## intake loop <YYYY-MM-DD HH:MM>`：
    - 零新信号：一行 `sweep clean (<inspected> msgs, board unchanged, backend 无新候选)`，仍推进水位。
    - 有候选：每条一行 `[候选 <id>] 一句依据 — permalink`。
-7. 若存在候选：**一轮只发一条父消息**到 `#agent-intake`（`C0C9N6SSH39`），内含本轮全部候选。用 webhook 发，URL 从 `~/.config/taskradar/webhook.url` 读（勿打印到日志）：
+7. 若存在候选：**一轮只发一条消息**到 Telegram 频道（`TELEGRAM_CHANNEL_ID`，bot `@hao_intake_bot` 以频道身份发 Post），内含本轮全部候选。发送命令（token 由 tgd 自己从 `~/.config/taskradar/telegram.env` 读，勿打印）：
 
    ```bash
-   curl -sS -X POST -H 'Content-type: application/json' \
-     --data "$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1]}))' "<payload>")" \
-     "$(cat ~/.config/taskradar/webhook.url)"
+   ~/.bun/bin/bun ~/code/agents-config/loops/tgd/tgd.mjs notify "<payload>"
    ```
 
-   `text` 形如（**mention 与 `[<id>]` 都是硬要求**：mention 保证私有频道弹通知，`[<id>]` 供 thread session 引用）：
+   `payload` 形如（**`[<id>]` 是硬要求**，供会话引用；Telegram 不需要 mention）：
 
    ```
-   <@U0A5T8AR9EU> intake loop 发现 <N> 个候选（在该消息的 thread 内回复，自然语言也行）
+   intake loop 发现 <N> 个候选（在该 Post 的评论区发言，自然语言也行）
    [<id1>] <一句依据>
      <permalink>
    [<id2>] <一句依据>
      <permalink>
    ```
 
-   一条消息装全部候选，不要拆成多条。webhook 失败（URL 缺失/非 2xx）时降级：daily log 一行 `[error] webhook <原因>`，本轮不重试。发送后**不回写任何 ts**。
+   一条消息装全部候选，不要拆成多条。发送失败（退出码非 0）时降级：daily log 一行 `[error] telegram notify <原因>`，本轮不重试。发送后**不回写任何 message id**。
 8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = 本轮 ISO 时间；报过的板外 issue url 追加进 `backendKnownCandidates`。**只允许「脚本内 read → 改这几个键 → tmp + mv」一步完成**（node/python 一行式），**禁止用 write 工具把整份快照盖回去**。临时文件必须与 state.json **同目录**（`mv` 才是原子 rename，跨文件系统会退化成拷贝），不得写到运行实例根目录。失败/出错时水位可推进但必须把异常写进 daily log。
 
 ## 语言
