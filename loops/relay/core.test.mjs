@@ -133,7 +133,7 @@ test("TC-6 state writes are atomic and leave no temp files behind", async () => 
   await tick();
   const leftovers = readdirSync(dir).filter((name) => name.includes(".tmp-"));
   assert.deepEqual(leftovers, []);
-  assert.deepEqual(Object.keys(readJsonOr(stateFile, {})), ["cursor", "seen", "convs", "alerts"]);
+  assert.deepEqual(Object.keys(readJsonOr(stateFile, {})), ["cursor", "seen", "convs", "alerts", "meta"]);
 });
 
 test("TC-7 log files older than 72h are pruned, fresh ones kept", () => {

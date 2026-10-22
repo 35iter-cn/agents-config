@@ -20,7 +20,7 @@ export function readJsonOr(file, fallback) {
 }
 
 export function emptyState() {
-  return { cursor: null, seen: {}, convs: {}, alerts: {} };
+  return { cursor: null, seen: {}, convs: {}, alerts: {}, meta: {} };
 }
 
 export function writeJsonAtomic(file, value) {
