@@ -1,0 +1,14 @@
+[Unit]
+Description=relay@%i — %i conversations routed to pi sessions
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+Environment=RELAY_PLATFORM=%i
+ExecStart=%h/.bun/bin/bun %h/code/agents-config/loops/relay/relay.mjs %i
+
+[Install]
+WantedBy=default.target
