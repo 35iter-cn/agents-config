@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCore, defaultLog } from "./core.mjs";
+import { defineAdapter, isPlatform, PLATFORMS } from "./platform.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.HOME;
 const CFG_DIR = join(HOME, ".config/taskradar");
-const PLATFORMS = ["feishu", "slack", "telegram"];
 
 export function readEnv(file) {
   const out = {};
@@ -35,14 +35,14 @@ export function usage() {
 
 async function loadAdapter(platform) {
   const module = await import(`./adapters/${platform}.mjs`);
-  return module.createAdapter({ paths, readEnv, log: defaultLog });
+  return defineAdapter(module.createAdapter({ paths, readEnv, log: defaultLog }));
 }
 
 async function main() {
   const [mode, ...rest] = process.argv.slice(2);
   if (mode === "notify") {
     const [platform, ...words] = rest;
-    if (!PLATFORMS.includes(platform)) usage();
+    if (!isPlatform(platform)) usage();
     const text = words.join(" ").trim();
     if (!text) usage();
     const adapter = await loadAdapter(platform);
@@ -53,7 +53,7 @@ async function main() {
     await adapter.notify(text);
     return;
   }
-  if (!PLATFORMS.includes(mode)) usage();
+  if (!isPlatform(mode)) usage();
 
   const adapter = await loadAdapter(mode);
   const platformPaths = {
