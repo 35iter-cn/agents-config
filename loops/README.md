@@ -2,87 +2,83 @@
 
 定时扫描循环跑在 systemd user timer 上，事件驱动的会话跑在常驻 service 上：环境存活才运行、关机即停，停机窗口的增量由水位在下轮一次补扫。
 
-intake 是「单轮扫描 + 事件驱动会话」两件套：`intake.sh`（30min 定时扫描 GitHub 两源与 Slack，只读 + 推候选）和 `slackd`（常驻守护进程，`#agent-intake` 里每条消息一到就起一条 pi 会话，不等 timer）。
+两件套：`intake`（30min 定时扫描 GitHub 两源与 Slack，只读 + 推候选）和 `relay`（常驻守护，三个平台的消息线程各起一条 pi 会话，不等 timer）。
 
 ## 结构
 
-每个循环一个 `<slug>/` 目录，自含运行时，互不共享状态：
-
 ```
-loops/<slug>/
-├── <slug>.sh            # 定时型主轮入口：flock 防重叠 + cd ~/code + pi --mode json --print
-├── <slug>.mjs           # 常驻型入口（bun 运行时，事件源驱动）
-├── prompts/<X>.md       # 每轮 / 每会话固定 prompt
-├── .lock                # flock 文件（定时型）
-└── systemd/<slug>.{service,timer}   # 定时型；常驻型只有 .service（Restart=always）
+loops/
+├── intake/                  定时型
+│   ├── intake.sh            flock + cd ~/code + pi --mode json --print
+│   ├── prompts/scan.md      每轮固定 prompt
+│   └── systemd/intake.{service,timer}
+└── relay/                   常驻型（三平台共用一个核）
+    ├── relay.mjs            唯一入口：relay.mjs <feishu|slack|telegram> | notify <platform> <text>
+    ├── core.mjs             会话生命周期：白名单、去重、队列、worker、超时、分块、状态、日志
+    ├── chunk.mjs            分块纯函数
+    ├── platform.mjs         适配器契约（见 core 的 adapter 形状）
+    ├── adapters/<platform>.mjs
+    ├── prompts/thread.md    会话首轮模板（占位符由 core 渲染）
+    ├── migrate-state.mjs    旧 looper 状态 → relay-<platform>.json
+    ├── systemd/relay@.service
+    └── *.test.mjs           与源码同目录的用例（`node --test`）
 ```
 
-运行时日志不写仓内，见《日志与保留》。通用红线写进 prompt：写操作按 Level 分层（L0 只允许 state 水位 / daily log / 专用通知频道推送），报告先于水位提交。外部凭据（如 webhook URL）放 `~/.config/taskradar/`，不入库。
+一个平台一个进程：`relay@feishu` / `relay@slack` / `relay@telegram`，由同一个 systemd 模板实例化。核里没有平台字面量，平台差异只在 `adapters/<platform>.mjs`。
 
-## Timer 安装（定时型，per slug）
+## 安装
 
 ```bash
-for u in <slug>; do
-  ln -sf "$(pwd)/loops/<slug>/systemd/$u.service" ~/.config/systemd/user/
-  ln -sf "$(pwd)/loops/<slug>/systemd/$u.timer"  ~/.config/systemd/user/
-  systemctl --user enable --now "$u.timer"
-done
+# 定时型
+ln -sf "$(pwd)/loops/intake/systemd/intake.service" ~/.config/systemd/user/
+ln -sf "$(pwd)/loops/intake/systemd/intake.timer"   ~/.config/systemd/user/
+systemctl --user enable --now intake.timer
+
+# 常驻型（模板 unit，一次链接，按实例启用）
+ln -sf "$(pwd)/loops/relay/systemd/relay@.service" ~/.config/systemd/user/
 systemctl --user daemon-reload
+for p in feishu slack telegram; do systemctl --user enable --now "relay@$p.service"; done
+systemctl --user show -p ExecStart relay@feishu.service
 ```
 
-service 的 `ExecStart` 指向 `%h/code/agents-config/loops/<slug>/<slug>.sh`（main checkout 路径）——worktree 里调试时手动 `bash loops/<slug>/<slug>.sh`，启用 timer 前先把改动合回 main。
+`ExecStart` 必须解析成 `%h/.bun/bin/bun %h/code/agents-config/loops/relay/relay.mjs %i`。调试时在 worktree 里手动 `bun loops/relay/relay.mjs <platform>`，合并回 master 再启用 unit。
 
-## 常驻型安装（`slackd`）
+## 状态、凭据、日志
+
+- 状态：`~/.config/taskradar/relay-<platform>.json`，结构 `{ cursor, seen, convs, alerts, meta }`。写入一律经由 core 的 `writeJsonAtomic`（tmp + rename）；禁止整份覆盖写。
+- intake 的状态是独立的 `~/.config/taskradar/state.json`（四游标），常驻桥不碰它。
+- 凭据（0600，不入库）：`feishu.env`（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID`）、`slack-app.env`（`SLACK_APP_TOKEN`）、`webhook.url`（Slack 回帖，app 身份）、`.slack-xoxc.tmp`（读 Slack thread root）、`telegram.env`（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USER` / `TELEGRAM_CHANNEL_ID` / `TELEGRAM_CHAT_ID`）。
+- 环境变量统一 `RELAY_` 前缀：`RELAY_ALLOWED_USER`、`RELAY_WORKER`（默认 `pi`，`stub` 只回显）、`RELAY_TIMEOUT_MS`、`RELAY_MAX_WORKERS`、`RELAY_QUEUE_DEPTH`。
+- 日志：`~/.config/taskradar/logs/{intake,feishu,slack,telegram}/`，保留 72h（intake 每轮自清，relay 启动时与每 24h 清）。仓内禁止出现 `loops/*/logs/`。
+
+## 平台差异（由适配器承担）
+
+| 平台 | 会话 key | 入口 | 「处理中」信号 | 回帖上限 |
+|---|---|---|---|---|
+| feishu | `th-<thread/root/parent>`、无话题 `ms-<msg>`，session `fs-<key>` | 群内话题或新消息 | `THINKING` reaction（无权限时占位卡原地 PATCH） | 卡片 3000 |
+| slack | thread ts 去点，session `slack-<ts>` | `#agent-intake` 任意消息 | 无 | 3500 |
+| telegram | `ch<帖id>`，session `tg-ch<id>` | 频道 Post，讨论组评论归位 | `sendChatAction(typing)` 4s | 4096 |
+
+Slack 判活只认协议级 ping/pong：30s 无 server ping 或 10s 无 pong 即 `terminate` 重连，换连按 `approximate_connection_time × 0.8` overlap。飞书长连接是集群模式，**同一应用全局只允许一个消费者**。
+
+## 测试
 
 ```bash
-ln -sf "$(pwd)/loops/slackd/systemd/slackd.service" ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now slackd.service
-systemctl --user show -p ExecStart slackd.service
+node --test loops/relay/*.test.mjs loops/relay/adapters/*.test.mjs   # 与 `npm test`（node --test）一致
 ```
 
-只链 `.service`、不启用 timer：事件由 Slack Socket Mode 推来。`ExecStart` 必须解析成 `%h/.bun/bin/bun %h/code/agents-config/loops/<slug>/<slug>.mjs`；日志看 `journalctl --user -u slackd -n 50` 与 `~/.config/taskradar/logs/slackd/`。
+用例必须零网络、零真实状态写入（临时目录），平台 SDK 只在装配层 import；行为变更与用例同 PR。
 
-## 常驻型安装（`tgd`）
+## 新增一个平台
 
-Telegram 版：Bot API 长轮询（无 WebSocket，心跳/连接轮转/断连告警全部不需要）。凭据 `~/.config/taskradar/telegram.env`（`TELEGRAM_BOT_TOKEN`、`TELEGRAM_ALLOWED_USER` 必填，`TELEGRAM_CHAT_ID` 是频道关联的讨论组、`TELEGRAM_CHANNEL_ID` 是频道，由 `probe` 拿到后回填），chmod 600；状态 `~/.config/taskradar/tgd.json`（`offset` 游标 + 会话表 + `channelPosts` 镜像映射 + alias），日志 `~/.config/taskradar/logs/tgd/`。
-
-频道是唯一入口：频道里每个 Post 都是一条独立会话（键 `ch<帖id>`，session `tg-ch<帖id>`），频道关联的讨论组只作为评论区——Post 下的评论凭 `message_thread_id` 归到该 Post 的会话，讨论组里不属于任何 Post 的消息一律忽略。tgd 从讨论组的自动转发镜像学习 `帖id → 镜像id` 映射（重启后由下一条评论补齐），bot 的回帖 reply 到该 Post 的镜像消息、对用户评论的回复再 reply 该评论，因此始终落在同一评论线程里；镜像可能比 Post 晚几秒到达，回帖前会等它出现。单条 4096 字符自动切分成多条连续消息。
-
-`notify` 直接把候选推到频道（`TELEGRAM_CHANNEL_ID`），推送本身就是一条 Post，用户在评论区的发言即开新会话。
-
-```bash
-ln -sf "$(pwd)/loops/tgd/systemd/tgd.service" ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now tgd.service
-```
-
-手工命令：`--selftest` 跑纯函数自测；`probe` 打印最近一条消息的 chat id / 发送者 user id（首次配置用）；`notify "<文本>"` 把候选推到频道，供 intake 轮次推送用。
-
-讨论组不能用带话题的群（forum），否则无法被频道选为关联讨论组。
-
-超时与信号：单轮 worker 硬超时 `TGD_TIMEOUT_MS`（默认 90 分钟，超时对整个进程组 SIGKILL，回帖只说已终止，部分输出只在 `logs/tgd/worker-*.log`）；排队等待超时 `TGD_WAIT_MS`（默认 90 分钟，超时报「当前繁忙」）。worker 在跑期间每 `TGD_TYPING_MS`（默认 4 秒）发一次 `sendChatAction(typing)`，按 chat 共享一个定时器、多 topic 轮转，把调用压在群 20 次/分钟限额内；发送失败只记 warn，不影响本轮。
-
-## 新增一个循环
-
-1. `cp -r intake/<new-slug>` 后重命名 sh/unit 文件里的 slug
-2. 重写 `prompts/`，替换取数源头与红线（沿用"三处允许写 + Level 分层"格式）
-3. 初始化外置 state 文件（路径在 sh 的 `TASKRADAR_STATE`；按新源头定义初始水位）
-4. 日志一律写 `~/.config/taskradar/logs/<slug>/`，不要在仓内建 `logs/`
-5. 有事件源（如 Slack Socket Mode）时不要加次轮 timer，直接做常驻 service + thread 会话
-6. 常驻 service 必须 `Restart=always` + `StartLimitIntervalSec=0`，并在入口里自行补齐 `PATH`（systemd user env 缺 volta / bun）
-7. 安装（见上），`systemctl --user list-timers` 确认
+1. 写 `loops/relay/adapters/<platform>.mjs`：`createAdapter({ paths, readEnv, log })` 返回 `{ name, allowedUser, chunkLimit, timeoutMs, maxWorkers, queueDepth, worker, piBin, replyRules, start({ onMessage, core }), reply, notify?, onProgress?, onProgressDone? }`
+2. `start` 只做「事件源 → `onMessage(inbound)`」，`inbound` 带 `{ key, session, dedupeId, authorId, text, chatId, rootText, replyTo }`；不要自己写 `state.seen`（去重归 core）
+3. 会判定的逻辑（健康检查、映射、游标）抽成纯函数导出，并补用例
+4. `relay.mjs` 的 `PLATFORMS` 加一项，`systemctl --user enable --now relay@<platform>`
 
 ## 水位规则
 
-- 外置 state 文件是唯一跨轮状态；写入用「脚本内 read → 改单键 → tmp + `mv`」一步完成，禁止用编辑工具把整份快照盖回去
-- state 只放增量游标（渠道水位 / 板列基线 / 已知候选 / 上次扫描时间），不放候选台账——候选的上下文是频道消息与 thread
+- 外置 state 是唯一跨轮状态；写入用 core 的原子写，禁止把整份快照盖回去
+- state 只放增量游标与已知集合，不放候选台账——候选的上下文是频道消息与 thread
 - 失败轮/超时轮不推进水位（下轮重扫同一窗口），但异常要写进当日 daily log
 - 水位只增不减；源头重构（换频道/换列）时人工重置
-
-## 日志与保留
-
-- 路径：`~/.config/taskradar/logs/{intake,slackd}/`；`intake.sh` 每轮开始自删 72h 之前的文件，`slackd` 启动时与每 24h 各清一次
-- 仓内禁止出现 `loops/*/logs/`（`.gitignore` 仍保留该规则，但不再有目录）
-- 保留窗口 72h：JSONL 只服务「刚出了什么事」的定位；需要长久结论的写 daily log / STATE.md / topicbox
-- worker 的 stderr 与退出码落在 `logs/slackd/worker-*.log`；`thread` 会话的工具调用明细在 pi session jsonl 里（`~/.pi/agent/sessions/--home-manooog-code--/`）

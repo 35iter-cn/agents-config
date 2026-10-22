@@ -1,5 +1,5 @@
 [Unit]
-Description=intake loop: scan Slack #frontend + Frontend Tasks board (L0 read-only)
+Description=intake loop: scan Slack #frontend + Frontend Tasks board + backend issues (L0 read-only)
 
 [Service]
 Type=oneshot
