@@ -11,6 +11,14 @@ function seed(files) {
   return dir;
 }
 
+test("TC-13 slack legacy dedup array becomes a seen map", () => {
+  const dir = seed({ "slackd.json": { dedup: ["1792558469.808939", "1792560605.074029"], threads: {} } });
+  migrate({ platform: "slack", stateDir: dir });
+  const state = JSON.parse(readFileSync(join(dir, "relay-slack.json"), "utf8"));
+  assert.deepEqual(Object.keys(state.seen), ["1792558469.808939", "1792560605.074029"]);
+  assert.equal(state.seen["1792558469.808939"], true);
+});
+
 test("TC-13 slack legacy state maps dedup and threads", () => {
   const dir = seed({ "slackd.json": { dedup: { e1: "t" }, threads: { "111.222": { session: "sl-111.222" } }, alerts: { stale: 1 } } });
   const result = migrate({ platform: "slack", stateDir: dir });
