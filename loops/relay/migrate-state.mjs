@@ -13,10 +13,15 @@ export function emptyRelayState() {
   return emptyState();
 }
 
+function seenMap(dedup) {
+  if (Array.isArray(dedup)) return Object.fromEntries(dedup.filter(Boolean).map((ts) => [String(ts), true]));
+  return dedup ?? {};
+}
+
 function migrateSlack(legacy) {
   return {
     cursor: null,
-    seen: legacy.dedup ?? {},
+    seen: seenMap(legacy.dedup),
     convs: legacy.threads ?? {},
     alerts: legacy.alerts ?? {},
     meta: {},
