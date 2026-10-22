@@ -1,6 +1,6 @@
 # Intake loop — 主扫描轮（只读取数 + 候选推送）
 
-写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向 Telegram（`tgd.mjs notify`）推送候选、轮次日志。
+写操作仅限四处：外置 state.json（路径见 prompt 末尾注入）、memory daily log、向飞书群（`feishud/notify.mjs`）推送候选、轮次日志。
 
 运行实例根目录（prompt 末尾注入的那个目录）**只读**：禁止在其下创建、修改、删除任何文件或目录（含 `.tmp/`、`.cache/`）。
 
@@ -18,28 +18,28 @@
 6. 报告写入当日 memory daily log（`memory_write target=daily`），头部一行 `## intake loop <YYYY-MM-DD HH:MM>`：
    - 零新信号：一行 `sweep clean (<inspected> msgs, board unchanged, backend 无新候选)`，仍推进水位。
    - 有候选：每条一行 `[候选 <id>] 一句依据 — permalink`。
-7. 若存在候选：**一轮只发一条消息**到 Telegram 频道（`TELEGRAM_CHANNEL_ID`，bot `@hao_intake_bot` 以频道身份发 Post），内含本轮全部候选。发送命令（token 由 tgd 自己从 `~/.config/taskradar/telegram.env` 读，勿打印）：
+7. 若存在候选：**一轮只发一条消息**到飞书群（bot `Nova`，群 `tgd 桥测试`；chat id 与凭据由脚本自己从 `~/.config/taskradar/feishu.env` 读，勿打印），内含本轮全部候选。发送命令：
 
    ```bash
-   ~/.bun/bin/bun ~/code/agents-config/loops/tgd/tgd.mjs notify "<payload>"
+   ~/.bun/bin/bun ~/code/agents-config/loops/feishud/notify.mjs "<payload>"
    ```
 
-   `payload` 形如（**`[<id>]` 是硬要求**，供会话引用；Telegram 不需要 mention）：
+   `payload` 形如（**`[<id>]` 是硬要求**，供会话引用；飞书不需要 mention）：
 
    ```
-   intake loop 发现 <N> 个候选（在该 Post 的评论区发言，自然语言也行）
+   intake loop 发现 <N> 个候选（在该消息的话题里回复，自然语言也行）
    [<id1>] <一句依据>
      <permalink>
    [<id2>] <一句依据>
      <permalink>
    ```
 
-   一条消息装全部候选，不要拆成多条。发送失败（退出码非 0）时降级：daily log 一行 `[error] telegram notify <原因>`，本轮不重试。发送后**不回写任何 message id**。
+   一条消息装全部候选，不要拆成多条。发送失败（退出码非 0）时降级：daily log 一行 `[error] feishu notify <原因>`，本轮不重试。发送后**不回写任何 message id**。
 8. 更新外置 state.json：`channels.C0A51L0GAJ0` = 本轮见到的最大 ts；`lastBoardKnownIssues` = 本轮看板两列全部 issue 编号；`lastBoardScan` = 本轮 ISO 时间；报过的板外 issue url 追加进 `backendKnownCandidates`。**只允许「脚本内 read → 改这几个键 → tmp + mv」一步完成**（node/python 一行式），**禁止用 write 工具把整份快照盖回去**。临时文件必须与 state.json **同目录**（`mv` 才是原子 rename，跨文件系统会退化成拷贝），不得写到运行实例根目录。失败/出错时水位可推进但必须把异常写进 daily log。
 
 ## 语言
 
-报告与频道消息用中文；消息原文里的链接、代码、标识符逐字保留，不翻译。
+报告与群消息用中文；消息原文里的链接、代码、标识符逐字保留，不翻译。
 
 ## 边界
 
