@@ -102,6 +102,8 @@ export function createCore({ adapter, paths, deps = {} }) {
   const spawn = deps.spawn ?? spawnProcess;
   const log = deps.log ?? defaultLog;
   const state = readJsonOr(paths.stateFile, emptyState());
+  const children = new Map();
+  const notes = new Map();
   const logDir = join(paths.logDir, adapter.name);
   mkdirSync(logDir, { recursive: true });
 
@@ -166,6 +168,7 @@ export function createCore({ adapter, paths, deps = {} }) {
       let stdout = "";
       let stderr = "";
       let killed = false;
+      children.set(inbound.key, child);
       const timer = setTimeout(() => {
         killed = true;
         try {
@@ -178,11 +181,16 @@ export function createCore({ adapter, paths, deps = {} }) {
       child.on("error", (error) => stderr += `${error}\n`);
       child.on("close", async (code) => {
         clearTimeout(timer);
+        children.delete(inbound.key);
         appendLog({ event: "done", key: inbound.key, session: entry.session, exit: code, killed, elapsedMs: now() - started });
         const body = stdout.trim();
-        const text = killed
-          ? `已终止：本轮超过 ${Math.round(adapter.timeoutMs / 60_000)} 分钟未结束。\n\n${body.slice(-1500)}`.trim()
-          : body || `[无输出] exit=${code}\n${stderr.trim().split("\n").slice(-10).join("\n")}`;
+        const note = notes.get(inbound.key);
+        notes.delete(inbound.key);
+        const text = note
+          ? note
+          : killed
+            ? `已终止：本轮超过 ${Math.round(adapter.timeoutMs / 60_000)} 分钟未结束。\n\n${body.slice(-1500)}`.trim()
+            : body || `[无输出] exit=${code}\n${stderr.trim().split("\n").slice(-10).join("\n")}`;
         for (const part of chunkText(text, adapter.chunkLimit)) {
           try {
             await adapter.reply(inbound, part);
@@ -229,10 +237,25 @@ export function createCore({ adapter, paths, deps = {} }) {
     return "accepted";
   }
 
+  function cancel(key, note = "已按指令终止本轮") {
+    const child = children.get(key);
+    if (!child) return false;
+    notes.set(key, note);
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+    }
+    return true;
+  }
+
   return {
     state,
     save,
     handle,
+    cancel,
     stats: () => queue.stats(),
     pruneLogs: () => pruneOldFiles(logDir, RETENTION_MS, now()),
     log,
