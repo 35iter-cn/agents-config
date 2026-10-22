@@ -218,9 +218,9 @@ export function createCore({ adapter, paths, deps = {} }) {
     for (const key of Object.keys(state.seen)) {
       if (Object.keys(state.seen).length > 5000) delete state.seen[key];
     }
-    const entry = state.convs[inbound.key] ?? { session: inbound.session, rootText: inbound.text, lastMsgTs: null };
+    const entry = state.convs[inbound.key] ?? { session: inbound.session, rootText: inbound.rootText ?? inbound.text, lastMsgTs: null };
     entry.lastMsgTs = new Date(now()).toISOString();
-    if (!entry.rootText) entry.rootText = inbound.text;
+    if (!entry.rootText) entry.rootText = inbound.rootText ?? inbound.text;
     state.convs[inbound.key] = entry;
     save();
 
