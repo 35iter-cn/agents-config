@@ -1,8 +1,19 @@
 #!/usr/bin/env bun
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chunkText } from "../chunk.mjs";
 
 const CARD_LIMIT = 3000;
+const BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
+const CLOCK = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 const DEFAULT_ALLOWED = "ou_ce8b91019c8e721b5b47ff89b4a78fba";
 const PROGRESS_EMOJI = "THINKING";
 const PERMISSION_ERRORS = new Set([99991672, 99991663, 99991400, 1061045]);
@@ -54,6 +65,52 @@ export function toCard(text, limit = CARD_LIMIT) {
 
 export function notifyCard(text, limit = CARD_LIMIT) {
   return toCard(text, limit);
+}
+
+export function readBootId(path = BOOT_ID_PATH) {
+  try {
+    return readFileSync(path, "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function shouldAnnounceBoot(previousId, currentId) {
+  if (!currentId) return false;
+  return previousId !== currentId;
+}
+
+export function formatMinute(date) {
+  const parts = Object.fromEntries(CLOCK.formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
+export function bootNoticeText(date, format = formatMinute) {
+  return `🟢 系统已启动，Agent 已准备好接收你的任务\n上线时间：${format(date)}`;
+}
+
+export function createBootWatch({ getState, notify, save, log = () => {}, readId = readBootId, now = () => new Date() }) {
+  return async function announce() {
+    const bootId = readId();
+    if (!bootId) {
+      log("warn", "boot-notice", "no-boot-id");
+      return false;
+    }
+    const state = getState();
+    const meta = state.meta ?? (state.meta = { schemaVersion: 2 });
+    if (!shouldAnnounceBoot(meta.bootNotice?.bootId, bootId)) return false;
+    const at = now();
+    try {
+      await notify(bootNoticeText(at));
+    } catch (error) {
+      log("error", "boot-notice", String(error?.message ?? error));
+      return false;
+    }
+    meta.bootNotice = { bootId, at: at.toISOString() };
+    save();
+    log("info", "boot-notice", bootId, formatMinute(at));
+    return true;
+  };
 }
 
 export function decideProgressMode(code) {
@@ -203,7 +260,7 @@ export function textOfMessage(message) {
   }
 }
 
-export function createAdapter({ paths, readEnv, log: baseLog, createClient = defaultClientFactory, loadSdk = () => import("@larksuiteoapi/node-sdk") }) {
+export function createAdapter({ paths, readEnv, log: baseLog, createClient = defaultClientFactory, loadSdk = () => import("@larksuiteoapi/node-sdk"), readBootId: readId = readBootId }) {
   const env = { ...readEnv(join(paths.configDir, "feishu.env")), ...process.env };
   const appId = env.FEISHU_APP_ID;
   const appSecret = env.FEISHU_APP_SECRET;
@@ -242,6 +299,14 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
     coreRef?.save();
     return entry.rootText || null;
   }
+
+  const announceBoot = createBootWatch({
+    getState: () => state,
+    notify: async (text) => (await ensureRuntime()).notify(text),
+    save: () => coreRef?.save(),
+    log,
+    readId,
+  });
 
   async function ensureRuntime() {
     if (runtime) return runtime;
@@ -311,6 +376,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
         autoReconnect: true,
         onReady: () => {
           log("info", "ws-ready");
+          announceBoot().catch((error) => log("error", "boot-notice", String(error?.message ?? error)));
           onReady?.();
         },
         onError: (error) => log("error", "ws", String(error?.message ?? error)),

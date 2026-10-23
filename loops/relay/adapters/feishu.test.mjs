@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationKey, sessionFor, textOf, textOfMessage, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
+import { conversationKey, sessionFor, textOf, textOfMessage, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter, readBootId, shouldAnnounceBoot, formatMinute, bootNoticeText, createBootWatch } from "./feishu.mjs";
 
 function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 }, create = { code: 0, data: { message_id: "m-notify" } } } = {}) {
   const calls = [];
@@ -422,4 +422,119 @@ test("TC-R3 root fetch gives up after three failures", async () => {
   assert.equal(callsAfterThree, 3);
   assert.equal(calls.length, 3);
   assert.equal(seen.at(-1).rootText, null);
+});
+
+test("TC-B1 a notice fires once per boot id", () => {
+  assert.equal(shouldAnnounceBoot(undefined, "b1"), true);
+  assert.equal(shouldAnnounceBoot(null, "b1"), true);
+  assert.equal(shouldAnnounceBoot("b1", "b1"), false);
+  assert.equal(shouldAnnounceBoot("b1", "b2"), true);
+  assert.equal(shouldAnnounceBoot("b1", null), false);
+  assert.equal(shouldAnnounceBoot("b1", ""), false);
+  assert.equal(readBootId("/nonexistent/boot_id"), null);
+  assert.ok(readBootId().length > 0);
+});
+
+test("TC-B2 the notice time is rendered in Asia/Shanghai with a 00-23 hour", () => {
+  assert.equal(formatMinute(new Date("2026-10-23T22:58:00Z")), "2026-10-24 06:58");
+  assert.equal(formatMinute(new Date("2026-10-23T16:00:00Z")), "2026-10-24 00:00");
+  assert.equal(bootNoticeText(new Date("2026-10-23T22:58:00Z")), "🟢 系统已启动，Agent 已准备好接收你的任务\n上线时间：2026-10-24 06:58");
+});
+
+function bootHarness({ bootId = "b1", meta, notify = async () => {} } = {}) {
+  const state = { convs: {}, meta };
+  const sends = [];
+  const logs = [];
+  let saves = 0;
+  const announce = createBootWatch({
+    getState: () => state,
+    notify: async (text) => {
+      sends.push(text);
+      await notify(text);
+    },
+    save: () => {
+      saves += 1;
+    },
+    log: (level, ...parts) => logs.push([level, ...parts].join(" ")),
+    readId: () => bootId,
+    now: () => new Date("2026-10-23T22:58:00Z"),
+  });
+  return { state, sends, logs, announce, saves: () => saves };
+}
+
+test("TC-B3 the first ready of a boot sends one notice and records the boot id", async () => {
+  const h = bootHarness({ meta: { schemaVersion: 2 } });
+  assert.equal(await h.announce(), true);
+  assert.equal(h.sends.length, 1);
+  assert.match(h.sends[0], /系统已启动，Agent 已准备好接收你的任务/);
+  assert.deepEqual(h.state.meta.bootNotice, { bootId: "b1", at: "2026-10-23T22:58:00.000Z" });
+  assert.equal(h.saves(), 1);
+  assert.ok(h.logs.some((line) => line.includes("boot-notice") && line.includes("b1")));
+});
+
+test("TC-B3b a machine without a boot id stays silent instead of announcing never-ending", async () => {
+  const h = bootHarness({ bootId: null });
+  assert.equal(await h.announce(), false);
+  assert.equal(h.sends.length, 0);
+  assert.ok(h.logs.some((line) => line.includes("no-boot-id")));
+});
+
+test("TC-B4 restarts within the same boot stay silent and a new boot announces again", async () => {
+  const same = bootHarness({ meta: { schemaVersion: 2, bootNotice: { bootId: "b1", at: "x" } } });
+  assert.equal(await same.announce(), false);
+  assert.equal(same.sends.length, 0);
+  assert.equal(same.saves(), 0);
+  const next = bootHarness({ bootId: "b2", meta: { schemaVersion: 2, bootNotice: { bootId: "b1", at: "x" } } });
+  assert.equal(await next.announce(), true);
+  assert.equal(next.sends.length, 1);
+  assert.equal(next.state.meta.bootNotice.bootId, "b2");
+});
+
+test("TC-B5 a failed notice is logged, left unrecorded and retried on the next start", async () => {
+  const h = bootHarness({ notify: async () => { throw new Error("network down"); } });
+  assert.equal(await h.announce(), false);
+  assert.equal(h.sends.length, 1);
+  assert.equal(h.saves(), 0);
+  assert.equal(h.state.meta.bootNotice, undefined);
+  assert.ok(h.logs.some((line) => line.includes("boot-notice") && line.includes("network down")));
+});
+
+test("TC-B6 ws ready triggers exactly one boot notice through the adapter", async () => {
+  const { client, calls } = fakeClient();
+  const instances = { readyCalls: 0 };
+  const sdk = {
+    default: {
+      Client: function Client() {},
+      EventDispatcher: function EventDispatcher() {
+        this.register = () => this;
+      },
+      WSClient: function WSClient(options) {
+        this.start = () => {
+          instances.readyCalls += 1;
+          options.onReady();
+        };
+      },
+      Domain: { Feishu: "feishu" },
+      LoggerLevel: { warn: 4 },
+    },
+  };
+  const state = { convs: {}, meta: { schemaVersion: 2 } };
+  let saves = 0;
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => client,
+    loadSdk: async () => sdk,
+    readBootId: () => "b-live",
+  });
+  adapter.start({ onMessage: async () => {}, core: { state, save: () => { saves += 1; } } });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const creates = calls.filter(([name]) => name === "create");
+  assert.equal(creates.length, 1);
+  const card = JSON.parse(creates[0][1].data.content);
+  assert.match(card.body.elements[0].content, /系统已启动/);
+  assert.equal(state.meta.bootNotice.bootId, "b-live");
+  assert.equal(saves, 1);
+  assert.equal(instances.readyCalls, 1);
 });

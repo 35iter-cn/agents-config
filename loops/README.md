@@ -63,6 +63,8 @@ systemctl --user show -p ExecStart relay@feishu.service
 
 入站文本统一在适配器里剥掉 mention：飞书按 `mentions[].key`（`@_user_N` 占位符）、Slack 按 `<@U…>`、Telegram 按 `entities[]` 的 offset。**Telegram 不能扫描 `@`** —— 正文里的邮箱、链接、账号名会一起被吃掉。因此 `core.mjs` 只接收纯文本，指令判定不做任何平台兜底。代价：正文中被 @ 的人名会消失（群当前是 1:1，无第三人可指；群里出现第三者时需要重新评估）。
 
+飞书另有开机上线通知：每次开机后第一条长连接就绪（`ws-ready`）时向群推一条 `🟢 系统已启动，Agent 已准备好接收你的任务`（复用 `notify`，会 @ Hao）。去重键是 `/proc/sys/kernel/random/boot_id`，记在 `relay-feishu.json` 的 `meta.bootNotice`——同一次开机内崩溃拉起、部署重启都不重复推；发送失败不写该键，下次重启自动重试。
+
 Slack 判活只认协议级 ping/pong：30s 无 server ping 或 10s 无 pong 即 `terminate` 重连，换连按 `approximate_connection_time × 0.8` overlap。飞书长连接是集群模式，**同一应用全局只允许一个消费者**。
 
 ## job 与崩溃恢复
