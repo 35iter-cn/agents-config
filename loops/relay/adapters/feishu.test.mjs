@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationKey, sessionFor, textOf, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
+import { conversationKey, sessionFor, textOf, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
 
 function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 }, create = { code: 0, data: { message_id: "m-notify" } } } = {}) {
   const calls = [];
@@ -294,4 +294,18 @@ test("TC-28 feishu edit patches an existing message and reports failure honestly
   assert.equal(calls.at(-1)[0], "patch");
   const failing = createRuntime({ client: fakeClient({ patch: { code: 230001, msg: "no" } }).client, log: () => {}, chatId: "oc_1" });
   assert.equal(await failing.edit(inbound, "m-out", "x"), false);
+});
+
+test("mentions are stripped with mentions[].key instead of scanning for @", () => {
+  const mentions = [
+    { key: "@_user_1", name: "Nova" },
+    { key: "@_user_2", name: "Hao" },
+  ];
+  assert.equal(stripMentions("@_user_1 帮我看下 #5753", mentions), "帮我看下 #5753");
+  assert.equal(stripMentions("@_user_1 @_user_2 都看一下", mentions), "都看一下");
+  assert.equal(stripMentions("@_user_1 /重跑", mentions), "/重跑");
+  assert.equal(stripMentions("@_user_1", mentions), "");
+  assert.equal(stripMentions("没有 mention 的正文", mentions), "没有 mention 的正文");
+  assert.equal(stripMentions("@_user_1 没有映射表时原样保留", []), "@_user_1 没有映射表时原样保留");
+  assert.equal(stripMentions("邮箱 hao@example.com", mentions), "邮箱 hao@example.com");
 });

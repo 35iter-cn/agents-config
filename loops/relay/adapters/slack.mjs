@@ -10,7 +10,6 @@ const HELLO_TIMEOUT_MS = 15_000;
 const HEARTBEAT_LOG_EVERY = 3;
 const ALERT_COOLDOWN_MS = Number(process.env.RELAY_ALERT_COOLDOWN_MS ?? 30 * 60_000);
 const PASSING_SUBTYPES = ["thread_broadcast", "file_share"];
-const STOP_WORDS = ["停", "stop"];
 const CHUNK_LIMIT = 3500;
 const THREAD_RETENTION_MS = 30 * 86_400_000;
 
@@ -23,11 +22,7 @@ export const defaults = {
 };
 
 export function stripMentions(text) {
-  return String(text ?? "").replace(/<@[A-Z0-9]+>/g, "").trim();
-}
-
-export function isStop(text) {
-  return STOP_WORDS.includes(String(text ?? "").trim().toLowerCase());
+  return String(text ?? "").replace(/\s*<@[A-Z0-9]+>/g, "").trim();
 }
 
 export function sessionFor(thread) {
@@ -314,7 +309,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
         const stripped = stripMentions(event.text ?? "");
         const text = event.files?.length ? `${stripped}\n[附件]`.trim() : stripped;
         const rootText = await rootTextFor(thread);
-        if (isStop(text) && core.cancel(thread)) return;
         await onMessage({
           key: thread,
           session: sessionFor(thread),

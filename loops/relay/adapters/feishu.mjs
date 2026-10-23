@@ -28,6 +28,15 @@ export function textOf(message) {
   }
 }
 
+export function stripMentions(text, mentions = []) {
+  let out = String(text ?? "");
+  for (const mention of mentions) {
+    if (!mention?.key) continue;
+    out = out.split(`${mention.key} `).join("").split(mention.key).join("");
+  }
+  return out.trim();
+}
+
 export function isAcceptedSender(sender, allowedUser) {
   const type = sender?.sender_type ?? "";
   if (type === "app") return { ok: false, why: "bot" };
@@ -212,7 +221,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
             log("ignore", verdict.why, message.message_id ?? "");
             return { code: 0 };
           }
-          const text = textOf(message).trim();
+          const text = stripMentions(textOf(message), message.mentions);
           if (!text) {
             log("ignore", "empty", message.message_id ?? "");
             return { code: 0 };

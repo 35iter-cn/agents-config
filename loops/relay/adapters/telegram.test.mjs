@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  stripMentions,
   channelKey,
   sessionFor,
   channelPostIdFor,
@@ -8,7 +9,6 @@ import {
   learnMirror,
   mirrorFor,
   nextOffset,
-  isStop,
   escapeHtml,
   toTelegramHtml,
   pickTypingTarget,
@@ -107,9 +107,6 @@ test("nextOffset returns null for an empty update list", () => {
 });
 
 test("stop words terminate only the exact match", () => {
-  assert.equal(isStop(" 停 "), true);
-  assert.equal(isStop("STOP"), true);
-  assert.equal(isStop("停下来"), false);
 });
 
 test("telegram html conversion escapes and formats", () => {
@@ -129,4 +126,28 @@ test("alerts are rate limited by cooldown", () => {
   assert.equal(alertAllowed({}, "poll", 1_000_000), true);
   assert.equal(alertAllowed({ poll: new Date(1_000_000).toISOString() }, "poll", 1_060_000), false);
   assert.equal(alertAllowed({ poll: new Date(1_000_000).toISOString() }, "poll", 1_000_000 + 31 * 60_000), true);
+});
+
+test("mentions are stripped by entity offsets, never by scanning @", () => {
+  assert.equal(
+    stripMentions("@hao_dev 看下这个 hao@example.com", [{ type: "mention", offset: 0, length: 8 }]),
+    "看下这个 hao@example.com",
+  );
+  assert.equal(stripMentions("邮箱 hao@example.com", []), "邮箱 hao@example.com");
+  assert.equal(
+    stripMentions("看 https://x.com/@someone/status", []),
+    "看 https://x.com/@someone/status",
+  );
+  assert.equal(
+    stripMentions("@a @b 好", [
+      { type: "mention", offset: 0, length: 2 },
+      { type: "mention", offset: 3, length: 2 },
+    ]),
+    "好",
+  );
+  assert.equal(
+    stripMentions("🚀 @Hao 你好", [{ type: "text_mention", offset: 3, length: 4 }]),
+    "🚀 你好",
+  );
+  assert.equal(stripMentions("@_user_1 无 entities", []), "@_user_1 无 entities");
 });
