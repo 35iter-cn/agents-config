@@ -13,7 +13,7 @@ const PASSING_SUBTYPES = ["thread_broadcast", "file_share"];
 const CHUNK_LIMIT = 3500;
 const THREAD_RETENTION_MS = 30 * 86_400_000;
 
-export const replyRules = "- 你的 stdout 会以 app `Intake Notifier` 的身份发回本 thread（不是你本人账号）。\n- 用 Slack mrkdwn：不要用 `#` 标题、不要用 Markdown 表格；粗体 `*x*`、代码块、短列表可用。\n- 超过 3500 字符会切分成多条消息。";
+export const replyRules = "- 你的 stdout 会以 app `Intake Notifier` 的身份发回本 thread（不是你本人账号）。\n- 用 Slack mrkdwn：不要用 `#` 标题、不要用 Markdown 表格；粗体 `*x*`、代码块、短列表可用。";
 
 export const defaults = {
   channel: "C0C9N6SSH39",
@@ -275,6 +275,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
 
   const adapter = {
     name: "slack",
+    surface: "本 thread",
     allowedUser,
     chunkLimit: CHUNK_LIMIT,
     timeoutMs: Number(process.env.RELAY_TIMEOUT_MS ?? 20 * 60_000),

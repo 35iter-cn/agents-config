@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationKey, sessionFor, textOf, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
+import { conversationKey, sessionFor, textOf, textOfMessage, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
 
 function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 }, create = { code: 0, data: { message_id: "m-notify" } } } = {}) {
   const calls = [];
@@ -308,4 +308,118 @@ test("mentions are stripped with mentions[].key instead of scanning for @", () =
   assert.equal(stripMentions("没有 mention 的正文", mentions), "没有 mention 的正文");
   assert.equal(stripMentions("@_user_1 没有映射表时原样保留", []), "@_user_1 没有映射表时原样保留");
   assert.equal(stripMentions("邮箱 hao@example.com", mentions), "邮箱 hao@example.com");
+});
+
+test("TC-R0 textOfMessage extracts text, card markdown and rejects media", () => {
+  assert.equal(textOfMessage({ msg_type: "text", body: { content: '{"text":"你好"}' } }), "你好");
+  assert.equal(
+    textOfMessage({ msg_type: "interactive", body: { content: JSON.stringify({ body: { elements: [{ tag: "markdown", content: "候选一\n候选二" }] } }) } }),
+    "候选一\n候选二",
+  );
+  assert.equal(
+    textOfMessage({ msg_type: "post", body: { content: JSON.stringify({ zh_cn: { title: "标题", content: [[{ tag: "text", text: "正文" }]] } }) } }).includes("正文"),
+    true,
+  );
+  assert.equal(textOfMessage({ msg_type: "image", body: { content: '{"image_key":"k"}' } }), null);
+  assert.equal(textOfMessage(null), null);
+});
+
+function rootHarness({ get, convs = {} } = {}) {
+  const handlers = {};
+  const calls = [];
+  const client = {
+    im: {
+      v1: {
+        message: {
+          reply: async (args) => ({ code: 0, data: { message_id: "m-out" } }),
+          patch: async () => ({ code: 0 }),
+          get: async (args) => {
+            calls.push(args);
+            return get(args);
+          },
+        },
+        messageReaction: { create: async () => ({ code: 0 }), delete: async () => ({ code: 0 }) },
+      },
+    },
+  };
+  const sdk = {
+    default: {
+      Client: function Client() {},
+      EventDispatcher: function EventDispatcher() {
+        this.register = (map) => { Object.assign(handlers, map); return this; };
+      },
+      WSClient: function WSClient() { this.start = () => {}; },
+      Domain: { Feishu: "feishu" },
+      LoggerLevel: { warn: 4 },
+    },
+  };
+  const state = { convs: { ...convs }, save: () => {} };
+  const seen = [];
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => client,
+    loadSdk: async () => sdk,
+  });
+  const started = adapter.start({ onMessage: async (msg) => seen.push(msg), core: { state, save: () => {} } });
+  started.catch(() => {});
+  return { adapter, started, handlers, calls, seen, state };
+}
+
+test("TC-R1 the reply-chain root supplies rootText via user_card_content", async () => {
+  const { ready, handlers, calls, seen } = rootHarness({
+    get: async () => ({
+      code: 0,
+      data: { items: [{ msg_type: "interactive", body: { content: JSON.stringify({ body: { elements: [{ tag: "markdown", content: "候选一\n候选二" }] } }) } }] },
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await handlers["im.message.receive_v1"]({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: "om_child", root_id: "om_root", chat_id: "oc_1", message_type: "text", content: '{"text":"go"}', mentions: [] },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path.message_id, "om_root");
+  assert.equal(calls[0].params.card_msg_content_type, "user_card_content");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].rootText, "候选一\n候选二");
+});
+
+test("TC-R2 a group message without root_id never fetches a root", async () => {
+  const { ready, handlers, calls, seen } = rootHarness({ get: async () => ({ code: 0, data: { items: [] } }) });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await handlers["im.message.receive_v1"]({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: "om_solo", chat_id: "oc_1", message_type: "text", content: '{"text":"读一下"}', mentions: [] },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls.length, 0);
+  assert.equal(seen[0].rootText, null);
+});
+
+test("TC-R3 root fetch gives up after three failures", async () => {
+  let attempts = 0;
+  const { ready, handlers, calls, seen } = rootHarness({
+    get: async () => {
+      attempts += 1;
+      throw new Error("gateway down");
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const event = (id) => ({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: id, root_id: "om_root", chat_id: "oc_1", message_type: "text", content: '{"text":"go"}', mentions: [] },
+  });
+  for (const id of ["om_a", "om_b", "om_c"]) {
+    await handlers["im.message.receive_v1"](event(id));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const callsAfterThree = calls.length;
+  await handlers["im.message.receive_v1"](event("om_d"));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(callsAfterThree, 3);
+  assert.equal(calls.length, 3);
+  assert.equal(seen.at(-1).rootText, null);
 });

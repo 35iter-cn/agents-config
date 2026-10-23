@@ -7,7 +7,7 @@ const DEFAULT_ALLOWED = "ou_ce8b91019c8e721b5b47ff89b4a78fba";
 const PROGRESS_EMOJI = "THINKING";
 const PERMISSION_ERRORS = new Set([99991672, 99991663, 99991400, 1061045]);
 
-export const replyRules = "- stdout 会以 `interactive` 卡片（schema 2.0 + markdown 元素）发回本话题，超过 3000 字符切成多条卡片。\n- 用 **粗体**、`行内代码`、``` 代码围栏、• 列表；不要用 `#` 标题，不要用 Markdown 表格。\n- 超过约 3000 字不要硬塞，写到 `~/.config/taskradar/logs/feishu/` 下的文件，回帖只给路径与摘要。";
+export const replyRules = "- 用 **粗体**、`行内代码`、``` 代码围栏、• 列表；不要用 `#` 标题，不要用 Markdown 表格。";
 
 export function conversationKey(message) {
   if (message?.thread_id) return `th-${message.thread_id}`;
@@ -175,6 +175,34 @@ export async function defaultClientFactory({ appId, appSecret }) {
   });
 }
 
+export function flattenCard(node, out = []) {
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) flattenCard(item, out);
+    return out;
+  }
+  if (typeof node === "object") {
+    if (typeof node.content === "string" && node.content) out.push(node.content);
+    else if (typeof node.text === "string" && node.text) out.push(node.text);
+    else for (const value of Object.values(node)) flattenCard(value, out);
+  }
+  return out;
+}
+
+export function textOfMessage(message) {
+  const type = message?.msg_type;
+  const body = String(message?.body?.content ?? "");
+  if (!body) return null;
+  try {
+    if (type === "text") return JSON.parse(body).text ?? "";
+    if (type === "interactive") return flattenCard(JSON.parse(body)).join("\n");
+    if (type === "post") return flattenCard(JSON.parse(body)).join("\n");
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function createAdapter({ paths, readEnv, log: baseLog, createClient = defaultClientFactory, loadSdk = () => import("@larksuiteoapi/node-sdk") }) {
   const env = { ...readEnv(join(paths.configDir, "feishu.env")), ...process.env };
   const appId = env.FEISHU_APP_ID;
@@ -185,6 +213,35 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
   let state = null;
   let coreRef = null;
   let runtime = null;
+  let client = null;
+
+  async function rootTextFor(message, key) {
+    if (!state) return null;
+    const entry = state.convs[key] ?? { session: sessionFor(key), rootText: null, rootFail: 0 };
+    state.convs[key] = entry;
+    if (entry.rootText !== null && entry.rootText !== undefined) return entry.rootText || null;
+    const rootId = message.root_id ?? message.parent_id;
+    if (!rootId || rootId === message.message_id) {
+      entry.rootText = "";
+      coreRef?.save();
+      return null;
+    }
+    try {
+      const res = await client.im.v1.message.get({
+        path: { message_id: rootId },
+        params: { card_msg_content_type: "user_card_content" },
+      });
+      entry.rootText = textOfMessage(res?.data?.items?.[0]) ?? "";
+      entry.rootFail = 0;
+      log("info", "root", key, `${entry.rootText.length} chars`);
+    } catch (error) {
+      entry.rootFail = (entry.rootFail ?? 0) + 1;
+      log("error", "root-fetch", key, String(error?.message ?? error));
+      if (entry.rootFail >= 3) entry.rootText = "";
+    }
+    coreRef?.save();
+    return entry.rootText || null;
+  }
 
   async function ensureRuntime() {
     if (runtime) return runtime;
@@ -192,12 +249,14 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
       log("error", "missing-credential", "FEISHU_APP_ID / FEISHU_APP_SECRET");
       process.exit(1);
     }
-    runtime = createRuntime({ client: await createClient({ appId, appSecret }), log, chatId, allowedUser });
+    client = await createClient({ appId, appSecret });
+    runtime = createRuntime({ client, log, chatId, allowedUser });
     return runtime;
   }
 
   const adapter = {
     name: "feishu",
+    surface: "本话题",
     allowedUser,
     chunkLimit: CARD_LIMIT,
     timeoutMs: Number(process.env.RELAY_TIMEOUT_MS ?? 20 * 60_000),
@@ -227,6 +286,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
             return { code: 0 };
           }
           const key = conversationKey(message);
+          const rootText = await rootTextFor(message, key);
           const inbound = {
             key,
             session: sessionFor(key),
@@ -236,7 +296,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
             chatId: message.chat_id ?? chatId,
             messageId: message.message_id,
             threadId: message.thread_id ?? null,
-            rootText: text,
+            rootText,
           };
           onMessage(inbound).catch((error) => log("error", "handle", String(error)));
           return { code: 0 };

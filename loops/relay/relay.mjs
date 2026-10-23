@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCore, defaultLog } from "./core.mjs";
+import { createJev } from "./jev.mjs";
+import { createUsage } from "./usage.mjs";
 import { defineAdapter, isPlatform, PLATFORMS } from "./platform.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +28,8 @@ export const paths = {
   logDir: join(CFG_DIR, "logs"),
   sessionsDir: join(HOME, ".pi/agent/sessions", `--${join(HOME, "code").replace(/^\//, "").replace(/[/\\:]/g, "-")}--`),
   promptFile: join(ROOT, "prompts/thread.md"),
+  candidateRulesFile: join(ROOT, "prompts/candidate-rules.md"),
+  usageDir: join(CFG_DIR, "logs/usage"),
 };
 
 export function usage() {
@@ -60,7 +64,9 @@ async function main() {
     ...paths,
     stateFile: join(CFG_DIR, `relay-${mode}.json`),
   };
-  const core = createCore({ adapter, paths: platformPaths });
+  const jev = createJev({ env: { ...process.env, ...readEnv(join(CFG_DIR, "jev.env")) }, log: defaultLog });
+  const usage = createUsage({ dir: platformPaths.usageDir, judge: jev, log: defaultLog });
+  const core = createCore({ adapter, paths: platformPaths, deps: { jev, usage } });
   core.pruneLogs();
   setInterval(() => core.pruneLogs(), 86_400_000).unref();
   await adapter.start({

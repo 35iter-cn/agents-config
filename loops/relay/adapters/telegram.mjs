@@ -10,7 +10,7 @@ const MIRROR_TIMEOUT_MS = 30_000;
 const MIRROR_STEP_MS = 250;
 const CHUNK_LIMIT = 4096;
 
-export const replyRules = "- 4096 字符以上会被切成多条连续消息；长文本写到 `~/.config/taskradar/logs/telegram/` 下的文件，回帖只给路径与摘要。\n- 可以写 `**粗体**`、行内代码与 ``` 代码围栏（会转成 Telegram 的 HTML），不要用 Markdown 表格。";
+export const replyRules = "- 可以写 `**粗体**`、行内代码与 ``` 代码围栏（会转成 Telegram 的 HTML），不要用 Markdown 表格。";
 
 export function channelKey(postId) {
   return `ch${postId}`;
@@ -201,6 +201,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
 
   const adapter = {
     name: "telegram",
+    surface: "本 topic",
     allowedUser,
     chunkLimit: CHUNK_LIMIT,
     timeoutMs: Number(process.env.RELAY_TIMEOUT_MS ?? 90 * 60_000),
