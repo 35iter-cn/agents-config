@@ -532,3 +532,36 @@ test("TC-26 stop words cancel the running turn and answer honestly when idle", a
   assert.equal(await idle.core.handle(inbound({ dedupeId: "c", text: "/stop" })), "accepted");
   assert.match(idle.replies[0].text, /没有在跑的任务/);
 });
+
+test("TC-26 command words survive Feishu mention placeholders", async () => {
+  const cases = [
+    ["/重跑", "retry"],
+    ["@_user_1 重跑", "retry"],
+    ["@_user_1 /重跑", "retry"],
+    ["@_user_1 @_user_2 重跑", "retry"],
+    ["重跑", "retry"],
+    ["  /rerun  ", "retry"],
+    ["@_user_1 停", "stop"],
+    ["/stop", "stop"],
+    ["我们要重跑一下这个流程", null],
+    ["重跑了", null],
+  ];
+  for (const [text, expected] of cases) {
+    const state = jobState({ status: "interrupted", lease: null });
+    state.jobs["job-1"].noticeSent = true;
+    const { core, replies } = harness({ state, spawn: () => fakeChild({ stdout: "x" }) });
+    await core.handle(inbound({ dedupeId: `cmd-${text}`, text }));
+    if (expected === "retry") {
+      const created = Object.values(core.state.jobs).find((job) => job.id !== "job-1");
+      assert.ok(created, `"${text}" should retry`);
+      assert.match(created.inbound.dedupeId, /#retry1$/);
+    } else if (expected === "stop") {
+      assert.equal(core.state.seen[`cmd-${text}`], "legacy", `"${text}" should stop`);
+    } else {
+      const created = Object.values(core.state.jobs).find((job) => job.id !== "job-1");
+      assert.ok(created, `"${text}" is an ordinary message and must be accepted`);
+      assert.doesNotMatch(created.inbound.dedupeId, /#retry/, `"${text}" must not become a retry`);
+      assert.equal(created.attempts, 1);
+    }
+  }
+});
