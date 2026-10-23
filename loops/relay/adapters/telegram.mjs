@@ -198,7 +198,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     piBin: join(paths.home, ".bun/bin/pi"),
     replyRules,
 
-    async start({ onMessage, core }) {
+    async start({ onMessage, onReady, core }) {
       state = core.state;
       if (!token) {
         log("error", "missing-credential", "TELEGRAM_BOT_TOKEN");
@@ -295,6 +295,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
 
       let backoff = 1_000;
       let failures = 0;
+      let announced = false;
       for (;;) {
         try {
           await pollUpdates({
@@ -311,6 +312,10 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
           });
           backoff = 1_000;
           failures = 0;
+          if (!announced) {
+            announced = true;
+            onReady?.();
+          }
         } catch (error) {
           failures += 1;
           log("error", "poll", String(error));

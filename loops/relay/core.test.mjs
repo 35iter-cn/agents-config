@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { createCore, emptyState, renderPrompt, writeJsonAtomic, pruneOldFiles, readJsonOr } from "./core.mjs";
+import { hashOf } from "./jobs.mjs";
 
 function controlledChild() {
   const child = new EventEmitter();
@@ -31,7 +32,7 @@ function fakeChild({ stdout = "", stderr = "", code = 0, onClose } = {}) {
   return child;
 }
 
-function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyState(), sessions = [] } = {}) {
+function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyState(), sessions = [], deps = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "relay-core-"));
   const sessionsDir = join(dir, "sessions");
   mkdirSync(sessionsDir, { recursive: true });
@@ -57,7 +58,7 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   const core = createCore({
     adapter,
     paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, cwd: dir, home: dir },
-    deps: { spawn: spawn ?? (() => fakeChild({ stdout: "ok" })), log: (level, ...parts) => logs.push([level, ...parts].join(" ")) },
+    deps: { spawn: spawn ?? (() => fakeChild({ stdout: "ok" })), log: (level, ...parts) => logs.push([level, ...parts].join(" ")), ...deps },
   });
   return { core, adapter, replies, logs, dir, stateFile, sessionsDir };
 }
@@ -362,4 +363,131 @@ test("TC-23 an adapter without edit never tries to patch", async () => {
   const job = core.state.jobs[core.state.seen.m1];
   assert.equal(job.status, "done");
   assert.equal(typeof core.state.jobs[core.state.seen.m1].answer, "undefined");
+});
+
+function jobState({ status = "running", lease = null, parts = [], answer = null } = {}) {
+  const state = emptyState();
+  state.jobs["job-1"] = {
+    id: "job-1",
+    key: "th-abc",
+    session: "fs-th-abc",
+    status,
+    inbound: { text: "hello", rootText: "hello", chatId: "c1", authorId: "u-ok", dedupeId: "m1", messageId: "om_1", threadId: null, replyTo: null, channelPost: null },
+    answer,
+    parts,
+    progress: null,
+    lease,
+    noticeSent: false,
+    retriedBy: null,
+    attempts: 1,
+    createdAt: "2026-10-23T00:00:00.000Z",
+    updatedAt: "2026-10-23T00:00:00.000Z",
+    error: null,
+  };
+  state.seen.m1 = "job-1";
+  state.convs["th-abc"] = { session: "fs-th-abc", rootText: "hello", lastMsgTs: "", activeJob: "job-1" };
+  return state;
+}
+
+test("TC-21 a restart reports an interrupted run instead of rerunning it", async () => {
+  let spawned = 0;
+  const state = jobState({ lease: { pid: 999999, startTicks: "1", startedAt: 0, heartbeatAt: Date.now() } });
+  const { core, replies } = harness({
+    state,
+    spawn: () => {
+      spawned += 1;
+      return fakeChild({ stdout: "x" });
+    },
+    deps: { readStartTicks: () => null },
+  });
+  assert.equal(await core.recover(), 1);
+  assert.equal(spawned, 0, "an interrupted run is never rerun automatically");
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /被中断/);
+  assert.match(replies[0].text, /\/重跑/);
+  const job = core.state.jobs["job-1"];
+  assert.equal(job.status, "interrupted");
+  assert.equal(job.noticeSent, true);
+
+  assert.equal(await core.recover(), 0, "the second restart stays quiet");
+  assert.equal(replies.length, 1);
+});
+
+test("TC-22 a live orphan worker is killed before the run is reported", async () => {
+  const killed = [];
+  const state = jobState({ lease: { pid: 4242, startTicks: "777", startedAt: 0, heartbeatAt: Date.now() } });
+  const { core, replies } = harness({
+    state,
+    deps: { readStartTicks: () => "777", kill: (target, signal) => killed.push([target, signal]) },
+  });
+  await core.recover();
+  assert.deepEqual(killed, [[-4242, "SIGKILL"]]);
+  assert.equal(replies.length, 1);
+  assert.equal(core.state.jobs["job-1"].status, "interrupted");
+  assert.equal(core.state.jobs["job-1"].lease, null);
+});
+
+test("TC-23 a restart resends only the missing chunks without spawning", async () => {
+  let spawned = 0;
+  const delivered = [];
+  const answer = "a".repeat(45);
+  const state = jobState({
+    status: "answered",
+    answer,
+    parts: [{ i: 0, messageId: "m-1", hash: hashOf("a".repeat(20)), sentAt: "" }],
+  });
+  const { core } = harness({
+    state,
+    spawn: () => {
+      spawned += 1;
+      return fakeChild({ stdout: "x" });
+    },
+    adapterOverrides: {
+      reply: async (ctx, text) => {
+        delivered.push({ text, replyTo: ctx.replyTo });
+        return { messageId: "m-new" };
+      },
+    },
+  });
+  await core.recover();
+  assert.equal(spawned, 0);
+  assert.deepEqual(delivered.map((entry) => entry.text.length), [20, 5]);
+  assert.equal(delivered[0].replyTo, "m-1");
+  assert.equal(core.state.jobs["job-1"].status, "done");
+});
+
+test("TC-20 a queued job left by a crash is picked up again", async () => {
+  const state = emptyState();
+  state.jobs["job-1"] = {
+    id: "job-1",
+    key: "th-abc",
+    session: "fs-th-abc",
+    status: "queued",
+    inbound: { text: "hello", rootText: "hello", chatId: "c1", authorId: "u-ok", dedupeId: "m1", messageId: "om_1", threadId: null, replyTo: null, channelPost: null },
+    answer: null,
+    parts: [],
+    progress: null,
+    lease: null,
+    noticeSent: false,
+    retriedBy: null,
+    attempts: 1,
+    createdAt: "2026-10-23T00:00:00.000Z",
+    updatedAt: "2026-10-23T00:00:00.000Z",
+    error: null,
+  };
+  state.seen.m1 = "job-1";
+  let spawned = 0;
+  const { core, replies } = harness({
+    state,
+    spawn: () => {
+      spawned += 1;
+      return fakeChild({ stdout: "resumed answer" });
+    },
+  });
+  await core.recover();
+  await tick();
+  assert.equal(spawned, 1);
+  assert.equal(core.state.jobs["job-1"].status, "done");
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /resumed answer/);
 });

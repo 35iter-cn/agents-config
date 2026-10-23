@@ -3,9 +3,10 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statS
 import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { chunkText } from "./chunk.mjs";
-import { createJob, ctxOf, hashOf, isFinished, planParts, readProcStartTicks } from "./jobs.mjs";
+import { createJob, ctxOf, hashOf, isFinished, nextAction, planParts, readProcStartTicks } from "./jobs.mjs";
 
 const HEARTBEAT_MS = 15_000;
+const LEASE_TTL_MS = 45_000;
 
 const RETENTION_MS = 72 * 3_600_000;
 const SEEN_RETENTION_MS = 72 * 3_600_000;
@@ -90,6 +91,7 @@ export function createCore({ adapter, paths, deps = {} }) {
   const now = deps.now ?? (() => Date.now());
   const spawn = deps.spawn ?? spawnProcess;
   const readStartTicks = deps.readStartTicks ?? readProcStartTicks;
+  const kill = deps.kill ?? ((target, signal) => process.kill(target, signal));
   const log = deps.log ?? defaultLog;
   const state = upgradeState(readJsonOr(paths.stateFile, emptyState()));
   const children = new Map();
@@ -318,6 +320,75 @@ export function createCore({ adapter, paths, deps = {} }) {
     }
   }
 
+  const INTERRUPT_NOTICE = "上一轮处理被中断（进程重启）。这条消息可能未完成，也可能已经产生了部分改动。回复 /重跑 可重新执行。";
+
+  async function interrupt(job) {
+    if (!job.noticeSent) {
+      try {
+        await adapter.reply(ctxOf(job), INTERRUPT_NOTICE);
+      } catch (error) {
+        log("error", "interrupt-reply", String(error?.message ?? error));
+      }
+      try {
+        await adapter.onProgressDone?.(ctxOf(job));
+      } catch (error) {
+        log("warn", "progress-done", String(error?.message ?? error));
+      }
+      job.noticeSent = true;
+    }
+    job.status = "interrupted";
+    job.lease = null;
+    job.answer = undefined;
+    job.progress = null;
+    job.updatedAt = isoNow();
+    save();
+    appendLog({ event: "interrupted", job: job.id, key: job.key });
+  }
+
+  async function recover() {
+    const at = now();
+    const canEdit = typeof adapter.edit === "function";
+    let touched = 0;
+    for (const job of Object.values(state.jobs)) {
+      if (isFinished(job) || job.status === "interrupted") {
+        if (state.inbox.includes(job.id)) state.inbox = state.inbox.filter((id) => id !== job.id);
+        continue;
+      }
+      const action = nextAction(job, { now: at, leaseTtlMs: LEASE_TTL_MS, canEdit, chunkLimit: adapter.chunkLimit, readStartTicks });
+      if (action.type === "rerun") {
+        if (!state.inbox.includes(job.id)) state.inbox.push(job.id);
+        touched += 1;
+        continue;
+      }
+      if (action.type === "reap-then-interrupt") {
+        try {
+          kill(-action.pid, "SIGKILL");
+        } catch (error) {
+          log("warn", "reap", String(error?.message ?? error));
+        }
+        await interrupt(job);
+        touched += 1;
+        continue;
+      }
+      if (action.type === "interrupt") {
+        await interrupt(job);
+        touched += 1;
+        continue;
+      }
+      if (action.type === "resend") {
+        await deliver(job);
+        touched += 1;
+        continue;
+      }
+      job.answer = undefined;
+      job.progress = null;
+      touched += 1;
+    }
+    if (touched) save();
+    drainInbox();
+    return touched;
+  }
+
   async function handle(inbound) {
     if (adapter.allowedUser && inbound.authorId && inbound.authorId !== adapter.allowedUser) {
       log("ignore", "author", inbound.authorId);
@@ -389,6 +460,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     state,
     save,
     handle,
+    recover,
     cancel,
     stats: () => ({ running: running.size, pending: state.inbox.length }),
     pruneLogs: () => pruneOldFiles(logDir, RETENTION_MS, now()),

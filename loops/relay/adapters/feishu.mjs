@@ -198,7 +198,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
     piBin: join(paths.home, ".bun/bin/pi"),
     replyRules,
 
-    async start({ onMessage, core }) {
+    async start({ onMessage, onReady, core }) {
       coreRef = core;
       state = core.state;
       await ensureRuntime();
@@ -240,7 +240,10 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
         domain: lark.default.Domain.Feishu,
         loggerLevel: lark.default.LoggerLevel.warn,
         autoReconnect: true,
-        onReady: () => log("info", "ws-ready"),
+        onReady: () => {
+          log("info", "ws-ready");
+          onReady?.();
+        },
         onError: (error) => log("error", "ws", String(error?.message ?? error)),
       });
 
