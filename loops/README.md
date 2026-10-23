@@ -45,7 +45,7 @@ systemctl --user show -p ExecStart relay@feishu.service
 
 ## 状态、凭据、日志
 
-- 状态：`~/.config/taskradar/relay-<platform>.json`，结构 `{ cursor, seen, convs, alerts, meta }`。写入一律经由 core 的 `writeJsonAtomic`（tmp + rename）；禁止整份覆盖写。
+- 状态：`~/.config/taskradar/relay-<platform>.json`，结构 `{ cursor, seen, convs, alerts, meta, jobs, inbox }`（`meta.schemaVersion = 2`）。写入一律经由 core 的 `writeJsonAtomic`（tmp + rename）；禁止整份覆盖写。
 - intake 的状态是独立的 `~/.config/taskradar/state.json`（四游标），常驻桥不碰它。
 - 凭据（0600，不入库）：`feishu.env`（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID`）、`slack-app.env`（`SLACK_APP_TOKEN`）、`webhook.url`（Slack 回帖，app 身份）、`.slack-xoxc.tmp`（读 Slack thread root）、`telegram.env`（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USER` / `TELEGRAM_CHANNEL_ID` / `TELEGRAM_CHAT_ID`）。
 - 环境变量统一 `RELAY_` 前缀：`RELAY_ALLOWED_USER`、`RELAY_WORKER`（默认 `pi`，`stub` 只回显）、`RELAY_TIMEOUT_MS`、`RELAY_MAX_WORKERS`、`RELAY_QUEUE_DEPTH`。
@@ -61,11 +61,36 @@ systemctl --user show -p ExecStart relay@feishu.service
 
 Slack 判活只认协议级 ping/pong：30s 无 server ping 或 10s 无 pong 即 `terminate` 重连，换连按 `approximate_connection_time × 0.8` overlap。飞书长连接是集群模式，**同一应用全局只允许一个消费者**。
 
+## job 与崩溃恢复
+
+每一条入站消息落成一个 job，状态机在 `jobs.mjs`，事实存在 state 文件里：
+
+| 状态 | 含义 | 重启后的动作 |
+|---|---|---|
+| `queued` | 已受理、未派发 | 自动重跑（无任何副作用） |
+| `running` | worker 在跑（带 `lease.pid` / `startTicks` / 心跳） | 判孤儿：活着就 SIGKILL 进程组，然后发中断告知；**不自动重跑** |
+| `answered` | 正文已落盘、未发完 | 按 `parts[].hash` 只补发缺失块，不重新跑模型 |
+| `done` / `failed` / `cancelled` / `interrupted` | 终态 | 清理（`done` 时清空正文） |
+
+要点：
+
+- **先落盘再产生副作用**：受理先写 job，worker 退出先写 `answer` 再回帖，每块回帖成功才写 `parts`。
+- **恰好一次**：`seen[dedupeId]` 指向 job id，重复投递只会推进同一个 job；`parts[].hash` 让已发内容不重发。
+- **重跑由人决定**：`running` 被打断时不自动重做（worker 里的写操作不可幂等）。回复 `/重跑`（或 `/rerun`）把最近一个 `interrupted` job 变成新 attempt，`dedupeId` 加 `#retry<n>`。
+- **停止**：`停`、`stop`、`/stop` 取消当前轮。
+- 恢复扫描在适配器 `onReady` 之后执行一次（`relay.mjs`），因此崩溃后第一件事是把没跑完的 job 收敛掉。
+
+## 升级
+
+`scripts/relay-upgrade.sh <platform>`：先轮询 state 直到无 `queued|running|answered`（上限 `RELAY_UPGRADE_WAIT`，默认 1200s），再 restart unit，10s 后探活；失败打印 journal 尾部并以非 0 退出。不要在等待窗口里手工 `systemctl stop` 后再串后续命令——历史事故原因见 topicbox spec 01 Notes。
+
 ## 测试
 
 ```bash
-node --test loops/relay/*.test.mjs loops/relay/adapters/*.test.mjs   # 与 `npm test`（node --test）一致
+node --test loops/relay/*.test.mjs loops/relay/adapters/*.test.mjs
 ```
+
+不要用 `npm test`：`package.json` 声明了 `packageManager: pnpm@...`，corepack 会拦截 `npm` 并联网下载 pnpm，在 WSL 上静默挂住。
 
 用例必须零网络、零真实状态写入（临时目录），平台 SDK 只在装配层 import；行为变更与用例同 PR。
 
