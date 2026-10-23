@@ -100,49 +100,45 @@ function runWith(state, args = {}) {
     .then((record) => ({ record, seen }));
 }
 
-test("TC-U6 root text precedes the turn text in the judged state", async () => {
+test("TC-U6 state keeps start message before the turn message", async () => {
   const { seen } = await runWith({ text: "再查一下", rootText: "你 5 分钟向我汇报一下进度" });
   const state = seen[0].state;
+  assert.ok(state.indexOf("【话题起始消息】") < state.indexOf("【本轮用户消息】"));
   assert.ok(state.indexOf("你 5 分钟") < state.indexOf("再查一下"));
-  assert.ok(state.includes("=== agent 产出"));
+  assert.ok(state.includes("【agent 本轮回答（仅供参考，不是用户请求）】"));
 });
 
-test("TC-U7 root equal to turn text is not duplicated", async () => {
-  const { seen } = await runWith({ text: "看下这个", rootText: "看下这个" });
+test("TC-U7 start message equal to the turn is not duplicated", async () => {
+  const { seen } = await runWith({ text: "早上好", rootText: "早上好" });
   const state = seen[0].state;
-  assert.equal(state.split("看下这个").length - 1, 1);
+  assert.equal(state.split("早上好").length - 1, 1);
+  assert.ok(state.includes("(无，本级即话题起点)"));
 });
 
-test("TC-U8 answer is truncated to 500 chars while answerHead stays 200", async () => {
+test("TC-U8 answer is truncated to 400 chars while answerHead stays 200", async () => {
   const { record, seen } = await runWith({ text: "t" }, { answer: "x".repeat(1200) });
-  assert.ok(seen[0].state.endsWith("x".repeat(500)));
+  assert.ok(seen[0].state.endsWith("x".repeat(400)));
   assert.equal(record.answerHead.length, 200);
 });
 
-test("TC-U9 criteria spells out tooling and greeting boundaries", async () => {
+test("TC-U9 criteria carries the asset list and the exclusion list", async () => {
   const { seen } = await runWith({ text: "t" });
-  assert.match(seen[0].criteria.magic_work, /公司工具链/);
-  assert.match(seen[0].criteria.non_magic, /纯问候/);
+  const magicWork = seen[0].criteria.magic_work;
+  assert.match(magicWork, /agents-config/);
+  assert.match(magicWork, /MD STACK/);
+  assert.match(magicWork, /明确不属于/);
+  assert.match(magicWork, /纯问候/);
 });
 
-test("TC-U10 magic asset keyword decides without calling the judge", async () => {
-  const { record, seen } = await runWith({ text: "把 MD STACK 里的 owner-portal 重启一下" });
+test("TC-U10 instructions tell the model to resolve pronouns from earlier turns", async () => {
+  const { seen } = await runWith({ text: "t" });
+  assert.match(seen[0].instructions, /指代/);
+  assert.match(seen[0].instructions, /前几轮/);
+  assert.match(seen[0].instructions, /不算 magic_work/);
+});
+
+test("TC-U11 judge is always consulted for done runs", async () => {
+  const { seen, record } = await runWith({ text: "早上好" });
+  assert.equal(seen.length, 1);
   assert.equal(record.magic, "magic_work");
-  assert.equal(record.confidence, 1);
-  assert.equal(record.judgeSource, "rule");
-  assert.equal(seen.length, 0);
-});
-
-test("TC-U11 greeting only decides non_magic without calling the judge", async () => {
-  const { record, seen } = await runWith({ text: "早上好！" });
-  assert.equal(record.magic, "non_magic");
-  assert.equal(record.judgeSource, "rule");
-  assert.equal(seen.length, 0);
-});
-
-test("TC-U12 root context drives the rule layer", async () => {
-  const { record, seen } = await runWith({ text: "再查一下", rootText: "Company Portal 的 HEIC 上传问题继续跟" });
-  assert.equal(record.magic, "magic_work");
-  assert.equal(record.judgeSource, "rule");
-  assert.equal(seen.length, 0);
 });

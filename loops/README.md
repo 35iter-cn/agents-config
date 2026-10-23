@@ -50,8 +50,8 @@ systemctl --user show -p ExecStart relay@feishu.service
 - 凭据（0600，不入库）：`feishu.env`（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID`）、`slack-app.env`（`SLACK_APP_TOKEN`）、`webhook.url`（Slack 回帖，app 身份）、`.slack-xoxc.tmp`（读 Slack thread root）、`telegram.env`（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USER` / `TELEGRAM_CHANNEL_ID` / `TELEGRAM_CHAT_ID`）。
 - 环境变量统一 `RELAY_` 前缀：`RELAY_ALLOWED_USER`、`RELAY_WORKER`（默认 `pi`，`stub` 只回显）、`RELAY_TIMEOUT_MS`、`RELAY_MAX_WORKERS`、`RELAY_QUEUE_DEPTH`。
 - 日志：`~/.config/taskradar/logs/{intake,feishu,slack,telegram}/`，保留 72h（intake 每轮自清，relay 启动时与每 24h 清）。仓内禁止出现 `loops/*/logs/`。
-- 运行记录：`~/.config/taskradar/logs/usage/<YYYY-MM-DD>.jsonl`，`deliver()` 收尾后一行一次。字段 `ts/jobId/platform/key/session/startedAt/endedAt/durationMs/status/inputChars/answerChars/answerHead/magic/confidence/fallback/judgeSource`。`magic` 四个取值：`magic_work` / `non_magic` / `unknown`（判了但未定，看 `fallback` 的 `low-confidence`/`timeout`/`circuit`/`nokey`）/ `unjudged`（非 `done` 终态，`fallback` 保留 `failed`/`cancelled`/`interrupted`）。`judgeSource` 区分 `rule`（规则命中，confidence 恒为 1）/ `jev`（模型判定）/ `null`（未判）。
-- 归属判定两层：先跑规则（会话 root + 本轮文本命中 MagicDoor 资产词 → `magic_work`；纯问候 → `non_magic`），不命中才调 Jev；Jev 输入为 root（截 1500）+ 本轮 + 回答前 500 字，且回答标注为「仅上下文，不作为归属依据」。
+- 运行记录：`~/.config/taskradar/logs/usage/<YYYY-MM-DD>.jsonl`，`deliver()` 收尾后一行一次。字段 `ts/jobId/platform/key/session/startedAt/endedAt/durationMs/status/inputChars/answerChars/answerHead/magic/confidence/fallback`。`magic` 四个取值：`magic_work` / `non_magic` / `unknown`（判了但未定，看 `fallback` 的 `low-confidence`/`timeout`/`circuit`/`nokey`）/ `unjudged`（非 `done` 终态，`fallback` 保留 `failed`/`cancelled`/`interrupted`）。
+- 归属判定只依赖 Jev，不走正则：state 分三段（`【话题起始消息】` / `【本轮用户消息】` / `【agent 本轮回答（仅供参考，不是用户请求）】`，回答截 400 字），criteria 里带 MagicDoor 资产清单（仓库、口语简称、内部系统、业务对象、明确不属于的四类），instructions 要求用前几轮消息解析「上一轮」「这个模式」这类指代。
 
 ## 平台差异（由适配器承担）
 

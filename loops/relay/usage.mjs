@@ -2,17 +2,23 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ANSWER_HEAD_CHARS = 200;
-const MAGIC_STATE_CHARS = 500;
+const MAGIC_STATE_CHARS = 400;
 const MAGIC_CONTEXT_CHARS = 1_500;
 
+const MAGIC_ASSETS = `- 代码仓库：backend、company-portal、owner-portal、tenant-portal、magic-manager、frontend-common-module、agents-config（内部 agent 配置与工具）
+- 用户口语简称：op repo / op env（owner-portal 那套）、MD STACK / md（本地全套环境）
+- 内部系统：relay 与 intake loop（飞书 / Slack / Telegram 桥）、Frontend Tasks 看板、MagicDoor 工时表、Jev 判断层、topicbox
+- 业务对象：property / manager / owner / tenant / vendor 门户、contribution、payment method、Plaid / Payabli 集成
+- 明确不属于：影视与闲聊、纯问候、个人网络与设备排障（路由器 / VPN / 本机网络）、个人配置仓库（自己的 rules 文件）`;
+
 const MAGIC_CRITERIA = {
-  magic_work: "MagicDoor 相关的代码、issue、PR、看板、工时、内部系统与公司工具链（含 relay / agents-config 这类内部基础设施）",
-  non_magic: "与 MagicDoor 业务无关：影视与闲聊、纯问候、个人网络与设备排障、个人配置仓库",
-  unknown: "用户请求里没有任何可判定归属的信息",
+  magic_work: `用户这一轮的请求指向下面清单里的任何资产、仓库、系统或业务对象，包括通过指代（「上一轮」「这个模式」「那个 bug」）承接前几轮正在做的清单内工作。\n\n${MAGIC_ASSETS}`,
+  non_magic: "用户这一轮的请求与清单完全无关：影视、闲聊、纯问候、个人网络与设备排障、个人配置仓库",
+  unknown: "从起始消息、前几轮与本轮请求都看不出指向清单内或清单外",
 };
 
-const MAGIC_ASSET = /magicdoor|md\s*stack|\bop repo\b|owner[-\s]?portal|company[-\s]?portal|tenant[-\s]?portal|magic[-\s]?manager|frontend[-\s]?common[-\s]?module/i;
-const GREETING_ONLY = /^(早|早上好|上午好|中午好|下午好|晚上好|晚安|你好|在吗|hi|hello|hey|yo)[\s!！。.,，~]*$/i;
+const MAGIC_INSTRUCTIONS =
+  "判断用户这一轮的请求指向什么。短指令或指代词要靠前几轮用户消息解析出它在指哪件事。回答只是 agent 做了什么，用户打招呼或聊无关话题时即使回答里出现清单中的名字也不算 magic_work。";
 
 export function createUsage(deps = {}) {
   const clock = deps.now ?? (() => Date.now());
@@ -21,35 +27,29 @@ export function createUsage(deps = {}) {
   const judge = deps.judge ?? null;
   const write = deps.write ?? appendFileSync;
 
-  function judgeContext(job) {
+  function judgeState(job, answer) {
     const text = String(job?.inbound?.text ?? "");
     const root = String(job?.inbound?.rootText ?? "");
-    return root && root !== text ? `${root.slice(0, MAGIC_CONTEXT_CHARS)}\n\n---\n\n${text}` : text;
-  }
-
-  function ruleVerdict(context) {
-    const trimmed = context.trim();
-    if (GREETING_ONLY.test(trimmed)) return { magic: "non_magic", confidence: 1, fallback: null, judgeSource: "rule" };
-    if (MAGIC_ASSET.test(trimmed)) return { magic: "magic_work", confidence: 1, fallback: null, judgeSource: "rule" };
-    return null;
+    const start = root && root !== text ? root.slice(0, MAGIC_CONTEXT_CHARS) : "(无，本级即话题起点)";
+    return [
+      `【话题起始消息】\n${start}`,
+      `【本轮用户消息】\n${text}`,
+      `【agent 本轮回答（仅供参考，不是用户请求）】\n${String(answer ?? "").slice(0, MAGIC_STATE_CHARS)}`,
+    ].join("\n\n");
   }
 
   async function judgeMagic(job, answer) {
-    const context = judgeContext(job);
-    const byRule = ruleVerdict(context);
-    if (byRule) return byRule;
-    if (typeof judge?.judgeChoice !== "function") return { magic: "unknown", confidence: null, fallback: "nokey", judgeSource: "jev" };
+    if (typeof judge?.judgeChoice !== "function") return { magic: "unknown", confidence: null, fallback: "nokey" };
     const verdict = await judge.judgeChoice({
       id: "run-magic",
-      state: `${context}\n\n=== agent 产出（仅上下文，不作为归属依据）===\n${String(answer ?? "").slice(0, MAGIC_STATE_CHARS)}`,
-      instructions: "只看会话根消息与本轮用户请求判断归属；用户只是打招呼或问无关话题时，不得因为回答提到 MagicDoor 就判 magic_work。",
+      state: judgeState(job, answer),
+      instructions: MAGIC_INSTRUCTIONS,
       criteria: MAGIC_CRITERIA,
     });
     return {
       magic: verdict.choice ?? "unknown",
       confidence: verdict.confidence ?? null,
       fallback: verdict.fallback ?? null,
-      judgeSource: "jev",
     };
   }
 
@@ -61,7 +61,7 @@ export function createUsage(deps = {}) {
       const output = String(answer ?? "");
       const judged = status === "done"
         ? await judgeMagic(job, output)
-        : { magic: "unjudged", confidence: null, fallback: status, judgeSource: null };
+        : { magic: "unjudged", confidence: null, fallback: status };
       const record = {
         ts: new Date(endedAt).toISOString(),
         jobId: job?.id ?? null,
@@ -77,7 +77,6 @@ export function createUsage(deps = {}) {
         magic: judged.magic,
         confidence: judged.confidence,
         fallback: judged.fallback,
-        judgeSource: judged.judgeSource,
       };
       if (status === "done") record.answerHead = output.slice(0, ANSWER_HEAD_CHARS);
       mkdirSync(dir, { recursive: true });
