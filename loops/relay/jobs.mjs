@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { chunkText } from "./chunk.mjs";
 
 export const DEFAULT_LEASE_TTL_MS = 45_000;
-export const FINISHED_STATUSES = new Set(["done", "failed", "cancelled"]);
+export const FINISHED_STATUSES = new Set(["done", "failed", "cancelled", "interrupted"]);
 
 export function hashOf(text) {
   return createHash("sha256").update(String(text)).digest("hex").slice(0, 16);
@@ -14,9 +14,16 @@ export function isFinished(job) {
   return FINISHED_STATUSES.has(job?.status);
 }
 
+function highestJobSeq(state) {
+  const existing = Object.keys(state.jobs ?? {})
+    .map((id) => Number(String(id).replace(/^job-/, "")))
+    .filter((value) => Number.isFinite(value));
+  return Math.max(Number(state.meta?.jobSeq ?? 0), 0, ...existing);
+}
+
 export function createJob(state, inbound, nowIso = () => new Date().toISOString()) {
   state.meta = state.meta ?? {};
-  const seq = Number(state.meta.jobSeq ?? 0) + 1;
+  const seq = highestJobSeq(state) + 1;
   state.meta.jobSeq = seq;
   const at = nowIso();
   return {

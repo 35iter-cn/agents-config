@@ -20,6 +20,13 @@ function job(overrides = {}) {
   return { ...createJob({ meta: {} }, inbound, nowIso), ...overrides };
 }
 
+test("createJob never reuses an id that already exists in state", () => {
+  const state = { meta: {}, jobs: { "job-7": { id: "job-7" } } };
+  const job = createJob(state, inbound, nowIso);
+  assert.equal(job.id, "job-8");
+  assert.equal(state.meta.jobSeq, 8);
+});
+
 test("createJob allocates a monotonic sequence and serializable inbound", () => {
   const state = { meta: {} };
   const first = createJob(state, inbound, nowIso);

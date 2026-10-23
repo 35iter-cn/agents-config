@@ -491,3 +491,44 @@ test("TC-20 a queued job left by a crash is picked up again", async () => {
   assert.equal(replies.length, 1);
   assert.match(replies[0].text, /resumed answer/);
 });
+
+test("TC-26 /重跑 turns the last interrupted job into a new attempt", async () => {
+  const state = jobState({ status: "interrupted", lease: null });
+  state.jobs["job-1"].noticeSent = true;
+  const { core, replies } = harness({ state, spawn: () => fakeChild({ stdout: "retried" }) });
+  assert.equal(await core.handle(inbound({ dedupeId: "cmd-1", text: "/重跑" })), "accepted");
+  const retried = Object.values(core.state.jobs).find((job) => job.id !== "job-1");
+  assert.ok(retried, "a new job is created");
+  assert.match(retried.inbound.dedupeId, /#retry1$/);
+  assert.equal(retried.attempts, 2);
+  assert.equal(core.state.jobs["job-1"].retriedBy, retried.id);
+  await tick();
+  assert.equal(retried.status, "done");
+  assert.match(replies.at(-1).text, /retried/);
+});
+
+test("TC-26 /重跑 without an interrupted job replies instead of creating work", async () => {
+  const { core, replies } = harness();
+  assert.equal(await core.handle(inbound({ dedupeId: "cmd-2", text: "/rerun" })), "accepted");
+  assert.equal(Object.keys(core.state.jobs).length, 0);
+  assert.match(replies[0].text, /没有可重跑/);
+});
+
+test("TC-26 stop words cancel the running turn and answer honestly when idle", async () => {
+  const spawned = [];
+  const { core, replies } = harness({
+    spawn: () => {
+      const child = controlledChild();
+      spawned.push(child);
+      return child;
+    },
+  });
+  await core.handle(inbound({ dedupeId: "a" }));
+  assert.equal(await core.handle(inbound({ dedupeId: "b", text: "停" })), "accepted");
+  assert.equal(core.state.jobs[core.state.seen.a].status, "cancelled");
+  assert.equal(core.state.seen.b, "legacy");
+
+  const idle = harness();
+  assert.equal(await idle.core.handle(inbound({ dedupeId: "c", text: "/stop" })), "accepted");
+  assert.match(idle.replies[0].text, /没有在跑的任务/);
+});

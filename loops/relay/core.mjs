@@ -320,6 +320,88 @@ export function createCore({ adapter, paths, deps = {} }) {
     }
   }
 
+  function parseCommand(text) {
+    const trimmed = String(text ?? "").trim();
+    const lower = trimmed.toLowerCase();
+    if (lower === "停" || lower === "stop" || /^\/stop(@\w+)?$/.test(lower)) return "stop";
+    if (/^\/重跑$/.test(trimmed) || /^\/rerun(@\w+)?$/i.test(trimmed)) return "retry";
+    return null;
+  }
+
+  function ctxFor(inbound, job) {
+    if (job) return ctxOf(job);
+    return {
+      jobId: null,
+      key: inbound.key,
+      chatId: inbound.chatId ?? null,
+      messageId: inbound.messageId ?? null,
+      threadId: inbound.threadId ?? null,
+      replyTo: inbound.replyTo ?? null,
+      progress: null,
+      text: inbound.text,
+      rootText: inbound.rootText ?? inbound.text,
+    };
+  }
+
+  async function runStop(inbound) {
+    const activeId = state.convs[inbound.key]?.activeJob;
+    const job = activeId ? state.jobs[activeId] : null;
+    const cancelled = cancel(inbound.key);
+    if (job && job.status === "running") {
+      job.status = "cancelled";
+      job.lease = null;
+      job.updatedAt = isoNow();
+    }
+    state.seen[inbound.dedupeId] = "legacy";
+    save();
+    appendLog({ event: "stop", key: inbound.key, cancelled, job: job?.id ?? null });
+    if (!cancelled) {
+      try {
+        await adapter.reply(ctxFor(inbound, job), "当前没有在跑的任务。");
+      } catch (error) {
+        log("error", "stop-reply", String(error?.message ?? error));
+      }
+    }
+    return "accepted";
+  }
+
+  async function runRetry(inbound) {
+    const target = Object.values(state.jobs)
+      .filter((job) => job.key === inbound.key && job.status === "interrupted")
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+    if (!target) {
+      try {
+        await adapter.reply(ctxFor(inbound, null), "这个会话没有可重跑的中断任务。");
+      } catch (error) {
+        log("error", "retry-reply", String(error?.message ?? error));
+      }
+      return "accepted";
+    }
+    const attempt = Number(target.attempts ?? 1) + 1;
+    const retryInbound = {
+      ...target.inbound,
+      key: target.key,
+      session: target.session,
+      dedupeId: `${target.inbound.dedupeId}#retry${attempt - 1}`,
+      authorId: inbound.authorId ?? target.inbound.authorId,
+      chatId: inbound.chatId ?? target.inbound.chatId,
+      messageId: inbound.messageId ?? target.inbound.messageId,
+      threadId: inbound.threadId ?? target.inbound.threadId,
+    };
+    const job = createJob(state, retryInbound, isoNow);
+    job.attempts = attempt;
+    state.jobs[job.id] = job;
+    state.inbox.push(job.id);
+    state.seen[retryInbound.dedupeId] = job.id;
+    state.seen[inbound.dedupeId] = job.id;
+    target.retriedBy = job.id;
+    target.updatedAt = isoNow();
+    save();
+    appendLog({ event: "retry", job: job.id, from: target.id, key: job.key });
+    drainInbox();
+    return "accepted";
+  }
+
   const INTERRUPT_NOTICE = "上一轮处理被中断（进程重启）。这条消息可能未完成，也可能已经产生了部分改动。回复 /重跑 可重新执行。";
 
   async function interrupt(job) {
@@ -394,6 +476,16 @@ export function createCore({ adapter, paths, deps = {} }) {
       log("ignore", "author", inbound.authorId);
       return "ignored";
     }
+    const command = parseCommand(inbound.text);
+    if (command) {
+      const knownCommand = state.seen[inbound.dedupeId];
+      if (knownCommand && knownCommand !== "legacy") {
+        log("ignore", "duplicate-command", inbound.dedupeId);
+        return "duplicate";
+      }
+      return command === "stop" ? runStop(inbound) : runRetry(inbound);
+    }
+
     const known = state.seen[inbound.dedupeId];
     if (known === "legacy") {
       log("ignore", "duplicate-legacy", inbound.dedupeId);

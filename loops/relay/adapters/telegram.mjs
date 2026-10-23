@@ -220,7 +220,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       };
 
       const dispatch = async (key, message, text, extra = {}) => {
-        if (isStop(text) && core.cancel(key)) return;
         const inbound = {
           key,
           session: sessionFor(key),
