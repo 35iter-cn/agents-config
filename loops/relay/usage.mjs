@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ANSWER_HEAD_CHARS = 200;
-const MAGIC_STATE_CHARS = 400;
+const MAGIC_ANSWER_CHARS = 400;
 const MAGIC_CONTEXT_CHARS = 1_500;
 
 const MAGIC_ASSETS = `- 代码仓库：backend、company-portal、owner-portal、tenant-portal、magic-manager、frontend-common-module、agents-config（内部 agent 配置与工具）
@@ -18,7 +18,7 @@ const MAGIC_CRITERIA = {
 };
 
 const MAGIC_INSTRUCTIONS =
-  "判断用户这一轮的请求指向什么。短指令或指代词要靠前几轮用户消息解析出它在指哪件事。回答只是 agent 做了什么，用户打招呼或聊无关话题时即使回答里出现清单中的名字也不算 magic_work。";
+  "判断用户这一轮的请求指向什么。短指令与「上一轮」「这个模式」这类指代词，要靠话题起始消息和 agent 本轮回答反推出它在指哪件事。回答只是 agent 做了什么，用户打招呼或聊无关话题时即使回答里出现清单中的名字也不算 magic_work。";
 
 export function createUsage(deps = {}) {
   const clock = deps.now ?? (() => Date.now());
@@ -34,7 +34,7 @@ export function createUsage(deps = {}) {
     return [
       `【话题起始消息】\n${start}`,
       `【本轮用户消息】\n${text}`,
-      `【agent 本轮回答（仅供参考，不是用户请求）】\n${String(answer ?? "").slice(0, MAGIC_STATE_CHARS)}`,
+      `【agent 本轮回答（仅供参考，不是用户请求）】\n${String(answer ?? "").slice(0, MAGIC_ANSWER_CHARS)}`,
     ].join("\n\n");
   }
 

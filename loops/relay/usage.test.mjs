@@ -130,14 +130,15 @@ test("TC-U9 criteria carries the asset list and the exclusion list", async () =>
   assert.match(magicWork, /纯问候/);
 });
 
-test("TC-U10 instructions tell the model to resolve pronouns from earlier turns", async () => {
+test("TC-U10 instructions point the model at the inputs it actually has", async () => {
   const { seen } = await runWith({ text: "t" });
   assert.match(seen[0].instructions, /指代/);
-  assert.match(seen[0].instructions, /前几轮/);
+  assert.match(seen[0].instructions, /话题起始消息/);
   assert.match(seen[0].instructions, /不算 magic_work/);
+  assert.doesNotMatch(seen[0].instructions, /前几轮/);
 });
 
-test("TC-U11 judge is always consulted for done runs", async () => {
+test("TC-U11 done runs record the judge verdict", async () => {
   const { seen, record } = await runWith({ text: "早上好" });
   assert.equal(seen.length, 1);
   assert.equal(record.magic, "magic_work");
