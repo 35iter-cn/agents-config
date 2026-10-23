@@ -152,7 +152,17 @@ export function createRuntime({ client, log, chatId, allowedUser = DEFAULT_ALLOW
   return runtime;
 }
 
-export function createAdapter({ paths, readEnv, log: baseLog }) {
+export async function defaultClientFactory({ appId, appSecret }) {
+  const lark = await import("@larksuiteoapi/node-sdk");
+  return new lark.default.Client({
+    appId,
+    appSecret,
+    domain: lark.default.Domain.Feishu,
+    loggerLevel: lark.default.LoggerLevel.warn,
+  });
+}
+
+export function createAdapter({ paths, readEnv, log: baseLog, createClient = defaultClientFactory, loadSdk = () => import("@larksuiteoapi/node-sdk") }) {
   const env = { ...readEnv(join(paths.configDir, "feishu.env")), ...process.env };
   const appId = env.FEISHU_APP_ID;
   const appSecret = env.FEISHU_APP_SECRET;
@@ -162,6 +172,16 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
   let state = null;
   let coreRef = null;
   let runtime = null;
+
+  async function ensureRuntime() {
+    if (runtime) return runtime;
+    if (!appId || !appSecret) {
+      log("error", "missing-credential", "FEISHU_APP_ID / FEISHU_APP_SECRET");
+      process.exit(1);
+    }
+    runtime = createRuntime({ client: await createClient({ appId, appSecret }), log, chatId, allowedUser });
+    return runtime;
+  }
 
   const adapter = {
     name: "feishu",
@@ -177,13 +197,8 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     async start({ onMessage, core }) {
       coreRef = core;
       state = core.state;
-      if (!appId || !appSecret) {
-        log("error", "missing-credential", "FEISHU_APP_ID / FEISHU_APP_SECRET");
-        process.exit(1);
-      }
-      const lark = await import("@larksuiteoapi/node-sdk");
-      const client = new lark.default.Client({ appId, appSecret, domain: lark.default.Domain.Feishu, loggerLevel: lark.default.LoggerLevel.warn });
-      runtime = createRuntime({ client, log, chatId, allowedUser });
+      await ensureRuntime();
+      const lark = await loadSdk();
 
       const dispatcher = new lark.default.EventDispatcher({}).register({
         "im.message.receive_v1": async (data) => {
@@ -247,19 +262,19 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     },
 
     async reply(inbound, text) {
-      await runtime.reply(inbound, text);
+      await (await ensureRuntime()).reply(inbound, text);
     },
 
     async onProgress(inbound) {
-      return runtime.onProgress(inbound);
+      return (await ensureRuntime()).onProgress(inbound);
     },
 
     async onProgressDone(inbound) {
-      return runtime.onProgressDone(inbound);
+      return (await ensureRuntime()).onProgressDone(inbound);
     },
 
     async notify(text) {
-      const id = await runtime.notify(text);
+      const id = await (await ensureRuntime()).notify(text);
       process.stdout.write(`sent ${id ? 1 : 0}\n`);
     },
   };

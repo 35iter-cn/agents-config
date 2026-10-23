@@ -229,3 +229,46 @@ test("TC-N4 a platform error surfaces the code instead of being swallowed", asyn
     captured.restore();
   }
 });
+
+test("TC-N3 notify then start() shares one client and one websocket", async () => {
+  let created = 0;
+  const { client } = fakeClient();
+  const instances = { ws: 0, dispatchers: 0 };
+  const sdk = {
+    default: {
+      Client: function Client() {},
+      EventDispatcher: function EventDispatcher() {
+        instances.dispatchers += 1;
+        this.register = () => this;
+      },
+      WSClient: function WSClient() {
+        instances.ws += 1;
+        this.start = () => {};
+      },
+      Domain: { Feishu: "feishu" },
+      LoggerLevel: { warn: 4 },
+    },
+  };
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => {
+      created += 1;
+      return client;
+    },
+    loadSdk: async () => sdk,
+  });
+  const captured = captureStdout();
+  try {
+    await adapter.notify("先 notify");
+  } finally {
+    captured.restore();
+  }
+  adapter.start({ onMessage: async () => {}, core: { state: { convs: {} }, save: () => {} } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(created, 1);
+  assert.equal(instances.ws, 1);
+  assert.equal(instances.dispatchers, 1);
+  assert.equal(captured.out.join(""), "sent 1\n");
+});
