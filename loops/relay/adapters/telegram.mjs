@@ -8,7 +8,6 @@ const WAIT_TIMEOUT_MS = Number(process.env.RELAY_WAIT_MS ?? 90 * 60_000);
 const ALERT_COOLDOWN_MS = Number(process.env.RELAY_ALERT_COOLDOWN_MS ?? 30 * 60_000);
 const MIRROR_TIMEOUT_MS = 30_000;
 const MIRROR_STEP_MS = 250;
-const STOP_WORDS = ["停", "stop"];
 const CHUNK_LIMIT = 4096;
 
 export const replyRules = "- 4096 字符以上会被切成多条连续消息；长文本写到 `~/.config/taskradar/logs/telegram/` 下的文件，回帖只给路径与摘要。\n- 可以写 `**粗体**`、行内代码与 ``` 代码围栏（会转成 Telegram 的 HTML），不要用 Markdown 表格。";
@@ -72,8 +71,21 @@ export async function pollUpdates({ api, cursor, handle, save, timeoutSeconds = 
   return { cursor: next, count: updates?.length ?? 0 };
 }
 
-export function isStop(text) {
-  return STOP_WORDS.includes(String(text ?? "").trim().toLowerCase());
+export function stripMentions(text, entities = []) {
+  const spans = (entities ?? [])
+    .filter((entity) => entity?.type === "mention" || entity?.type === "text_mention")
+    .map((entity) => [entity.offset, entity.offset + entity.length])
+    .sort((a, b) => b[0] - a[0]);
+  let out = String(text ?? "");
+  for (const [start, end] of spans) {
+    if (start < 0 || end > out.length) continue;
+    let from = start;
+    let to = end;
+    if (out[to] === " ") to += 1;
+    else if (out[from - 1] === " ") from -= 1;
+    out = out.slice(0, from) + out.slice(to);
+  }
+  return out.trim();
 }
 
 export function escapeHtml(text) {
@@ -259,7 +271,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
         if (String(message.chat?.id) !== String(chatId)) return log("ignore", "chat", message.chat?.id);
         if (message.from?.is_bot) return log("ignore", "bot", message.from?.id);
         if (String(message.from?.id) !== String(allowedUser)) return log("ignore", "author", message.from?.id);
-        const text = (message.text ?? "").trim();
+        const text = stripMentions(message.text ?? "", message.entities);
         if (!text) return log("ignore", "empty", message.message_id);
         let key = resolveCommentKey(message.message_thread_id, state.meta.channelPosts);
         if (!key) {
@@ -274,7 +286,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       const handleChannelPost = async (post) => {
         if (!channelId) return log("ignore", "channel-post-noid", post.message_id);
         if (String(post.chat?.id) !== String(channelId)) return log("ignore", "channel", post.chat?.id);
-        const text = (post.text ?? "").trim();
+        const text = stripMentions(post.text ?? "", post.entities);
         if (!text) return log("ignore", "channel-empty", post.message_id);
         await dispatch(channelKey(post.message_id), post, text, { channelPost: post.message_id, rootText: text });
       };

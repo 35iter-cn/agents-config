@@ -328,7 +328,7 @@ export function createCore({ adapter, paths, deps = {} }) {
   }
 
   function parseCommand(text) {
-    const trimmed = String(text ?? "").trim().replace(/^(@_user_\d+\s*)+/, "").trim();
+    const trimmed = String(text ?? "").trim();
     const lower = trimmed.toLowerCase();
     if (lower === "停" || lower === "stop" || /^\/stop(@\w+)?$/.test(lower)) return "stop";
     if (trimmed === "重跑" || /^\/重跑$/.test(trimmed) || /^\/rerun(@\w+)?$/i.test(trimmed)) return "retry";

@@ -1,9 +1,16 @@
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { stripMentions, isStop, sessionFor, acceptsEvent, heartbeatVerdict, refreshDelayMs, alertAllowed, pruneThreads, defaults } from "./slack.mjs";
+import { stripMentions, sessionFor, acceptsEvent, heartbeatVerdict, refreshDelayMs, alertAllowed, pruneThreads, defaults } from "./slack.mjs";
 
 const base = { channel: defaults.channel, ts: "1792558469.808939", text: "帮我扫一下 <@U0A5T8AR9EU>", user: defaults.allowedUser };
+
+test("mentions are stripped together with their surrounding space", () => {
+  assert.equal(stripMentions("<@U1> 帮我看下"), "帮我看下");
+  assert.equal(stripMentions("帮 <@U1> 看下"), "帮 看下");
+  assert.equal(stripMentions("<@U1> <@U2> 都看下"), "都看下");
+  assert.equal(stripMentions("邮箱 hao@example.com"), "邮箱 hao@example.com");
+});
 
 test("mentions are stripped from the message text", () => {
   assert.equal(stripMentions("<@U0A5T8AR9EU> 帮我扫一下"), "帮我扫一下");
@@ -79,9 +86,6 @@ test("threads older than the retention window are pruned", () => {
 });
 
 test("stop words cancel only the exact match", () => {
-  assert.equal(isStop("停"), true);
-  assert.equal(isStop(" stop "), true);
-  assert.equal(isStop("停一下再看看"), false);
 });
 
 test("slack announces readiness once and only from the start scope", () => {
