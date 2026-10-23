@@ -65,8 +65,8 @@ async function main() {
     stateFile: join(CFG_DIR, `relay-${mode}.json`),
   };
   const jev = createJev({ env: { ...process.env, ...readEnv(join(CFG_DIR, "jev.env")) }, log: defaultLog });
-  const usage = createUsage({ dir: platformPaths.usageDir, judge: jev, log: defaultLog });
-  const core = createCore({ adapter, paths: platformPaths, deps: { jev, usage } });
+  const usageRecorder = createUsage({ dir: platformPaths.usageDir, judge: jev, log: defaultLog });
+  const core = createCore({ adapter, paths: platformPaths, deps: { jev, usage: usageRecorder } });
   core.pruneLogs();
   setInterval(() => core.pruneLogs(), 86_400_000).unref();
   await adapter.start({

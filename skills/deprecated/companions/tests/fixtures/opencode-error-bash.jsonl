@@ -1,1 +1,0 @@
-{"type":"tool_use","part":{"type":"tool","tool":"bash","callID":"call-1","state":{"status":"error","input":{"command":"exit 2"},"error":"failed"}}}
