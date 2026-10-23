@@ -2,7 +2,23 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ANSWER_HEAD_CHARS = 200;
-const MAGIC_STATE_CHARS = 1_000;
+const MAGIC_ANSWER_CHARS = 400;
+const MAGIC_CONTEXT_CHARS = 1_500;
+
+const MAGIC_ASSETS = `- 代码仓库：backend、company-portal、owner-portal、tenant-portal、magic-manager、frontend-common-module、agents-config（内部 agent 配置与工具）
+- 用户口语简称：op repo / op env（owner-portal 那套）、MD STACK / md（本地全套环境）
+- 内部系统：relay 与 intake loop（飞书 / Slack / Telegram 桥）、Frontend Tasks 看板、MagicDoor 工时表、Jev 判断层、topicbox
+- 业务对象：property / manager / owner / tenant / vendor 门户、contribution、payment method、Plaid / Payabli 集成
+- 明确不属于：影视与闲聊、纯问候、个人网络与设备排障（路由器 / VPN / 本机网络）、个人配置仓库（自己的 rules 文件）`;
+
+const MAGIC_CRITERIA = {
+  magic_work: `用户这一轮的请求指向下面清单里的任何资产、仓库、系统或业务对象，包括通过指代（「上一轮」「这个模式」「那个 bug」）承接前几轮正在做的清单内工作。\n\n${MAGIC_ASSETS}`,
+  non_magic: "用户这一轮的请求与清单完全无关：影视、闲聊、纯问候、个人网络与设备排障、个人配置仓库",
+  unknown: "从起始消息、前几轮与本轮请求都看不出指向清单内或清单外",
+};
+
+const MAGIC_INSTRUCTIONS =
+  "判断用户这一轮的请求指向什么。短指令与「上一轮」「这个模式」这类指代词，要靠话题起始消息和 agent 本轮回答反推出它在指哪件事。回答只是 agent 做了什么，用户打招呼或聊无关话题时即使回答里出现清单中的名字也不算 magic_work。";
 
 export function createUsage(deps = {}) {
   const clock = deps.now ?? (() => Date.now());
@@ -11,17 +27,24 @@ export function createUsage(deps = {}) {
   const judge = deps.judge ?? null;
   const write = deps.write ?? appendFileSync;
 
-  async function judgeMagic(text, answer) {
+  function judgeState(job, answer) {
+    const text = String(job?.inbound?.text ?? "");
+    const root = String(job?.inbound?.rootText ?? "");
+    const start = root && root !== text ? root.slice(0, MAGIC_CONTEXT_CHARS) : "(无，本级即话题起点)";
+    return [
+      `【话题起始消息】\n${start}`,
+      `【本轮用户消息】\n${text}`,
+      `【agent 本轮回答（仅供参考，不是用户请求）】\n${String(answer ?? "").slice(0, MAGIC_ANSWER_CHARS)}`,
+    ].join("\n\n");
+  }
+
+  async function judgeMagic(job, answer) {
     if (typeof judge?.judgeChoice !== "function") return { magic: "unknown", confidence: null, fallback: "nokey" };
     const verdict = await judge.judgeChoice({
       id: "run-magic",
-      state: `${text}\n\n---\n\n${answer.slice(0, MAGIC_STATE_CHARS)}`,
-      instructions: "这一轮 agent 在做的事，是否属于 MagicDoor 的工作？",
-      criteria: {
-        magic_work: "处理 MagicDoor 相关事务：代码、issue、PR、看板、工时、内部系统、公司工具",
-        non_magic: "与 MagicDoor 无关：个人事务、其他项目、闲聊、环境杂务",
-        unknown: "信息不足以判断",
-      },
+      state: judgeState(job, answer),
+      instructions: MAGIC_INSTRUCTIONS,
+      criteria: MAGIC_CRITERIA,
     });
     return {
       magic: verdict.choice ?? "unknown",
@@ -37,8 +60,8 @@ export function createUsage(deps = {}) {
       const input = String(job?.inbound?.text ?? "");
       const output = String(answer ?? "");
       const judged = status === "done"
-        ? await judgeMagic(input, output)
-        : { magic: "unknown", confidence: null, fallback: status };
+        ? await judgeMagic(job, output)
+        : { magic: "unjudged", confidence: null, fallback: status };
       const record = {
         ts: new Date(endedAt).toISOString(),
         jobId: job?.id ?? null,
