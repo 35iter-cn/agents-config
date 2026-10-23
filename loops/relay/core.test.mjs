@@ -133,7 +133,7 @@ test("TC-6 state writes are atomic and leave no temp files behind", async () => 
   await tick();
   const leftovers = readdirSync(dir).filter((name) => name.includes(".tmp-"));
   assert.deepEqual(leftovers, []);
-  assert.deepEqual(Object.keys(readJsonOr(stateFile, {})), ["cursor", "seen", "convs", "alerts", "meta"]);
+  assert.deepEqual(Object.keys(readJsonOr(stateFile, {})), ["cursor", "seen", "convs", "alerts", "meta", "jobs", "inbox"]);
 });
 
 test("TC-7 log files older than 72h are pruned, fresh ones kept", () => {
@@ -178,4 +178,30 @@ test("reply failures are logged and do not throw", async () => {
 test("renderPrompt replaces every placeholder", () => {
   assert.equal(renderPrompt("{{a}}-{{b}}", { a: 1, b: "x" }), "1-x");
   assert.equal(renderPrompt("no placeholders", {}), "no placeholders");
+});
+
+test("TC-24 a duplicate for an unfinished job resumes it instead of dropping it", async () => {
+  const { core, replies } = harness({ adapterOverrides: { maxWorkers: 0, queueDepth: 5 } });
+  assert.equal(await core.handle(inbound()), "accepted");
+  const jobId = core.state.seen.m1;
+  assert.equal(core.state.jobs[jobId].status, "queued");
+  assert.equal(await core.handle(inbound()), "accepted");
+  assert.equal(core.state.inbox.filter((id) => id === jobId).length, 1);
+  assert.equal(replies.length, 0);
+});
+
+test("TC-24 a duplicate for a finished job is dropped", async () => {
+  const { core } = harness();
+  assert.equal(await core.handle(inbound()), "accepted");
+  await tick();
+  assert.equal(core.state.jobs[core.state.seen.m1].status, "done");
+  assert.equal(await core.handle(inbound()), "duplicate");
+});
+
+test("legacy seen values are treated as already answered", async () => {
+  const { core } = harness({ state: { cursor: null, seen: { old: "2026-01-01T00:00:00.000Z" }, convs: {}, alerts: {}, meta: {} } });
+  assert.equal(core.state.seen.old, "legacy");
+  assert.equal(core.state.meta.schemaVersion, 2);
+  assert.equal(await core.handle(inbound({ dedupeId: "old" })), "duplicate");
+  assert.deepEqual(core.state.jobs, {});
 });
