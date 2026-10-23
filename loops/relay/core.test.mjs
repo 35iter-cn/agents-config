@@ -6,6 +6,16 @@ import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { createCore, emptyState, renderPrompt, writeJsonAtomic, pruneOldFiles, readJsonOr } from "./core.mjs";
 
+function controlledChild() {
+  const child = new EventEmitter();
+  child.pid = 999999;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  child.finish = (code = 0) => child.emit("close", code);
+  return child;
+}
+
 function fakeChild({ stdout = "", stderr = "", code = 0, onClose } = {}) {
   const child = new EventEmitter();
   child.pid = 999999;
@@ -204,4 +214,51 @@ test("legacy seen values are treated as already answered", async () => {
   assert.equal(core.state.meta.schemaVersion, 2);
   assert.equal(await core.handle(inbound({ dedupeId: "old" })), "duplicate");
   assert.deepEqual(core.state.jobs, {});
+});
+
+test("TC-25 two messages in one conversation never run at the same time", async () => {
+  const spawned = [];
+  const { core } = harness({
+    spawn: () => {
+      const child = controlledChild();
+      spawned.push(child);
+      return child;
+    },
+  });
+  assert.equal(await core.handle(inbound({ dedupeId: "m1" })), "accepted");
+  assert.equal(spawned.length, 1);
+  assert.equal(await core.handle(inbound({ dedupeId: "m2" })), "accepted");
+  assert.equal(spawned.length, 1, "second message waits for the first to finish");
+  assert.deepEqual(core.stats(), { running: 1, pending: 1 });
+
+  spawned[0].stdout.emit("data", "first");
+  spawned[0].finish(0);
+  await tick();
+  assert.equal(spawned.length, 2, "second message starts once the first is done");
+  assert.equal(core.state.jobs[core.state.seen.m1].status, "done");
+  assert.equal(core.state.jobs[core.state.seen.m2].status, "running");
+
+  spawned[1].stdout.emit("data", "second");
+  spawned[1].finish(0);
+  await tick();
+  assert.equal(core.state.jobs[core.state.seen.m2].status, "done");
+  assert.equal(core.state.convs["th-abc"].activeJob, null);
+});
+
+test("TC-25 different conversations run in parallel up to maxWorkers", async () => {
+  const spawned = [];
+  const { core } = harness({
+    spawn: () => {
+      const child = controlledChild();
+      spawned.push(child);
+      return child;
+    },
+  });
+  await core.handle(inbound({ dedupeId: "a", key: "k1", session: "fs-k1" }));
+  await core.handle(inbound({ dedupeId: "b", key: "k2", session: "fs-k2" }));
+  assert.equal(spawned.length, 2);
+  assert.equal(core.stats().running, 2);
+  spawned.forEach((child) => child.finish(0));
+  await tick();
+  assert.equal(core.stats().running, 0);
 });

@@ -243,9 +243,20 @@ export function createCore({ adapter, paths, deps = {} }) {
       });
   }
 
+  function keyIsBusy(key) {
+    const activeId = state.convs[key]?.activeJob;
+    if (!activeId) return false;
+    const holder = state.jobs[activeId];
+    return Boolean(holder) && !isFinished(holder);
+  }
+
   function drainInbox() {
     while (running.size < adapter.maxWorkers) {
-      const index = state.inbox.findIndex((id) => state.jobs[id]?.status === "queued");
+      const index = state.inbox.findIndex((id) => {
+        const job = state.jobs[id];
+        if (!job || job.status !== "queued") return false;
+        return !keyIsBusy(job.key);
+      });
       if (index < 0) return;
       const [jobId] = state.inbox.splice(index, 1);
       startJob(state.jobs[jobId]);
