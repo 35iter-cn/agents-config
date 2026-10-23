@@ -3,7 +3,9 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statS
 import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { chunkText } from "./chunk.mjs";
-import { createJob, isFinished } from "./jobs.mjs";
+import { createJob, isFinished, readProcStartTicks } from "./jobs.mjs";
+
+const HEARTBEAT_MS = 15_000;
 
 const RETENTION_MS = 72 * 3_600_000;
 const SEEN_RETENTION_MS = 72 * 3_600_000;
@@ -87,6 +89,7 @@ export function isRetained(nowMs, mtimeMs, retentionMs = RETENTION_MS) {
 export function createCore({ adapter, paths, deps = {} }) {
   const now = deps.now ?? (() => Date.now());
   const spawn = deps.spawn ?? spawnProcess;
+  const readStartTicks = deps.readStartTicks ?? readProcStartTicks;
   const log = deps.log ?? defaultLog;
   const state = upgradeState(readJsonOr(paths.stateFile, emptyState()));
   const children = new Map();
@@ -180,6 +183,15 @@ export function createCore({ adapter, paths, deps = {} }) {
       let stderr = "";
       let killed = false;
       children.set(inbound.key, child);
+      job.lease = { pid: child.pid ?? null, startTicks: child.pid ? readStartTicks(child.pid) : null, startedAt: now(), heartbeatAt: now() };
+      job.updatedAt = isoNow();
+      save();
+      const heartbeat = setInterval(() => {
+        if (job.status !== "running" || !job.lease) return;
+        job.lease.heartbeatAt = now();
+        save();
+      }, HEARTBEAT_MS);
+      heartbeat.unref?.();
       const timer = setTimeout(() => {
         killed = true;
         try {
@@ -192,6 +204,7 @@ export function createCore({ adapter, paths, deps = {} }) {
       child.on("error", (error) => stderr += `${error}\n`);
       child.on("close", async (code) => {
         clearTimeout(timer);
+        clearInterval(heartbeat);
         children.delete(inbound.key);
         appendLog({ event: "done", job: job.id, key: inbound.key, session: entry.session, exit: code, killed, elapsedMs: now() - started });
         const body = stdout.trim();
@@ -202,21 +215,36 @@ export function createCore({ adapter, paths, deps = {} }) {
           : killed
             ? `已终止：本轮超过 ${Math.round(adapter.timeoutMs / 60_000)} 分钟未结束。\n\n${body.slice(-1500)}`.trim()
             : body || `[无输出] exit=${code}\n${stderr.trim().split("\n").slice(-10).join("\n")}`;
-        for (const part of chunkText(text, adapter.chunkLimit)) {
-          try {
-            await adapter.reply(inbound, part);
-          } catch (error) {
-            log("error", "reply", String(error?.message ?? error));
-            break;
-          }
-        }
-        adapter.onProgressDone?.(inbound);
-        job.status = note ? "cancelled" : killed || code !== 0 ? "failed" : "done";
+        job.answer = text;
+        job.status = note ? "cancelled" : killed || code !== 0 ? "failed" : "answered";
+        job.lease = null;
         job.updatedAt = isoNow();
+        save();
+        await deliver(job, inbound);
         runtimeInbounds.delete(job.id);
         resolve();
       });
     });
+  }
+
+  async function deliver(job, inbound) {
+    const text = job.answer ?? "";
+    for (const part of chunkText(text, adapter.chunkLimit)) {
+      try {
+        await adapter.reply(inbound, part);
+      } catch (error) {
+        log("error", "reply", String(error?.message ?? error));
+        break;
+      }
+    }
+    adapter.onProgressDone?.(inbound);
+    if (job.status === "answered") {
+      job.status = "done";
+      job.answer = undefined;
+    }
+    job.updatedAt = isoNow();
+    save();
+    return job.status;
   }
 
   function startJob(job) {
@@ -224,6 +252,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     entry.activeJob = job.id;
     state.convs[job.key] = entry;
     job.status = "running";
+    job.lease = { pid: null, startTicks: null, startedAt: now(), heartbeatAt: now() };
     job.updatedAt = isoNow();
     running.add(job.id);
     save();

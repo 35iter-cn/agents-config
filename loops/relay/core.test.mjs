@@ -262,3 +262,48 @@ test("TC-25 different conversations run in parallel up to maxWorkers", async () 
   await tick();
   assert.equal(core.stats().running, 0);
 });
+
+test("TC-20 a queued job walks queued → running → answered → done", async () => {
+  const observed = [];
+  let core;
+  const built = harness({
+    adapterOverrides: {
+      reply: async () => {
+        const job = Object.values(core.state.jobs)[0];
+        observed.push({ status: job.status, answer: job.answer });
+      },
+    },
+  });
+  core = built.core;
+  assert.equal(await core.handle(inbound()), "accepted");
+  const job = Object.values(core.state.jobs)[0];
+  assert.equal(job.status, "running");
+  assert.equal(typeof job.lease.pid, "number");
+  await tick();
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].status, "answered", "the answer is committed before it is shown");
+  assert.equal(observed[0].answer, "ok");
+  assert.equal(job.status, "done");
+  assert.equal(job.lease, null);
+});
+
+test("TC-27 a done job drops the answer body but keeps its parts", async () => {
+  const { core, stateFile } = harness();
+  await core.handle(inbound());
+  await tick();
+  const job = core.state.jobs[core.state.seen.m1];
+  assert.equal(job.status, "done");
+  assert.equal(job.answer, undefined);
+  assert.ok(Array.isArray(job.parts));
+  const onDisk = readJsonOr(stateFile, {});
+  assert.equal(onDisk.jobs[core.state.seen.m1].answer, undefined);
+});
+
+test("TC-27 a failed job keeps its answer for diagnosis", async () => {
+  const { core } = harness({ spawn: () => fakeChild({ stdout: "", code: 2 }) });
+  await core.handle(inbound());
+  await tick();
+  const job = core.state.jobs[core.state.seen.m1];
+  assert.equal(job.status, "failed");
+  assert.match(job.answer, /无输出/);
+});
