@@ -72,6 +72,8 @@ node --test loops/relay/*.test.mjs loops/relay/adapters/*.test.mjs   # 与 `npm 
 ## 新增一个平台
 
 1. 写 `loops/relay/adapters/<platform>.mjs`：`createAdapter({ paths, readEnv, log })` 返回 `{ name, allowedUser, chunkLimit, timeoutMs, maxWorkers, queueDepth, worker, piBin, replyRules, start({ onMessage, core }), reply, notify?, onProgress?, onProgressDone? }`
+   - `notify` 是可选能力，但**必须在 `start()` 之前可调用**：`relay.mjs notify <platform> <text>` 只加载适配器、不调 `start()`，intake 定时轮依赖这条路径。
+   - 平台 SDK（client）一律懒建并经依赖注入（`createClient` / `loadSdk`），不得在模块作用域构造，否则单文件的 `notify` 会把整个常驻桥的初始化拖进来。
 2. `start` 只做「事件源 → `onMessage(inbound)`」，`inbound` 带 `{ key, session, dedupeId, authorId, text, chatId, rootText, replyTo }`；不要自己写 `state.seen`（去重归 core）
 3. 会判定的逻辑（健康检查、映射、游标）抽成纯函数导出，并补用例
 4. `relay.mjs` 的 `PLATFORMS` 加一项，`systemctl --user enable --now relay@<platform>`
