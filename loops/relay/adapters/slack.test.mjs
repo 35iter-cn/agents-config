@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { stripMentions, isStop, sessionFor, acceptsEvent, heartbeatVerdict, refreshDelayMs, alertAllowed, pruneThreads, defaults } from "./slack.mjs";
 
@@ -81,4 +82,12 @@ test("stop words cancel only the exact match", () => {
   assert.equal(isStop("停"), true);
   assert.equal(isStop(" stop "), true);
   assert.equal(isStop("停一下再看看"), false);
+});
+
+test("slack announces readiness once and only from the start scope", () => {
+  const source = readFileSync(new URL("./slack.mjs", import.meta.url), "utf8");
+  const helloBlock = source.slice(source.indexOf('if (envelope.type === "hello")'), source.indexOf('if (envelope.type === "disconnect")'));
+  assert.doesNotMatch(helloBlock, /onReady/);
+  assert.match(source, /let readyAnnounced = false;/);
+  assert.match(source, /if \(!readyAnnounced\) \{/);
 });

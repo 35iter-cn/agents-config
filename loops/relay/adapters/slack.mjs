@@ -233,7 +233,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
         log("info", "hello", `${envelope.num_connections ?? 1} conn`, `lifetime=${Math.round(conn.lifetimeMs / 1_000)}s`, `refresh=${Math.round(refreshIn / 1_000)}s`);
         conn.refreshTimer = setTimeout(() => conn.shutdown("refresh"), refreshIn);
         conn.onHello?.();
-        onReady?.();
         return;
       }
       if (envelope.type === "disconnect") {
@@ -342,12 +341,17 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       let backoff = 1_000;
       let conn = null;
       let authAlerts = 0;
+      let readyAnnounced = false;
       for (;;) {
         if (!conn) {
           try {
             conn = await connect(await openSocket(), (event) => {
               handle(event).catch((error) => log("error", "handle", String(error)));
             });
+            if (!readyAnnounced) {
+              readyAnnounced = true;
+              onReady?.();
+            }
           } catch (error) {
             log("error", "connect", String(error));
             const authFailure = String(error).includes("invalid_auth") || String(error).includes("not_authed");
