@@ -83,7 +83,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
   let coreRef = null;
   let webhookUrl = null;
   let cookies = null;
-  const chains = new WeakMap();
 
   function readCookies() {
     const lines = readFileSync(join(paths.configDir, ".slack-xoxc.tmp"), "utf8").split("\n").map((line) => line.trim()).filter(Boolean);
@@ -388,13 +387,9 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       }
     },
 
-    async reply(inbound, text) {
-      let chain = chains.get(inbound);
-      if (!chain) {
-        chain = { thread: inbound.replyTo };
-        chains.set(inbound, chain);
-      }
-      await post(chain.thread, text);
+    async reply(ctx, text) {
+      await post(ctx.replyTo ?? null, text);
+      return null;
     },
   };
 

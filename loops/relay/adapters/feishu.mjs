@@ -54,8 +54,6 @@ export function decideProgressMode(code) {
 }
 
 export function createRuntime({ client, log, chatId, allowedUser = DEFAULT_ALLOWED, chunkLimit = CARD_LIMIT }) {
-  const progress = new WeakMap();
-
   async function send(target, msgType, content, extra = {}) {
     const res = await client.im.v1.message.reply({
       path: { message_id: target.messageId },
@@ -66,66 +64,72 @@ export function createRuntime({ client, log, chatId, allowedUser = DEFAULT_ALLOW
   }
 
   const runtime = {
-    async onProgress(inbound) {
+    async onProgress(ctx) {
       try {
         const res = await client.im.v1.messageReaction.create({
-          path: { message_id: inbound.messageId },
+          path: { message_id: ctx.messageId },
           data: { reaction_type: { emoji_type: PROGRESS_EMOJI } },
         });
         const mode = decideProgressMode(res.code);
         if (mode === "reaction") {
-          progress.set(inbound, { mode: "reaction", reactionId: res.data?.reaction_id });
-          return "reaction";
+          return { mode: "reaction", messageId: ctx.messageId, reactionId: res.data?.reaction_id ?? null };
         }
         if (mode === "card") {
-          const cardId = await send({ messageId: inbound.messageId }, "interactive", toCard("⏳ 处理中…"), inbound.threadId ? { reply_in_thread: true } : {}).catch((error) => {
+          const cardId = await send({ messageId: ctx.messageId }, "interactive", toCard("⏳ 处理中…"), ctx.threadId ? { reply_in_thread: true } : {}).catch((error) => {
             log("warn", "progress-card", String(error));
             return null;
           });
-          if (cardId) {
-            progress.set(inbound, { mode: "card", messageId: cardId });
-            return "card";
-          }
+          if (cardId) return { mode: "card", messageId: cardId, reactionId: null };
         }
         log("warn", "progress-unavailable", res.code, res.msg);
-        return "none";
+        return null;
       } catch (error) {
         log("warn", "progress", String(error));
-        return "none";
+        return null;
       }
     },
 
-    async onProgressDone(inbound) {
-      const entry = progress.get(inbound);
-      if (!entry) return;
-      progress.delete(inbound);
-      if (entry.mode !== "reaction" || !entry.reactionId) return;
+    async onProgressDone(ctx) {
+      const entry = ctx.progress;
+      if (entry?.mode !== "reaction" || !entry.reactionId) return;
       try {
-        const res = await client.im.v1.messageReaction.delete({ path: { message_id: inbound.messageId, reaction_id: entry.reactionId } });
+        const res = await client.im.v1.messageReaction.delete({ path: { message_id: entry.messageId ?? ctx.messageId, reaction_id: entry.reactionId } });
         if (res.code !== 0) log("warn", "progress-delete", res.code, res.msg);
       } catch (error) {
         log("warn", "progress-delete", String(error));
       }
     },
 
-    async reply(inbound, text) {
-      const entry = progress.get(inbound);
+    async reply(ctx, text) {
+      const entry = ctx.progress;
       const parts = chunkText(text, chunkLimit);
-      const first = entry?.mode === "card" ? parts[0] : null;
-      if (entry?.mode === "card") {
-        progress.delete(inbound);
+      if (entry?.mode === "card" && entry.messageId && parts.length) {
         try {
-          const res = await client.im.v1.message.patch({ path: { message_id: entry.messageId }, data: { content: JSON.stringify(toCard(first)) } });
+          const res = await client.im.v1.message.patch({ path: { message_id: entry.messageId }, data: { content: JSON.stringify(toCard(parts[0])) } });
           if (res?.code === 0 || res?.code === undefined) {
-            for (const part of parts.slice(1)) await replyOnce(inbound, part);
-            return;
+            for (const part of parts.slice(1)) await replyOnce(ctx, part);
+            return { messageId: entry.messageId, patched: true };
           }
           log("warn", "patch", res.code, res.msg);
         } catch (error) {
           log("warn", "patch", String(error));
         }
       }
-      for (const part of parts) await replyOnce(inbound, part);
+      let last = null;
+      for (const part of parts) last = (await replyOnce(ctx, part)) ?? last;
+      return last ? { messageId: last } : null;
+    },
+
+    async edit(ctx, messageId, text) {
+      try {
+        const res = await client.im.v1.message.patch({ path: { message_id: messageId }, data: { content: JSON.stringify(toCard(text)) } });
+        if (res?.code === 0 || res?.code === undefined) return true;
+        log("warn", "edit", res.code, res.msg);
+        return false;
+      } catch (error) {
+        log("warn", "edit", String(error));
+        return false;
+      }
     },
 
     async notify(text) {
@@ -139,13 +143,13 @@ export function createRuntime({ client, log, chatId, allowedUser = DEFAULT_ALLOW
     },
   };
 
-  async function replyOnce(inbound, part) {
-    const extra = inbound.threadId ? { reply_in_thread: true } : {};
+  async function replyOnce(ctx, part) {
+    const extra = ctx.threadId ? { reply_in_thread: true } : {};
     try {
-      await send({ messageId: inbound.messageId }, "interactive", toCard(part), extra);
+      return await send({ messageId: ctx.messageId }, "interactive", toCard(part), extra);
     } catch (error) {
       log("warn", "card-fallback", String(error));
-      await send({ messageId: inbound.messageId }, "text", { text: part }, extra);
+      return await send({ messageId: ctx.messageId }, "text", { text: part }, extra);
     }
   }
 
@@ -261,16 +265,20 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
       return new Promise(() => {});
     },
 
-    async reply(inbound, text) {
-      await (await ensureRuntime()).reply(inbound, text);
+    async reply(ctx, text) {
+      return (await ensureRuntime()).reply(ctx, text);
     },
 
-    async onProgress(inbound) {
-      return (await ensureRuntime()).onProgress(inbound);
+    async edit(ctx, messageId, text) {
+      return (await ensureRuntime()).edit(ctx, messageId, text);
     },
 
-    async onProgressDone(inbound) {
-      return (await ensureRuntime()).onProgressDone(inbound);
+    async onProgress(ctx) {
+      return (await ensureRuntime()).onProgress(ctx);
+    },
+
+    async onProgressDone(ctx) {
+      return (await ensureRuntime()).onProgressDone(ctx);
     },
 
     async notify(text) {

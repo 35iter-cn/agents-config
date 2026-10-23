@@ -77,8 +77,9 @@ test("permission errors downgrade the progress signal to a card", () => {
 test("TC-15 the progress reaction is added and removed", async () => {
   const { client, calls } = fakeClient();
   const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
-  assert.equal(await runtime.onProgress(inbound), "reaction");
-  await runtime.onProgressDone(inbound);
+  const progress = await runtime.onProgress(inbound);
+  assert.equal(progress.mode, "reaction");
+  await runtime.onProgressDone({ ...inbound, progress });
   assert.deepEqual(calls.map(([name]) => name), ["reaction.create", "reaction.delete"]);
   assert.equal(calls[0][1].path.message_id, "om_1");
   assert.equal(calls[0][1].data.reaction_type.emoji_type, "THINKING");
@@ -88,9 +89,9 @@ test("TC-15 the progress reaction is added and removed", async () => {
 test("TC-15 the reaction is removed even when the worker fails or times out", async () => {
   const { client, calls } = fakeClient();
   const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
-  await runtime.onProgress(inbound);
-  await runtime.reply(inbound, "已终止：本轮超过 20 分钟未结束。");
-  await runtime.onProgressDone(inbound);
+  const progress = await runtime.onProgress(inbound);
+  await runtime.reply({ ...inbound, progress }, "已终止：本轮超过 20 分钟未结束。");
+  await runtime.onProgressDone({ ...inbound, progress });
   assert.equal(calls.filter(([name]) => name === "reaction.delete").length, 1);
   assert.equal(calls.filter(([name]) => name === "reply").length, 1);
 });
@@ -98,8 +99,9 @@ test("TC-15 the reaction is removed even when the worker fails or times out", as
 test("TC-16 without reaction permission a placeholder card is patched into the answer", async () => {
   const { client, calls } = fakeClient({ reaction: { code: 99991672, msg: "no scope" } });
   const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
-  assert.equal(await runtime.onProgress(inbound), "card");
-  await runtime.reply(inbound, "最终回答");
+  const progress = await runtime.onProgress(inbound);
+  assert.equal(progress.mode, "card");
+  await runtime.reply({ ...inbound, progress }, "最终回答");
   const names = calls.map(([name]) => name);
   assert.deepEqual(names, ["reaction.create", "reply", "patch"]);
   const patched = JSON.parse(calls[2][1].data.content);
@@ -109,8 +111,8 @@ test("TC-16 without reaction permission a placeholder card is patched into the a
 test("TC-16 a failed patch falls back to a normal reply instead of losing the answer", async () => {
   const { client, calls } = fakeClient({ reaction: { code: 99991672, msg: "no scope" }, patch: { code: 230001, msg: "cannot patch" } });
   const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
-  await runtime.onProgress(inbound);
-  await runtime.reply(inbound, "最终回答");
+  const progress = await runtime.onProgress(inbound);
+  await runtime.reply({ ...inbound, progress }, "最终回答");
   const replies = calls.filter(([name]) => name === "reply").map(([, args]) => args.data.content);
   assert.ok(replies.some((content) => content.includes("最终回答")));
 });
@@ -271,4 +273,25 @@ test("TC-N3 notify then start() shares one client and one websocket", async () =
   assert.equal(instances.ws, 1);
   assert.equal(instances.dispatchers, 1);
   assert.equal(captured.out.join(""), "sent 1\n");
+});
+
+test("TC-28 the feishu reply context survives a JSON round trip", async () => {
+  const { client, calls } = fakeClient();
+  const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
+  const progress = await runtime.onProgress(inbound);
+  const ctx = JSON.parse(JSON.stringify({ ...inbound, progress }));
+  const sent = await runtime.reply(ctx, "恢复后的回帖");
+  assert.deepEqual(sent, { messageId: "m-out" });
+  assert.equal(calls.filter(([name]) => name === "reply").length, 1);
+  await runtime.onProgressDone(ctx);
+  assert.equal(calls.filter(([name]) => name === "reaction.delete").length, 1);
+});
+
+test("TC-28 feishu edit patches an existing message and reports failure honestly", async () => {
+  const { client, calls } = fakeClient();
+  const runtime = createRuntime({ client, log: () => {}, chatId: "oc_1" });
+  assert.equal(await runtime.edit(inbound, "m-out", "更新后的正文"), true);
+  assert.equal(calls.at(-1)[0], "patch");
+  const failing = createRuntime({ client: fakeClient({ patch: { code: 230001, msg: "no" } }).client, log: () => {}, chatId: "oc_1" });
+  assert.equal(await failing.edit(inbound, "m-out", "x"), false);
 });
