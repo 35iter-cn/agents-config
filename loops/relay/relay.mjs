@@ -63,7 +63,13 @@ async function main() {
   const core = createCore({ adapter, paths: platformPaths });
   core.pruneLogs();
   setInterval(() => core.pruneLogs(), 86_400_000).unref();
-  await adapter.start({ onMessage: (inbound) => core.handle(inbound), core });
+  await adapter.start({
+    onMessage: (inbound) => core.handle(inbound),
+    onReady: () => {
+      core.recover().catch((error) => defaultLog("error", "recover", String(error?.stack ?? error)));
+    },
+    core,
+  });
 }
 
 if (import.meta.main) {

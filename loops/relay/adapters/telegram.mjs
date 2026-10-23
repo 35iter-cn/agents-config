@@ -186,7 +186,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
   }
 
   let state = null;
-  const chains = new WeakMap();
 
   const adapter = {
     name: "telegram",
@@ -199,7 +198,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     piBin: join(paths.home, ".bun/bin/pi"),
     replyRules,
 
-    async start({ onMessage, core }) {
+    async start({ onMessage, onReady, core }) {
       state = core.state;
       if (!token) {
         log("error", "missing-credential", "TELEGRAM_BOT_TOKEN");
@@ -221,7 +220,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       };
 
       const dispatch = async (key, message, text, extra = {}) => {
-        if (isStop(text) && core.cancel(key)) return;
         const inbound = {
           key,
           session: sessionFor(key),
@@ -296,6 +294,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
 
       let backoff = 1_000;
       let failures = 0;
+      let announced = false;
       for (;;) {
         try {
           await pollUpdates({
@@ -312,6 +311,10 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
           });
           backoff = 1_000;
           failures = 0;
+          if (!announced) {
+            announced = true;
+            onReady?.();
+          }
         } catch (error) {
           failures += 1;
           log("error", "poll", String(error));
@@ -329,21 +332,37 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       }
     },
 
-    async reply(inbound, text) {
-      let chain = chains.get(inbound);
-      if (!chain) {
-        let replyTo = inbound.replyTo;
-        if (inbound.channelPost) {
-          const mirror = await waitForMirror({ read: () => mirrorFor(state.meta?.channelPosts, inbound.channelPost), timeoutMs: MIRROR_TIMEOUT_MS, stepMs: MIRROR_STEP_MS });
-          if (!mirror) log("warn", "no-mirror", `post=${inbound.channelPost}`);
-          replyTo = mirror ?? inbound.replyTo;
-        }
-        chain = { replyTo };
-        chains.set(inbound, chain);
+    async reply(ctx, text) {
+      client = client ?? apiFactory(token);
+      let replyTo = ctx.replyTo ?? null;
+      if (ctx.channelPost && !replyTo) {
+        const mirror = await waitForMirror({ read: () => mirrorFor(state.meta?.channelPosts, ctx.channelPost), timeoutMs: MIRROR_TIMEOUT_MS, stepMs: MIRROR_STEP_MS });
+        if (!mirror) log("warn", "no-mirror", `post=${ctx.channelPost}`);
+        replyTo = mirror ?? replyTo;
       }
-      const sent = await sendText({ chatId, topic: topicFor(inbound.key, state), replyTo: chain.replyTo }, text);
-      if (sent?.message_id) chain.replyTo = sent.message_id;
-      return sent;
+      const sent = await sendText({ chatId, topic: topicFor(ctx.key, state), replyTo }, text);
+      return sent?.message_id ? { messageId: String(sent.message_id) } : null;
+    },
+
+    async edit(ctx, messageId, text) {
+      client = client ?? apiFactory(token);
+      const payload = { chat_id: String(chatId), message_id: Number(messageId), text: toTelegramHtml(text), parse_mode: "HTML", link_preview_options: { is_disabled: true } };
+      try {
+        await client("editMessageText", payload);
+        return true;
+      } catch (error) {
+        if (String(error).includes("can't parse entities") || String(error).includes("can't find end of")) {
+          try {
+            await client("editMessageText", { ...payload, parse_mode: undefined, text });
+            return true;
+          } catch (retry) {
+            log("warn", "edit", String(retry));
+            return false;
+          }
+        }
+        log("warn", "edit", String(error));
+        return false;
+      }
     },
 
     notify: async (text) => {

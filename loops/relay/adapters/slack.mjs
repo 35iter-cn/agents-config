@@ -83,7 +83,6 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
   let coreRef = null;
   let webhookUrl = null;
   let cookies = null;
-  const chains = new WeakMap();
 
   function readCookies() {
     const lines = readFileSync(join(paths.configDir, ".slack-xoxc.tmp"), "utf8").split("\n").map((line) => line.trim()).filter(Boolean);
@@ -234,6 +233,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
         log("info", "hello", `${envelope.num_connections ?? 1} conn`, `lifetime=${Math.round(conn.lifetimeMs / 1_000)}s`, `refresh=${Math.round(refreshIn / 1_000)}s`);
         conn.refreshTimer = setTimeout(() => conn.shutdown("refresh"), refreshIn);
         conn.onHello?.();
+        onReady?.();
         return;
       }
       if (envelope.type === "disconnect") {
@@ -290,7 +290,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     piBin: join(paths.home, ".bun/bin/pi"),
     replyRules,
 
-    async start({ onMessage, core }) {
+    async start({ onMessage, onReady, core }) {
       coreRef = core;
       state = core.state;
       if (!appToken) {
@@ -388,13 +388,9 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
       }
     },
 
-    async reply(inbound, text) {
-      let chain = chains.get(inbound);
-      if (!chain) {
-        chain = { thread: inbound.replyTo };
-        chains.set(inbound, chain);
-      }
-      await post(chain.thread, text);
+    async reply(ctx, text) {
+      await post(ctx.replyTo ?? null, text);
+      return null;
     },
   };
 
