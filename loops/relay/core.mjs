@@ -93,7 +93,9 @@ export function createCore({ adapter, paths, deps = {} }) {
   const readStartTicks = deps.readStartTicks ?? readProcStartTicks;
   const kill = deps.kill ?? ((target, signal) => process.kill(target, signal));
   const log = deps.log ?? defaultLog;
-  const state = upgradeState(readJsonOr(paths.stateFile, emptyState()));
+  const loadedState = readJsonOr(paths.stateFile, null);
+  const needsUpgrade = !loadedState?.meta?.schemaVersion;
+  const state = upgradeState(loadedState ?? emptyState());
   const children = new Map();
   const notes = new Map();
   const runtimeInbounds = new Map();
@@ -102,6 +104,11 @@ export function createCore({ adapter, paths, deps = {} }) {
   mkdirSync(logDir, { recursive: true });
 
   const isoNow = () => new Date(now()).toISOString();
+
+  if (needsUpgrade) {
+    mkdirSync(paths.stateFile.slice(0, paths.stateFile.lastIndexOf("/")), { recursive: true });
+    writeJsonAtomic(paths.stateFile, state);
+  }
 
   function save() {
     mkdirSync(paths.stateFile.slice(0, paths.stateFile.lastIndexOf("/")), { recursive: true });
