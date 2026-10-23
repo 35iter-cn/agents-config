@@ -307,3 +307,59 @@ test("TC-27 a failed job keeps its answer for diagnosis", async () => {
   assert.equal(job.status, "failed");
   assert.match(job.answer, /无输出/);
 });
+
+test("TC-23 every delivered chunk is committed to parts with its hash", async () => {
+  const delivered = [];
+  const { core } = harness({
+    spawn: () => fakeChild({ stdout: "a".repeat(45) }),
+    adapterOverrides: {
+      reply: async (ctx, text) => {
+        delivered.push({ text, replyTo: ctx.replyTo });
+        return { messageId: `m-${delivered.length}` };
+      },
+    },
+  });
+  await core.handle(inbound());
+  await tick();
+  const job = core.state.jobs[core.state.seen.m1];
+  assert.equal(delivered.length, 3, "45 chars at 20 per chunk is three chunks");
+  assert.equal(job.parts.length, 3);
+  assert.deepEqual(job.parts.map((part) => part.i), [0, 1, 2]);
+  assert.deepEqual(job.parts.map((part) => part.messageId), ["m-1", "m-2", "m-3"]);
+  assert.equal(job.parts[0].hash.length, 16);
+  assert.equal(delivered[1].replyTo, "m-1", "later chunks reply to the previous one");
+  assert.equal(delivered[2].replyTo, "m-2");
+});
+
+test("TC-23 a reply failure stops delivery and keeps the job answered for a later resend", async () => {
+  let calls = 0;
+  const { core } = harness({
+    spawn: () => fakeChild({ stdout: "a".repeat(45) }),
+    adapterOverrides: {
+      reply: async () => {
+        calls += 1;
+        if (calls === 2) throw new Error("platform down");
+        return { messageId: "m-1" };
+      },
+    },
+  });
+  await core.handle(inbound());
+  await tick();
+  const job = core.state.jobs[core.state.seen.m1];
+  assert.equal(job.status, "answered");
+  assert.equal(job.parts.length, 1);
+  assert.ok(job.answer);
+});
+
+test("TC-23 an adapter without edit never tries to patch", async () => {
+  const { core } = harness({
+    adapterOverrides: {
+      reply: async () => ({ messageId: "m-1" }),
+    },
+  });
+  await core.handle(inbound());
+  await tick();
+  const job = core.state.jobs[core.state.seen.m1];
+  assert.equal(job.status, "done");
+  assert.equal(typeof core.state.jobs[core.state.seen.m1].answer, "undefined");
+});

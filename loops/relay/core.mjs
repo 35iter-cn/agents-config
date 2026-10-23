@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statS
 import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { chunkText } from "./chunk.mjs";
-import { createJob, isFinished, readProcStartTicks } from "./jobs.mjs";
+import { createJob, ctxOf, hashOf, isFinished, planParts, readProcStartTicks } from "./jobs.mjs";
 
 const HEARTBEAT_MS = 15_000;
 
@@ -198,7 +198,13 @@ export function createCore({ adapter, paths, deps = {} }) {
           process.kill(-child.pid, "SIGKILL");
         } catch {}
       }, adapter.timeoutMs);
-      adapter.onProgress?.(inbound);
+      const progressPromise = Promise.resolve(adapter.onProgress?.(ctxOf(job))).then((progress) => {
+        if (!progress) return;
+        job.progress = progress;
+        job.updatedAt = isoNow();
+        save();
+      }).catch((error) => log("warn", "progress", String(error?.message ?? error)));
+      void progressPromise;
       child.stdout.on("data", (chunk) => (stdout += chunk));
       child.stderr.on("data", (chunk) => (stderr += chunk));
       child.on("error", (error) => stderr += `${error}\n`);
@@ -220,25 +226,45 @@ export function createCore({ adapter, paths, deps = {} }) {
         job.lease = null;
         job.updatedAt = isoNow();
         save();
-        await deliver(job, inbound);
+        await deliver(job);
         runtimeInbounds.delete(job.id);
         resolve();
       });
     });
   }
 
-  async function deliver(job, inbound) {
-    const text = job.answer ?? "";
-    for (const part of chunkText(text, adapter.chunkLimit)) {
+  async function deliver(job) {
+    const canEdit = typeof adapter.edit === "function";
+    const plan = planParts({ answer: job.answer ?? "", parts: job.parts, chunkLimit: adapter.chunkLimit, canEdit });
+    let failed = false;
+    for (const step of plan) {
+      if (step.action === "skip") continue;
       try {
-        await adapter.reply(inbound, part);
+        if (step.action === "edit") {
+          const ok = await adapter.edit(ctxOf(job), step.messageId, step.text);
+          if (!ok) {
+            log("warn", "edit-skip", job.id, step.i);
+            continue;
+          }
+          job.parts = [...job.parts.filter((part) => part.i !== step.i), { i: step.i, messageId: step.messageId, hash: hashOf(step.text), sentAt: isoNow() }];
+        } else {
+          const sent = await adapter.reply(ctxOf(job), step.text);
+          job.parts = [...job.parts.filter((part) => part.i !== step.i), { i: step.i, messageId: sent?.messageId ?? null, hash: hashOf(step.text), sentAt: isoNow() }];
+        }
+        job.updatedAt = isoNow();
+        save();
       } catch (error) {
         log("error", "reply", String(error?.message ?? error));
+        failed = true;
         break;
       }
     }
-    adapter.onProgressDone?.(inbound);
-    if (job.status === "answered") {
+    try {
+      await adapter.onProgressDone?.(ctxOf(job));
+    } catch (error) {
+      log("warn", "progress-done", String(error?.message ?? error));
+    }
+    if (!failed && job.status === "answered") {
       job.status = "done";
       job.answer = undefined;
     }
