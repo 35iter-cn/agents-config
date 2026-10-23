@@ -8,6 +8,7 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=10
 Environment=RELAY_PLATFORM=%i
+Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.volta/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=%h/.bun/bin/bun %h/code/agents-config/loops/relay/relay.mjs %i
 
 [Install]
