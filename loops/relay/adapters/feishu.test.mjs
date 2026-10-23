@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationKey, sessionFor, textOf, isAcceptedSender, toCard, decideProgressMode, createRuntime } from "./feishu.mjs";
+import { conversationKey, sessionFor, textOf, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter } from "./feishu.mjs";
 
-function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 } } = {}) {
+function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 }, create = { code: 0, data: { message_id: "m-notify" } } } = {}) {
   const calls = [];
   const client = {
     im: {
@@ -14,7 +14,7 @@ function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply
           },
           create: async (args) => {
             calls.push(["create", args]);
-            return { code: 0, data: { message_id: "m-notify" } };
+            return typeof create === "function" ? create(args) : create;
           },
           patch: async (args) => {
             calls.push(["patch", args]);
@@ -152,4 +152,123 @@ test("notify does not double the at tag when the caller already wrote one", asyn
   await runtime.notify("<at id=ou_me></at> 已有 at");
   const card = JSON.parse(calls[0][1].data.content);
   assert.equal(card.body.elements[0].content.match(/<at /g).length, 1);
+});
+
+const adapterPaths = { configDir: "/tmp/relay-test-config", home: "/tmp/relay-test-home" };
+const adapterEnv = { FEISHU_APP_ID: "cli_test", FEISHU_APP_SECRET: "secret", FEISHU_CHAT_ID: "oc_1" };
+
+function captureStdout() {
+  const original = process.stdout.write;
+  const out = [];
+  process.stdout.write = (chunk) => {
+    out.push(String(chunk));
+    return true;
+  };
+  return { out, restore: () => { process.stdout.write = original; } };
+}
+
+test("TC-N1 notify sends before start() was ever called", async () => {
+  const { client, calls } = fakeClient();
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => client,
+  });
+  const captured = captureStdout();
+  try {
+    await adapter.notify("intake 候选一条");
+  } finally {
+    captured.restore();
+  }
+  const createCalls = calls.filter(([name]) => name === "create");
+  assert.equal(createCalls.length, 1);
+  assert.equal(createCalls[0][1].data.msg_type, "interactive");
+  const card = JSON.parse(createCalls[0][1].data.content);
+  assert.match(card.body.elements[0].content, /^<at id=ou_[0-9a-f]+><\/at>/);
+  assert.equal(captured.out.join(""), "sent 1\n");
+});
+
+test("TC-N2 missing credentials log one line and exit instead of a TypeError", async () => {
+  const logs = [];
+  const exits = [];
+  const originalExit = process.exit;
+  process.exit = (code) => {
+    exits.push(code);
+    throw new Error(`exit ${code}`);
+  };
+  try {
+    const adapter = createAdapter({
+      paths: adapterPaths,
+      readEnv: () => ({ FEISHU_CHAT_ID: "oc_1" }),
+      log: (...parts) => logs.push(parts.map(String).join(" ")),
+      createClient: async () => {
+        throw new Error("createClient must not be called without credentials");
+      },
+    });
+    await assert.rejects(() => adapter.notify("x"), /exit 1/);
+  } finally {
+    process.exit = originalExit;
+  }
+  assert.ok(logs.some((line) => line.includes("missing-credential")));
+  assert.deepEqual(exits, [1]);
+});
+
+test("TC-N4 a platform error surfaces the code instead of being swallowed", async () => {
+  const { client } = fakeClient({ create: { code: 99991672, msg: "no scope" } });
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => client,
+  });
+  const captured = captureStdout();
+  try {
+    await assert.rejects(() => adapter.notify("x"), /99991672/);
+  } finally {
+    captured.restore();
+  }
+});
+
+test("TC-N3 notify then start() shares one client and one websocket", async () => {
+  let created = 0;
+  const { client } = fakeClient();
+  const instances = { ws: 0, dispatchers: 0 };
+  const sdk = {
+    default: {
+      Client: function Client() {},
+      EventDispatcher: function EventDispatcher() {
+        instances.dispatchers += 1;
+        this.register = () => this;
+      },
+      WSClient: function WSClient() {
+        instances.ws += 1;
+        this.start = () => {};
+      },
+      Domain: { Feishu: "feishu" },
+      LoggerLevel: { warn: 4 },
+    },
+  };
+  const adapter = createAdapter({
+    paths: adapterPaths,
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => {
+      created += 1;
+      return client;
+    },
+    loadSdk: async () => sdk,
+  });
+  const captured = captureStdout();
+  try {
+    await adapter.notify("先 notify");
+  } finally {
+    captured.restore();
+  }
+  adapter.start({ onMessage: async () => {}, core: { state: { convs: {} }, save: () => {} } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(created, 1);
+  assert.equal(instances.ws, 1);
+  assert.equal(instances.dispatchers, 1);
+  assert.equal(captured.out.join(""), "sent 1\n");
 });
