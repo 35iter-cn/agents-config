@@ -98,7 +98,7 @@ node --test loops/relay/*.test.mjs loops/relay/adapters/*.test.mjs
 
 ## 新增一个平台
 
-1. 写 `loops/relay/adapters/<platform>.mjs`：`createAdapter({ paths, readEnv, log })` 返回 `{ name, allowedUser, chunkLimit, timeoutMs, maxWorkers, queueDepth, worker, piBin, replyRules, start({ onMessage, core }), reply, notify?, onProgress?, onProgressDone? }`
+1. 写 `loops/relay/adapters/<platform>.mjs`：`createAdapter({ paths, readEnv, log })` 返回 `{ name, surface?, allowedUser, chunkLimit, timeoutMs, maxWorkers, queueDepth, worker, piBin, replyRules, start({ onMessage, core }), reply, notify?, onProgress?, onProgressDone? }`（`surface` 为可选，缺失回退 `"本会话"`，用于模板里的「发回哪里」）
    - `notify` 是可选能力，但**必须在 `start()` 之前可调用**：`relay.mjs notify <platform> <text>` 只加载适配器、不调 `start()`，intake 定时轮依赖这条路径。
    - 平台 SDK（client）一律懒建并经依赖注入（`createClient` / `loadSdk`），不得在模块作用域构造，否则单文件的 `notify` 会把整个常驻桥的初始化拖进来。
 2. `start` 只做「事件源 → `onMessage(inbound)`」，`inbound` 带 `{ key, session, dedupeId, authorId, text, chatId, rootText, replyTo }`；不要自己写 `state.seen`（去重归 core）

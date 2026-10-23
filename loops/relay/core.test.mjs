@@ -32,13 +32,15 @@ function fakeChild({ stdout = "", stderr = "", code = 0, onClose } = {}) {
   return child;
 }
 
-function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyState(), sessions = [], deps = {} } = {}) {
+function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyState(), sessions = [], deps = {}, candidateRules = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "relay-core-"));
   const sessionsDir = join(dir, "sessions");
   mkdirSync(sessionsDir, { recursive: true });
   for (const name of sessions) writeFileSync(join(sessionsDir, `2026-01-01T00-00-00_${name}.jsonl`), "{}\n");
   const promptFile = join(dir, "thread.md");
-  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_text}} platform={{platform}} rules={{reply_rules}}");
+  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} logdir={{log_dir}} candidate={{candidate_rules}}");
+  const candidateRulesFile = join(dir, "candidate-rules.md");
+  if (candidateRules) writeFileSync(candidateRulesFile, candidateRules);
   const stateFile = join(dir, "relay-fake.json");
   writeJsonAtomic(stateFile, state);
   const adapter = {
@@ -57,7 +59,7 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   const logs = [];
   const core = createCore({
     adapter,
-    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, cwd: dir, home: dir },
+    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, candidateRulesFile, cwd: dir, home: dir },
     deps: { spawn: spawn ?? (() => fakeChild({ stdout: "ok" })), log: (level, ...parts) => logs.push([level, ...parts].join(" ")), ...deps },
   });
   return { core, adapter, replies, logs, dir, stateFile, sessionsDir };
@@ -167,6 +169,7 @@ test("TC-5 a worker over its timeout is killed as a process group", async () => 
     replies,
     adapterOverrides: {
       timeoutMs: 300,
+      chunkLimit: 500,
       buildWorker: () => ({ bin: process.execPath, args: ["-e", "setTimeout(() => {}, 60000)"] }),
     },
   });
@@ -603,4 +606,115 @@ test("TC-26 stop words cancel the running turn and answer honestly when idle", a
   const idle = harness();
   assert.equal(await idle.core.handle(inbound({ dedupeId: "c", text: "/stop" })), "accepted");
   assert.match(idle.replies[0].text, /没有在跑的任务/);
+});
+
+test("TC-V1 candidate root injects the candidate section", async () => {
+  const captured = [];
+  const { core } = harness({
+    candidateRules: "## 候选任务\n\n候选规则正文",
+    adapterOverrides: { buildWorker: ({ prompt, full }) => (captured.push({ prompt, full }), { bin: "/bin/true", args: [] }) },
+  });
+  await core.handle(inbound({ text: "go", rootText: "[20261023-0834-1] 看板新增 Todo https://x/1" }));
+  await tick();
+  assert.equal(captured.length, 1);
+  assert.match(captured[0].prompt, /## 候选任务/);
+  assert.match(captured[0].prompt, /候选规则正文/);
+  assert.match(captured[0].prompt, /本会话的起点（不是你这条）：/);
+});
+
+test("TC-V2 task root skips the candidate section", async () => {
+  const captured = [];
+  const { core } = harness({
+    candidateRules: "## 候选任务\n\n候选规则正文",
+    adapterOverrides: { buildWorker: ({ prompt, full }) => (captured.push({ prompt, full }), { bin: "/bin/true", args: [] }) },
+  });
+  await core.handle(inbound({ text: "读一下 core.mjs", rootText: "读一下 core.mjs" }));
+  await tick();
+  assert.doesNotMatch(captured[0].prompt, /候选任务/);
+  assert.doesNotMatch(captured[0].prompt, /本会话的起点/);
+});
+
+test("TC-V3 empty root falls back to the message text for the variant judgement", async () => {
+  const captured = [];
+  const { core } = harness({
+    candidateRules: "## 候选任务\n\n候选规则正文",
+    adapterOverrides: { buildWorker: ({ prompt, full }) => (captured.push({ prompt, full }), { bin: "/bin/true", args: [] }) },
+  });
+  await core.handle(inbound({ text: "[20261023-0834-9] 板外 issue https://x/9", rootText: "" }));
+  await tick();
+  assert.match(captured[0].prompt, /## 候选任务/);
+  assert.doesNotMatch(captured[0].prompt, /本会话的起点/);
+});
+
+test("TC-V4 jev verdict wins over the regex fallback", async () => {
+  const captured = [];
+  const { core } = harness({
+    candidateRules: "## 候选任务\n\n候选规则正文",
+    deps: { jev: { judgeChoice: async () => ({ choice: "candidate_rules", confidence: 0.99, fallback: null }) } },
+    adapterOverrides: { buildWorker: ({ prompt, full }) => (captured.push({ prompt, full }), { bin: "/bin/true", args: [] }) },
+  });
+  await core.handle(inbound({ text: "没有方括号的候选播报", rootText: "没有方括号的候选播报" }));
+  await tick();
+  assert.match(captured[0].prompt, /## 候选任务/);
+});
+
+test("TC-V5 jev failure falls back to the regex and does not break dispatch", async () => {
+  const captured = [];
+  const { core } = harness({
+    candidateRules: "## 候选任务\n\n候选规则正文",
+    deps: { jev: { judgeChoice: async () => ({ choice: null, confidence: null, fallback: "timeout" }) } },
+    adapterOverrides: { buildWorker: ({ prompt, full }) => (captured.push({ prompt, full }), { bin: "/bin/true", args: [] }) },
+  });
+  await core.handle(inbound({ text: "go", rootText: "[20261023-0834-1] 候选 https://x/1" }));
+  await tick();
+  assert.match(captured[0].prompt, /## 候选任务/);
+});
+
+test("TC-V6 killed worker tells the user to continue instead of rerunning", async () => {
+  const { spawn } = await import("node:child_process");
+  const replies = [];
+  const started = Date.now();
+  const { core } = harness({
+    spawn,
+    replies,
+    adapterOverrides: {
+      timeoutMs: 300,
+      chunkLimit: 500,
+      buildWorker: () => ({ bin: process.execPath, args: ["-e", "setTimeout(() => {}, 60000)"] }),
+    },
+  });
+  await core.handle(inbound());
+  while (!replies.length && Date.now() - started < 5000) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /回复「继续」/);
+  assert.doesNotMatch(replies[0].text, /\/重跑/);
+});
+
+test("TC-V7 a timed-out job cannot be rerun while an interrupted one can", async () => {
+  const state = emptyState();
+  state.jobs["job-old"] = {
+    id: "job-old",
+    key: "th-abc",
+    session: "fs-th-abc",
+    status: "failed",
+    killed: true,
+    createdAt: "2026-10-23T00:00:00.000Z",
+    updatedAt: "2026-10-23T00:01:00.000Z",
+    inbound: { text: "第一条", dedupeId: "m0" },
+  };
+  const { core, replies } = harness({ state });
+  await core.handle(inbound({ dedupeId: "cmd-1", text: "/重跑" }));
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /没有可重跑/);
+});
+
+test("TC-V8 usage records one run per terminal job", async () => {
+  const runs = [];
+  const { core } = harness({ deps: { usage: { recordRun: (args) => runs.push(args) } } });
+  await core.handle(inbound({ text: "hi" }));
+  await tick();
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "done");
+  assert.equal(runs[0].platform, "fake");
+  assert.equal(runs[0].answer, "ok");
 });

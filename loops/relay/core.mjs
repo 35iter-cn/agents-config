@@ -87,12 +87,16 @@ export function isRetained(nowMs, mtimeMs, retentionMs = RETENTION_MS) {
   return nowMs - mtimeMs <= retentionMs;
 }
 
+export const CANDIDATE_LINE = /^[ \t]*\[\d{8}-\d{4}-\d+\][ \t]+\S/m;
+
 export function createCore({ adapter, paths, deps = {} }) {
   const now = deps.now ?? (() => Date.now());
   const spawn = deps.spawn ?? spawnProcess;
   const readStartTicks = deps.readStartTicks ?? readProcStartTicks;
   const kill = deps.kill ?? ((target, signal) => process.kill(target, signal));
   const log = deps.log ?? defaultLog;
+  const jev = deps.jev ?? null;
+  const usage = deps.usage ?? null;
   const loadedState = readJsonOr(paths.stateFile, null);
   const needsUpgrade = !loadedState?.meta?.schemaVersion;
   const state = upgradeState(loadedState ?? emptyState());
@@ -162,19 +166,72 @@ export function createCore({ adapter, paths, deps = {} }) {
     return inbound;
   }
 
+  function rootSectionText(root, message) {
+    const value = String(root ?? "").trim();
+    if (!value) return "";
+    if (value === String(message ?? "").trim()) return "";
+    return `\n本会话的起点（不是你这条）：\n${value}`;
+  }
+
+  function candidateRulesText() {
+    try {
+      return readFileSync(paths.candidateRulesFile, "utf8").trim();
+    } catch (error) {
+      log("warn", "candidate-rules", String(error?.message ?? error));
+      return "";
+    }
+  }
+
+  function logDirText() {
+    if (!paths.home || !logDir.startsWith(paths.home)) return logDir;
+    return `~${logDir.slice(paths.home.length)}`;
+  }
+
+  function regexVariant(root) {
+    return CANDIDATE_LINE.test(root) ? "candidate_rules" : "task_skeleton";
+  }
+
+  function renderPromptFor(inbound, entry, variant) {
+    const root = entry.rootText || inbound.text;
+    const rules = variant === "candidate_rules" ? candidateRulesText() : "";
+    return renderPrompt(promptTemplate(), {
+      platform: adapter.name,
+      surface: adapter.surface ?? "本会话",
+      conversation: inbound.key,
+      chat_id: inbound.chatId,
+      user_message: inbound.text,
+      root_section: rootSectionText(root, inbound.text),
+      reply_rules: adapter.replyRules ?? "",
+      chunk_limit: adapter.chunkLimit,
+      log_dir: logDirText(),
+      candidate_rules: rules ? `\n\n${rules}` : "",
+    });
+  }
+
+  function buildPrompt(inbound, entry) {
+    const root = entry.rootText || inbound.text;
+    if (typeof jev?.judgeChoice !== "function") return renderPromptFor(inbound, entry, regexVariant(root));
+    return jev.judgeChoice({
+      id: "prompt-variant",
+      state: root,
+      instructions: "要给这条消息拼装 prompt 模板，应该选哪个变体？",
+      criteria: {
+        candidate_rules: "在播报新候选任务，带候选编号或任务链接",
+        task_skeleton: "用户在给指令、表态或提问，不是播报候选",
+      },
+    }).then((verdict) => renderPromptFor(inbound, entry, verdict?.choice ?? regexVariant(root)));
+  }
+
   function execute(job, entry) {
     const inbound = runtimeInbound(job);
     const full = !hasSession(entry.session);
-    const prompt = full
-      ? renderPrompt(promptTemplate(), {
-          conversation: inbound.key,
-          chat_id: inbound.chatId,
-          user_message: inbound.text,
-          root_text: entry.rootText ?? inbound.text,
-          platform: adapter.name,
-          reply_rules: adapter.replyRules ?? "",
-        })
-      : inbound.text;
+    if (!full) return spawnWorker(job, entry, inbound, inbound.text, false);
+    const built = buildPrompt(inbound, entry);
+    if (typeof built?.then === "function") return built.then((prompt) => spawnWorker(job, entry, inbound, prompt, true));
+    return spawnWorker(job, entry, inbound, built, true);
+  }
+
+  function spawnWorker(job, entry, inbound, prompt, full) {
     const args = adapter.worker === "stub" ? ["-e", `console.log("[stub] session=${entry.session} full=${full}")`] : ["--print", "--session-id", entry.session, "--", prompt];
     const bin = adapter.worker === "stub" ? process.execPath : adapter.piBin;
     const command = adapter.buildWorker ? adapter.buildWorker({ prompt, full, session: entry.session }) : { bin, args };
@@ -193,6 +250,7 @@ export function createCore({ adapter, paths, deps = {} }) {
       let killed = false;
       children.set(inbound.key, child);
       job.lease = { pid: child.pid ?? null, startTicks: child.pid ? readStartTicks(child.pid) : null, startedAt: now(), heartbeatAt: now() };
+      job.startedAt = started;
       job.updatedAt = isoNow();
       save();
       const heartbeat = setInterval(() => {
@@ -228,7 +286,7 @@ export function createCore({ adapter, paths, deps = {} }) {
         const text = note
           ? note
           : killed
-            ? `已终止：本轮超过 ${Math.round(adapter.timeoutMs / 60_000)} 分钟未结束。\n\n${body.slice(-1500)}`.trim()
+            ? `已终止：本轮超过 ${Math.round(adapter.timeoutMs / 60_000)} 分钟未结束。回复「继续」可以接着做，前面已完成的改动都在。\n\n${body.slice(-1500)}`.trim()
             : body || `[无输出] exit=${code}\n${stderr.trim().split("\n").slice(-10).join("\n")}`;
         job.answer = text;
         job.status = note ? "cancelled" : killed || code !== 0 ? "failed" : "answered";
@@ -236,6 +294,15 @@ export function createCore({ adapter, paths, deps = {} }) {
         job.updatedAt = isoNow();
         save();
         await deliver(job);
+        usage?.recordRun({
+          job,
+          platform: adapter.name,
+          key: inbound.key,
+          session: entry.session,
+          answer: text,
+          status: job.status,
+          startedAt: job.startedAt ?? Date.parse(job.createdAt),
+        });
         runtimeInbounds.delete(job.id);
         resolve();
       });
@@ -409,7 +476,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     return "accepted";
   }
 
-  const INTERRUPT_NOTICE = "上一轮处理被中断（进程重启）。这条消息可能未完成，也可能已经产生了部分改动。回复 /重跑 可重新执行。";
+  const INTERRUPT_NOTICE = "上一轮处理被中断（进程重启）。回复「继续」接着做，或 /重跑 从头再来。";
 
   async function interrupt(job) {
     if (!job.noticeSent) {
