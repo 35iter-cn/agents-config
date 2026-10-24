@@ -121,7 +121,7 @@ test("TC-C8 a target overlapping two of our records pairs with the first and del
   assert.deepEqual(plan.remove, ["b"]);
 });
 
-test("TC-C9 buildPlan counts only counted units and ignores synced rows outside the backfill window", () => {
+test("TC-C9 buildPlan counts only counted units, keeps a 48h backfill and ignores synced rows outside it", () => {
   const now = at("2026-10-24T12:00:00Z");
   const judged = [
     {
@@ -136,14 +136,19 @@ test("TC-C9 buildPlan counts only counted units and ignores synced rows outside 
       unit: { runs: [{ startedAt: now - 30 * HOUR, endedAt: now - 30 * HOUR + 20 * MIN }] },
       result: { kind: "count" },
     },
+    {
+      unit: { runs: [{ startedAt: now - 60 * HOUR, endedAt: now - 60 * HOUR + 20 * MIN }] },
+      result: { kind: "count" },
+    },
   ];
   const synced = {
     "2026-10-20": [{ id: "old", start: now - 4 * 24 * HOUR, end: now - 4 * 24 * HOUR + 10 * MIN }],
   };
   const cfg = { ...CLOCK_DEFAULTS, tz: TZ };
   const plan = buildPlan({ judged, now, cfg, synced });
-  assert.equal(plan.targets.length, 1);
-  assert.equal(plan.create.length, 1);
+  assert.equal(plan.targets.length, 2);
+  assert.equal(plan.create.length, 2);
+  assert.equal(plan.targets[0].start, now - 30 * HOUR);
   assert.deepEqual(plan.remove, []);
 });
 
