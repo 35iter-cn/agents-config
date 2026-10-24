@@ -1,0 +1,10 @@
+[Unit]
+Description=schedule agent-hours judging every 30min while environment is alive
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
