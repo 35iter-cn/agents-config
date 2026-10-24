@@ -442,3 +442,31 @@ test("setOverride rejects unknown units and unknown kinds", () => {
   const judge = fakeJudge([]);
   assert.equal(typeof judge, "object");
 });
+
+test("units that hit the cache are kept in the round even past the judge quota", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxUnitsPerRun: 0 }));
+  const second = fakeJudge([]);
+  await run({ now: now + 30 * MINUTE, dir, judge: second, notifyImpl: () => ({ ok: true }) });
+  assert.equal(second.calls.length, 0);
+  const round = readEvents(dir).filter((event) => event.event === "round").pop();
+  assert.equal(round.leftover, 0);
+  assert.equal(round.processed, 1);
+});
+
+test("a unit that needs judging is deferred, not dropped, when the quota is spent", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  writeFileSync(
+    path.join(dir, "ledger", "s2.jsonl"),
+    `${JSON.stringify(rec("2026-10-24T01:40:00.000Z", 5, { sessionId: "s2" }))}\n`,
+  );
+  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxUnitsPerRun: 1 }));
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 2);
+  const round = readEvents(dir).filter((event) => event.event === "round").pop();
+  assert.equal(round.leftover, 1);
+  assert.equal(round.processed, 1);
+});

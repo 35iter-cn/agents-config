@@ -427,19 +427,26 @@ export async function run({
   const candidates = buildUnits(readLedger(join(dir, "ledger"), { now }))
     .filter((unit) => unit.lastEnd >= windowStart)
     .filter((unit) => now - unit.lastEnd >= cfg.settleMinutes * 60_000);
-  const units = candidates.slice(0, cfg.maxUnitsPerRun);
+  const units = candidates;
   const roundStartedAt = Date.now();
+  const needsJudge = (unit) => {
+    const cached = cache[unit.key];
+    if (cached?.override) return false;
+    return !cached || cached.hash !== unitHash(unit);
+  };
 
   const fresh = [];
   const judged = [];
   let leftover = 0;
+  let judgedCount = 0;
   for (const unit of units) {
-    if (Date.now() - roundStartedAt >= budgetMs) {
-      leftover = units.length - fresh.length;
-      log(`[hours] budget ${budgetMs}ms exhausted, ${leftover} units left for the next round`);
-      break;
+    if (needsJudge(unit) && (judgedCount >= cfg.maxUnitsPerRun || Date.now() - roundStartedAt >= budgetMs)) {
+      leftover += 1;
+      log(`[hours] ${unit.key} left for the next round`);
+      continue;
     }
     const result = await decideUnit(unit, { judge: engine, cfg, now, cache });
+    if (needsJudge(unit)) judgedCount += 1;
     const previous = cache[unit.key];
     const notifiedHash = previous?.notifiedHash ?? null;
     const hash = unitHash(unit);
