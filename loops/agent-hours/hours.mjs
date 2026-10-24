@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createJev } from "../relay/jev.mjs";
+import { buildPlan, CLOCK_DEFAULTS, groupByDay, pruneSynced } from "./clock.mjs";
+import { createClockClient, pickActivity } from "./clock-client.mjs";
 
 const HOME = process.env.HOME ?? homedir();
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +21,7 @@ const REVIEW_DIR = join(CFG_DIR, "review");
 const DIGEST_DIR = join(CFG_DIR, "digest");
 const LOG_DIR = join(HOME, ".config/taskradar/logs/hours");
 const JEV_ENV = join(HOME, ".config/taskradar/jev.env");
+const CLOCK_ENV = join(HOME, ".config/agent-hours/clock.env");
 const RELAY_ENTRY = join(ROOT, "../relay/relay.mjs");
 
 export const DEFAULTS = {
@@ -30,6 +33,7 @@ export const DEFAULTS = {
   reviewLongRunHours: 4,
   maxUnitsPerRun: 30,
   notify: { platform: "feishu", enabled: true },
+  clock: { ...CLOCK_DEFAULTS },
 };
 
 export const LEDGER_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
@@ -57,12 +61,13 @@ export const JUDGE_CRITERIA = {
 
 export function loadConfig(dir = CFG_DIR) {
   const file = join(dir, "config.json");
-  if (!existsSync(file)) return { ...DEFAULTS };
+  if (!existsSync(file)) return { ...DEFAULTS, clock: { ...DEFAULTS.clock } };
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   return {
     ...DEFAULTS,
     ...parsed,
     notify: { ...DEFAULTS.notify, ...(parsed.notify ?? {}) },
+    clock: { ...DEFAULTS.clock, ...(parsed.clock ?? {}) },
   };
 }
 
@@ -337,6 +342,8 @@ export async function run({
   notifyImpl = notifyFeishu,
   logDir = join(dir, "logs"),
   budgetMs = ROUND_BUDGET_MS,
+  dryRunClock = false,
+  clockClient = null,
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
   const cfg = loadConfig(dir);
@@ -352,6 +359,7 @@ export async function run({
   const roundStartedAt = Date.now();
 
   const fresh = [];
+  const judged = [];
   let leftover = 0;
   for (const unit of units) {
     if (Date.now() - roundStartedAt >= budgetMs) {
@@ -396,8 +404,11 @@ export async function run({
         }, { dir });
       }
     }
+    judged.push({ unit, result });
     if (notifiedHash !== hash) fresh.push({ unit, result, hash });
   }
+
+  const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
 
   const report = formatReport(fresh, { tz: cfg.tz, now });
   let delivered = false;
@@ -422,9 +433,131 @@ export async function run({
       { dir, now, tz: cfg.tz },
     );
     appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, truncated: candidates.length - units.length, leftover, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    if (clockOutcome?.line) appendDigest(`  - clock：${clockOutcome.line}`, { dir, now, tz: cfg.tz });
   }
 
-  return { units: candidates.length, fresh, report, delivered, cache };
+  return { units: candidates.length, fresh, report, delivered, cache, clock: clockOutcome?.summary ?? null };
+}
+
+export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join(dir, "logs"), dryRun = false, planOnly = false, client = null, log = () => {} }) {
+  const clockCfg = { ...CLOCK_DEFAULTS, ...(cfg.clock ?? {}), tz: cfg.tz };
+  if (!clockCfg.enabled && !planOnly) return null;
+
+  const syncedFile = join(dir, "synced.json");
+  const synced = existsSync(syncedFile) ? JSON.parse(readFileSync(syncedFile, "utf8")) : {};
+  const plan = buildPlan({ judged, now, cfg: clockCfg, synced });
+  const summary = {
+    targets: plan.targets.length,
+    create: plan.create.length,
+    patch: plan.patch.length,
+    remove: plan.remove.length,
+    conflict: 0,
+    conflictMinutes: 0,
+    failed: 0,
+    blocked: plan.blocked,
+    dropped: plan.dropped,
+  };
+  const minute = (segment) => Math.round((segment.end - segment.start) / 60_000);
+
+  if (dryRun || planOnly) {
+    if (!dryRun) {
+      appendEvent({ event: "clock_plan", ...summary, plan: { create: plan.create.map((s) => [new Date(s.start).toISOString(), new Date(s.end).toISOString()]) } }, { dir: logDir, now, tz: cfg.tz });
+    }
+    for (const segment of plan.create) {
+      log(`[clock] plan ${new Date(segment.start).toISOString()} → ${new Date(segment.end).toISOString()} (${minute(segment)}min)`);
+    }
+    return { summary, line: `计划 ${summary.targets} 段（新建 ${summary.create}、改 ${summary.patch}、删 ${summary.remove}）` };
+  }
+
+  const apiKey = readEnvFile(CLOCK_ENV).CLOCK_API_KEY ?? "";
+  if (!apiKey) {
+    appendEvent({ event: "clock", action: "error", code: "no-key" }, { dir: logDir, now, tz: cfg.tz });
+    log("[error] clock: CLOCK_API_KEY 缺失");
+    return { summary, line: "未配置 CLOCK_API_KEY" };
+  }
+
+  const api = client ?? createClockClient({ baseUrl: clockCfg.baseUrl, apiKey });
+  let activityId = clockCfg.activityId;
+  if (!activityId) {
+    const listed = await api.activities();
+    const activity = listed.ok ? pickActivity(listed.data, { name: clockCfg.activityName }) : null;
+    if (!activity) {
+      appendEvent({ event: "clock", action: "error", code: "no-activity", name: clockCfg.activityName }, { dir: logDir, now, tz: cfg.tz });
+      log(`[error] clock: 找不到名为 ${clockCfg.activityName} 的活动`);
+      return { summary, line: `找不到活动 ${clockCfg.activityName}` };
+    }
+    activityId = activity.id;
+  }
+
+  const created = [];
+  const patched = [];
+  const deleted = [];
+  let budget = clockCfg.maxWritesPerRun;
+
+  for (const segment of plan.create) {
+    if (budget <= 0) break;
+    budget -= 1;
+    const result = await api.create({ activityId, start: segment.start, end: segment.end });
+    if (result.ok) {
+      created.push({ id: result.data.id, start: segment.start, end: segment.end });
+      appendEvent({ event: "clock", action: "create", id: result.data.id, start: new Date(segment.start).toISOString(), end: new Date(segment.end).toISOString(), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    if (result.code === "overlap") {
+      summary.conflict += 1;
+      summary.conflictMinutes += minute(segment);
+      appendEvent({ event: "clock", action: "conflict", start: new Date(segment.start).toISOString(), end: new Date(segment.end).toISOString(), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    summary.failed += 1;
+    appendEvent({ event: "clock", action: "create-failed", code: result.code, status: result.status, start: new Date(segment.start).toISOString() }, { dir: logDir, now, tz: cfg.tz });
+  }
+
+  for (const item of plan.patch) {
+    if (budget <= 0) break;
+    budget -= 1;
+    const result = await api.patch(item.id, { start: item.start, end: item.end });
+    if (result.ok) {
+      patched.push(item);
+      appendEvent({ event: "clock", action: "patch", id: item.id, start: new Date(item.start).toISOString(), end: new Date(item.end).toISOString() }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    summary.failed += 1;
+    appendEvent({ event: "clock", action: "patch-failed", id: item.id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
+  }
+
+  for (const id of plan.remove) {
+    if (budget <= 0) break;
+    budget -= 1;
+    const result = await api.remove(id);
+    if (result.ok) {
+      deleted.push(id);
+      appendEvent({ event: "clock", action: "delete", id }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    summary.failed += 1;
+    appendEvent({ event: "clock", action: "delete-failed", id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
+  }
+
+  if (created.length || patched.length || deleted.length) {
+    const byId = new Map(Object.values(synced ?? {}).flat().map((item) => [item.id, { ...item }]));
+    for (const id of deleted) byId.delete(id);
+    for (const item of patched) {
+      const current = byId.get(item.id);
+      if (current) {
+        current.start = item.start;
+        current.end = item.end;
+      }
+    }
+    for (const item of created) byId.set(item.id, item);
+    writeJsonAtomic(syncedFile, pruneSynced(groupByDay([...byId.values()], clockCfg.tz), { now, tz: clockCfg.tz, ttlDays: clockCfg.syncedTtlDays }));
+  }
+
+  appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
+  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${
+    summary.conflictMinutes ? `（${summary.conflictMinutes} 分钟）` : ""
+  }${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
+  return { summary, line };
 }
 
 function resolveEntry() {
@@ -440,6 +573,7 @@ function resolveEntry() {
 async function main(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
   const dryRun = flags.has("--dry-run");
+  const dryRunClock = flags.has("--dry-run-clock");
   const notify = !flags.has("--no-notify");
   const release = acquireLock(join(CFG_DIR, ".lock"));
   if (!release) {
@@ -447,7 +581,7 @@ async function main(argv) {
     return;
   }
   try {
-    const outcome = await run({ dryRun, notify, logDir: LOG_DIR });
+    const outcome = await run({ dryRun, notify, logDir: LOG_DIR, dryRunClock });
     if (dryRun) process.stdout.write(`${outcome.report || "(no new units)"}\n`);
     process.stderr.write(`[hours] units=${outcome.units} fresh=${outcome.fresh.length} notified=${outcome.delivered}\n`);
   } finally {
