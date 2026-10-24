@@ -17,7 +17,7 @@ Pi 扩展：每轮对话结束（`agent_settled`）时往 `~/.config/agent-hours
   "aborted": false }
 ```
 
-`source` 判定顺序：`AGENT_LEDGER_SOURCE` → `RELAY_PLATFORM` → session 文件名含 `_fs-` / `_sl-` / `_tg-` → `interactive`。
+`source` 判定顺序：`AGENT_LEDGER_SOURCE` → `RELAY_PLATFORM` → `interactive`。不靠 session 文件名兜底：在终端 `pi -r` 恢复一段 feishu 会话时文件名仍带 `_fs-`，兜底会误标成 `relay`。
 
 ## 安装
 

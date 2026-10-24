@@ -18,11 +18,9 @@ export function normalizeSessionId(value) {
   return safe || "unknown";
 }
 
-export function detectSource({ env = {}, sessionFile = "" } = {}) {
+export function detectSource({ env = {} } = {}) {
   if (env.AGENT_LEDGER_SOURCE) return String(env.AGENT_LEDGER_SOURCE);
   if (env.RELAY_PLATFORM) return "relay";
-  const base = String(sessionFile ?? "").split("/").pop() ?? "";
-  if (/_(fs|sl|tg)-/.test(base)) return "relay";
   return "interactive";
 }
 
@@ -107,7 +105,7 @@ export function createRunTracker({ now = () => Date.now(), env = () => process.e
       const record = buildRecord({
         sessionId,
         sessionFile,
-        source: detectSource({ env: envOverride ?? env(), sessionFile }),
+        source: detectSource({ env: envOverride ?? env() }),
         startedAtMs,
         endedAtMs: now(),
         texts: active.texts,

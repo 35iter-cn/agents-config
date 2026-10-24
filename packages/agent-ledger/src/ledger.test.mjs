@@ -39,24 +39,13 @@ test("normalizeSessionId keeps safe characters and replaces the rest", () => {
   assert.equal(normalizeSessionId(null), "unknown");
 });
 
-test("detectSource prefers explicit ledger source then relay platform then session file", () => {
+test("detectSource prefers an explicit ledger source, then relay platform, then interactive", () => {
   assert.equal(
     detectSource({ env: { AGENT_LEDGER_SOURCE: "automation", RELAY_PLATFORM: "feishu" } }),
     "automation",
   );
   assert.equal(detectSource({ env: { RELAY_PLATFORM: "feishu" } }), "relay");
-  assert.equal(
-    detectSource({ env: {}, sessionFile: "/sessions/dir/2026-10-23T10-11-58_fs-th-om_1.jsonl" }),
-    "relay",
-  );
-  assert.equal(
-    detectSource({ env: {}, sessionFile: "/sessions/dir/2026-10-23T10-11-58_sl-t1.jsonl" }),
-    "relay",
-  );
-  assert.equal(
-    detectSource({ env: {}, sessionFile: "/sessions/dir/2026-10-23T10-11-58_01a1662c.jsonl" }),
-    "interactive",
-  );
+  assert.equal(detectSource({ env: {} }), "interactive");
 });
 
 test("assistantText concatenates text parts and ignores other roles", () => {
@@ -116,6 +105,18 @@ test("a run settles once with wall-clock duration and no truncation", () => {
   assert.equal(record.source, "relay");
   assert.equal(record.userText, "跑一下端到端测试");
   assert.equal(tracker.drain({ sessionId: "fs-th-1" }), null);
+});
+
+test("a relay session file without any environment hint stays interactive", () => {
+  const clock = fixedClock();
+  const tracker = createRunTracker({ now: clock.now, env: () => ({}) });
+  tracker.begin("只回复：ok");
+  tracker.start();
+  const record = tracker.drain({
+    sessionId: "fs-th-om_1",
+    sessionFile: "/sessions/dir/2026-10-23T10-11-58_fs-th-om_1.jsonl",
+  });
+  assert.equal(record.source, "interactive");
 });
 
 test("duration is measured from the first agent_start of a multi-run settle window", () => {
