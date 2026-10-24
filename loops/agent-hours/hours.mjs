@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -32,7 +32,9 @@ export const DEFAULTS = {
   notify: { platform: "feishu", enabled: true },
 };
 
-const LEDGER_WINDOW_MS = 48 * 60 * 60 * 1000;
+export const LEDGER_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const ROUND_BUDGET_MS = 10 * 60 * 1000;
+const LOCK_STALE_MS = 10 * 60 * 1000;
 const USER_TEXT_LIMIT = 1200;
 const OUTPUT_LIMIT = 1200;
 const DECISIONS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -74,8 +76,7 @@ export function readLedger(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDG
       if (!line.trim()) continue;
       try {
         const record = JSON.parse(line);
-        const startedAt = Date.parse(record.startedAt);
-        if (Number.isNaN(startedAt) || now - startedAt > windowMs) continue;
+        if (Number.isNaN(Date.parse(record.startedAt))) continue;
         records.push(record);
       } catch {
         continue;
@@ -258,6 +259,41 @@ export function chunkMessage(text, limit = NOTIFY_CHUNK_CHARS) {
   return chunks.length ? chunks : [];
 }
 
+export function acquireLock(file, { now = Date.now(), staleMs = LOCK_STALE_MS, pid = process.pid } = {}) {
+  mkdirSync(dirname(file), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(file, JSON.stringify({ pid, ts: now }), { flag: "wx", mode: 0o600 });
+      return () => rmSync(file, { force: true });
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const held = readLock(file);
+      if (held && isAlive(held.pid) && now - held.ts <= staleMs) return null;
+      rmSync(file, { force: true });
+    }
+  }
+  return null;
+}
+
+function readLock(file) {
+  try {
+    const held = JSON.parse(readFileSync(file, "utf8"));
+    return typeof held?.ts === "number" ? held : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
 function appendDigest(line, { dir = CFG_DIR, now, tz }) {
   const digestDir = join(dir, "digest");
   mkdirSync(digestDir, { recursive: true });
@@ -300,6 +336,7 @@ export async function run({
   notify = true,
   notifyImpl = notifyFeishu,
   logDir = join(dir, "logs"),
+  budgetMs = ROUND_BUDGET_MS,
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
   const cfg = loadConfig(dir);
@@ -307,12 +344,21 @@ export async function run({
   const cache = existsSync(decisionsFile) ? JSON.parse(readFileSync(decisionsFile, "utf8")) : {};
   const engine = judge ?? createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
 
-  const units = buildUnits(readLedger(join(dir, "ledger"), { now }))
-    .filter((unit) => now - unit.lastEnd >= cfg.settleMinutes * 60_000)
-    .slice(0, cfg.maxUnitsPerRun);
+  const windowStart = now - LEDGER_WINDOW_MS;
+  const candidates = buildUnits(readLedger(join(dir, "ledger"), { now }))
+    .filter((unit) => unit.lastEnd >= windowStart)
+    .filter((unit) => now - unit.lastEnd >= cfg.settleMinutes * 60_000);
+  const units = candidates.slice(0, cfg.maxUnitsPerRun);
+  const roundStartedAt = Date.now();
 
   const fresh = [];
+  let leftover = 0;
   for (const unit of units) {
+    if (Date.now() - roundStartedAt >= budgetMs) {
+      leftover = units.length - fresh.length;
+      log(`[hours] budget ${budgetMs}ms exhausted, ${leftover} units left for the next round`);
+      break;
+    }
     const result = await decideUnit(unit, { judge: engine, cfg, now, cache });
     const previous = cache[unit.key];
     const notifiedHash = previous?.notifiedHash ?? null;
@@ -372,13 +418,13 @@ export async function run({
       return acc;
     }, {});
     appendDigest(
-      `- ${formatClock(now, cfg.tz)} 单元 ${units.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
+      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
       { dir, now, tz: cfg.tz },
     );
-    appendEvent({ event: "round", units: units.length, fresh: fresh.length, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, truncated: candidates.length - units.length, leftover, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
   }
 
-  return { units: units.length, fresh, report, delivered, cache };
+  return { units: candidates.length, fresh, report, delivered, cache };
 }
 
 function resolveEntry() {
@@ -395,9 +441,18 @@ async function main(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
   const dryRun = flags.has("--dry-run");
   const notify = !flags.has("--no-notify");
-  const outcome = await run({ dryRun, notify, logDir: LOG_DIR });
-  if (dryRun) process.stdout.write(`${outcome.report || "(no new units)"}\n`);
-  process.stderr.write(`[hours] units=${outcome.units} fresh=${outcome.fresh.length} notified=${outcome.delivered}\n`);
+  const release = acquireLock(join(CFG_DIR, ".lock"));
+  if (!release) {
+    process.stderr.write("[hours] skip: another round holds the lock\n");
+    return;
+  }
+  try {
+    const outcome = await run({ dryRun, notify, logDir: LOG_DIR });
+    if (dryRun) process.stdout.write(`${outcome.report || "(no new units)"}\n`);
+    process.stderr.write(`[hours] units=${outcome.units} fresh=${outcome.fresh.length} notified=${outcome.delivered}\n`);
+  } finally {
+    release();
+  }
 }
 
 if (resolveEntry()) {

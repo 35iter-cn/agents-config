@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 
 import os from "node:os";
 import path from "node:path";
 import {
+  acquireLock,
   buildUnits,
   chunkMessage,
   decideUnit,
@@ -231,7 +232,9 @@ test("a run writes one event stream with unit, notify and round lines", async ()
   assert.equal(notify.ok, true);
   assert.equal(notify.units, 1);
   assert.equal(round.units, 1);
-  assert.equal(round.fresh, 1);
+  assert.equal(round.processed, 1);
+  assert.equal(round.leftover, 0);
+  assert.equal(round.truncated, 0);
   assert.deepEqual(round.counts, { count: 1 });
 });
 
@@ -269,12 +272,77 @@ test("dry run writes nothing", async () => {
   assert.equal(existsSync(path.join(dir, "logs")), false);
 });
 
-test("ledger reader ignores records older than the window", () => {
+test("ledger reader keeps every record of a file whose mtime is inside the window", () => {
   const { dir, now } = sandbox();
   const fresh = readLedger(path.join(dir, "ledger"), { now });
   assert.equal(fresh.length, 2);
-  const stale = readLedger(path.join(dir, "ledger"), { now: now + 3 * 24 * 60 * MINUTE });
+  const stale = readLedger(path.join(dir, "ledger"), { now: now + 4 * 24 * 60 * MINUTE });
   assert.equal(stale.length, 0);
+});
+
+test("unit keys do not drift when a head run falls out of the startedAt window", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-"));
+  mkdirSync(path.join(dir, "ledger"), { recursive: true });
+  const now = Date.now();
+  const head = new Date(now - 71.5 * 3_600_000).toISOString();
+  const tail = new Date(now - 71.5 * 3_600_000 + 12 * MINUTE).toISOString();
+  writeFileSync(path.join(dir, "ledger", "s1.jsonl"), `${JSON.stringify(rec(head, 10))}\n${JSON.stringify(rec(tail, 10))}\n`);
+  const keysAt = (time) => buildUnits(readLedger(path.join(dir, "ledger"), { now: time }), {}).map((unit) => unit.key);
+  const before = keysAt(now);
+  assert.equal(before.length, 1);
+  assert.deepEqual(keysAt(now + 2 * 3_600_000), before);
+});
+
+test("units that ended before the window are dropped before judging", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-"));
+  mkdirSync(path.join(dir, "ledger"), { recursive: true });
+  const now = Date.now();
+  const old = new Date(now - 73 * 3_600_000).toISOString();
+  writeFileSync(path.join(dir, "ledger", "s1.jsonl"), `${JSON.stringify(rec(old, 5))}\n`);
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 0);
+  assert.equal(judge.calls.length, 0);
+});
+
+test("a second round cannot take the lock and a released one can", () => {
+  const file = path.join(mkdtempSync(path.join(os.tmpdir(), "agent-hours-")), ".lock");
+  const first = acquireLock(file);
+  assert.equal(typeof first, "function");
+  assert.equal(acquireLock(file), null);
+  first();
+  const second = acquireLock(file);
+  assert.equal(typeof second, "function");
+  second();
+});
+
+test("a stale lock is taken over instead of blocking forever", () => {
+  const file = path.join(mkdtempSync(path.join(os.tmpdir(), "agent-hours-")), ".lock");
+  writeFileSync(file, JSON.stringify({ pid: process.pid, ts: Date.now() - 60 * MINUTE }));
+  const release = acquireLock(file);
+  assert.equal(typeof release, "function");
+  release();
+});
+
+test("the round budget stops judging and leaves the rest for the next round", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-"));
+  mkdirSync(path.join(dir, "ledger"), { recursive: true });
+  writeFileSync(
+    path.join(dir, "ledger", "s1.jsonl"),
+    `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5))}\n${JSON.stringify(rec("2026-10-24T02:00:00.000Z", 5))}\n`,
+  );
+  const slow = {
+    async judgeChoice() {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null };
+    },
+  };
+  const outcome = await run({ now: Date.parse("2026-10-24T02:30:00.000Z"), dir, judge: slow, budgetMs: 10, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 2);
+  assert.equal(outcome.fresh.length, 1);
+  const round = readEvents(dir).find((event) => event.event === "round");
+  assert.equal(round.leftover, 1);
+  assert.equal(round.processed, 1);
 });
 
 test("report header counts each verdict and totals counted minutes", () => {
