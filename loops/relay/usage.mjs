@@ -64,6 +64,7 @@ export function createUsage(deps = {}) {
         : { magic: "unjudged", confidence: null, fallback: status };
       const record = {
         ts: new Date(endedAt).toISOString(),
+        event: "usage",
         jobId: job?.id ?? null,
         platform,
         key,
