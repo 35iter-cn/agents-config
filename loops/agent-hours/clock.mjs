@@ -10,7 +10,7 @@ export const CLOCK_DEFAULTS = {
   warnDailyHours: 12,
   changeThresholdMs: MINUTE_MS,
   unionGapMinutes: 15,
-  backfillHours: 24,
+  backfillHours: 48,
   maxWritesPerRun: 50,
   syncedTtlDays: 7,
 };
