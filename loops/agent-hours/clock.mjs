@@ -139,3 +139,14 @@ export function pruneSynced(synced, { now, tz, ttlDays }) {
   }
   return out;
 }
+
+export function pruneMissing(synced, liveIds, { windowFrom }) {
+  const out = {};
+  let dropped = 0;
+  for (const [day, records] of Object.entries(synced ?? {})) {
+    const kept = records.filter((record) => record.end < windowFrom || liveIds.has(record.id));
+    dropped += records.length - kept.length;
+    if (kept.length) out[day] = kept;
+  }
+  return { synced: out, dropped };
+}

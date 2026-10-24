@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createJev } from "../relay/jev.mjs";
-import { buildPlan, CLOCK_DEFAULTS, groupByDay, pruneSynced } from "./clock.mjs";
+import { buildPlan, CLOCK_DEFAULTS, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
 import { createClockClient, pickActivity } from "./clock-client.mjs";
 
 const HOME = process.env.HOME ?? homedir();
@@ -439,41 +439,54 @@ export async function run({
   return { units: candidates.length, fresh, report, delivered, cache, clock: clockOutcome?.summary ?? null };
 }
 
-export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join(dir, "logs"), dryRun = false, planOnly = false, client = null, log = () => {} }) {
+export async function syncClock({
+  judged,
+  now,
+  cfg,
+  dir = CFG_DIR,
+  logDir = join(dir, "logs"),
+  dryRun = false,
+  planOnly = false,
+  client = null,
+  log = () => {},
+}) {
   const clockCfg = { ...CLOCK_DEFAULTS, ...(cfg.clock ?? {}), tz: cfg.tz };
   if (!clockCfg.enabled && !planOnly) return null;
 
   const syncedFile = join(dir, "synced.json");
-  const synced = existsSync(syncedFile) ? JSON.parse(readFileSync(syncedFile, "utf8")) : {};
-  const plan = buildPlan({ judged, now, cfg: clockCfg, synced });
-  const summary = {
-    targets: plan.targets.length,
-    create: plan.create.length,
-    patch: plan.patch.length,
-    remove: plan.remove.length,
-    conflict: 0,
-    conflictMinutes: 0,
-    failed: 0,
-    blocked: plan.blocked,
-    dropped: plan.dropped,
-  };
+  const stored = existsSync(syncedFile) ? JSON.parse(readFileSync(syncedFile, "utf8")) : {};
   const minute = (segment) => Math.round((segment.end - segment.start) / 60_000);
+  const iso = (ms) => new Date(ms).toISOString();
 
   if (dryRun || planOnly) {
+    const plan = buildPlan({ judged, now, cfg: clockCfg, synced: stored });
     if (!dryRun) {
-      appendEvent({ event: "clock_plan", ...summary, plan: { create: plan.create.map((s) => [new Date(s.start).toISOString(), new Date(s.end).toISOString()]) } }, { dir: logDir, now, tz: cfg.tz });
+      appendEvent(
+        {
+          event: "clock_plan",
+          targets: plan.targets.length,
+          create: plan.create.length,
+          patch: plan.patch.length,
+          remove: plan.remove.length,
+          blocked: plan.blocked,
+          dropped: plan.dropped,
+          plan: { create: plan.create.map((segment) => [iso(segment.start), iso(segment.end)]) },
+        },
+        { dir: logDir, now, tz: cfg.tz },
+      );
     }
-    for (const segment of plan.create) {
-      log(`[clock] plan ${new Date(segment.start).toISOString()} → ${new Date(segment.end).toISOString()} (${minute(segment)}min)`);
-    }
-    return { summary, line: `计划 ${summary.targets} 段（新建 ${summary.create}、改 ${summary.patch}、删 ${summary.remove}）` };
+    for (const segment of plan.create) log(`[clock] plan ${iso(segment.start)} → ${iso(segment.end)} (${minute(segment)}min)`);
+    return {
+      summary: { targets: plan.targets.length, create: plan.create.length, patch: plan.patch.length, remove: plan.remove.length, blocked: plan.blocked, dropped: plan.dropped },
+      line: `计划 ${plan.targets.length} 段（新建 ${plan.create.length}、改 ${plan.patch.length}、删 ${plan.remove.length}）`,
+    };
   }
 
   const apiKey = readEnvFile(CLOCK_ENV).CLOCK_API_KEY ?? "";
   if (!apiKey) {
     appendEvent({ event: "clock", action: "error", code: "no-key" }, { dir: logDir, now, tz: cfg.tz });
     log("[error] clock: CLOCK_API_KEY 缺失");
-    return { summary, line: "未配置 CLOCK_API_KEY" };
+    return { summary: null, line: "未配置 CLOCK_API_KEY" };
   }
 
   const api = client ?? createClockClient({ baseUrl: clockCfg.baseUrl, apiKey });
@@ -484,10 +497,28 @@ export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join
     if (!activity) {
       appendEvent({ event: "clock", action: "error", code: "no-activity", name: clockCfg.activityName }, { dir: logDir, now, tz: cfg.tz });
       log(`[error] clock: 找不到名为 ${clockCfg.activityName} 的活动`);
-      return { summary, line: `找不到活动 ${clockCfg.activityName}` };
+      return { summary: null, line: `找不到活动 ${clockCfg.activityName}` };
     }
     activityId = activity.id;
   }
+
+  const windowFrom = now - (clockCfg.backfillHours + 6) * 3_600_000;
+  const liveIds = await fetchLiveIds(api, { from: windowFrom, to: now + 3_600_000 });
+  const { synced, dropped } = liveIds ? pruneMissing(stored, liveIds, { windowFrom }) : { synced: stored, dropped: 0 };
+  if (dropped) appendEvent({ event: "clock", action: "forget-missing", dropped }, { dir: logDir, now, tz: cfg.tz });
+
+  const plan = buildPlan({ judged, now, cfg: clockCfg, synced });
+  const summary = {
+    targets: plan.targets.length,
+    create: plan.create.length,
+    patch: plan.patch.length,
+    remove: plan.remove.length,
+    conflict: 0,
+    conflictMinutes: 0,
+    failed: 0,
+    dropped,
+    blocked: plan.blocked,
+  };
 
   const created = [];
   const patched = [];
@@ -500,17 +531,17 @@ export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join
     const result = await api.create({ activityId, start: segment.start, end: segment.end });
     if (result.ok) {
       created.push({ id: result.data.id, start: segment.start, end: segment.end });
-      appendEvent({ event: "clock", action: "create", id: result.data.id, start: new Date(segment.start).toISOString(), end: new Date(segment.end).toISOString(), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
+      appendEvent({ event: "clock", action: "create", id: result.data.id, start: iso(segment.start), end: iso(segment.end), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
       continue;
     }
     if (result.code === "overlap") {
       summary.conflict += 1;
       summary.conflictMinutes += minute(segment);
-      appendEvent({ event: "clock", action: "conflict", start: new Date(segment.start).toISOString(), end: new Date(segment.end).toISOString(), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
+      appendEvent({ event: "clock", action: "conflict", start: iso(segment.start), end: iso(segment.end), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
       continue;
     }
     summary.failed += 1;
-    appendEvent({ event: "clock", action: "create-failed", code: result.code, status: result.status, start: new Date(segment.start).toISOString() }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "clock", action: "create-failed", code: result.code, status: result.status, start: iso(segment.start) }, { dir: logDir, now, tz: cfg.tz });
   }
 
   for (const item of plan.patch) {
@@ -519,7 +550,7 @@ export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join
     const result = await api.patch(item.id, { start: item.start, end: item.end });
     if (result.ok) {
       patched.push(item);
-      appendEvent({ event: "clock", action: "patch", id: item.id, start: new Date(item.start).toISOString(), end: new Date(item.end).toISOString() }, { dir: logDir, now, tz: cfg.tz });
+      appendEvent({ event: "clock", action: "patch", id: item.id, start: iso(item.start), end: iso(item.end) }, { dir: logDir, now, tz: cfg.tz });
       continue;
     }
     summary.failed += 1;
@@ -540,7 +571,7 @@ export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join
   }
 
   if (created.length || patched.length || deleted.length) {
-    const byId = new Map(Object.values(synced ?? {}).flat().map((item) => [item.id, { ...item }]));
+    const byId = new Map(Object.values(synced).flat().map((item) => [item.id, { ...item }]));
     for (const id of deleted) byId.delete(id);
     for (const item of patched) {
       const current = byId.get(item.id);
@@ -554,10 +585,21 @@ export async function syncClock({ judged, now, cfg, dir = CFG_DIR, logDir = join
   }
 
   appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
-  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${
-    summary.conflictMinutes ? `（${summary.conflictMinutes} 分钟）` : ""
-  }${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
+  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${summary.conflictMinutes} 分钟）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
   return { summary, line };
+}
+
+async function fetchLiveIds(api, { from, to }) {
+  const ids = new Set();
+  let offset = 0;
+  for (;;) {
+    const result = await api.list({ start: from, end: to, limit: 100, offset });
+    if (!result.ok) return null;
+    for (const item of result.data?.periods ?? []) ids.add(item.id);
+    if (!result.data?.hasMore || offset >= 900) break;
+    offset += 100;
+  }
+  return ids;
 }
 
 function resolveEntry() {

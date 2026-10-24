@@ -10,6 +10,7 @@ import {
   groupByDay,
   oversizeDays,
   planReconcile,
+  pruneMissing,
   pruneSynced,
   unionSegments,
 } from "./clock.mjs";
@@ -181,4 +182,31 @@ test("TC-C12 grouping buckets records by the local day of their start", () => {
     TZ,
   );
   assert.deepEqual(Object.keys(grouped).sort(), ["2026-10-24"]);
+});
+
+test("TC-C13 rows missing from the server are forgotten so the next round rebuilds them", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const { synced, dropped } = pruneMissing(
+    {
+      "2026-10-24": [
+        { id: "gone", start: now - 2 * HOUR, end: now - HOUR },
+        { id: "alive", start: now - HOUR, end: now },
+      ],
+    },
+    new Set(["alive"]),
+    { windowFrom: now - 24 * HOUR },
+  );
+  assert.equal(dropped, 1);
+  assert.deepEqual(synced["2026-10-24"].map((row) => row.id), ["alive"]);
+});
+
+test("TC-C14 rows older than the verification window are kept untouched", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const { synced, dropped } = pruneMissing(
+    { "2026-10-20": [{ id: "old", start: now - 5 * 24 * HOUR, end: now - 5 * 24 * HOUR + HOUR }] },
+    new Set(),
+    { windowFrom: now - 24 * HOUR },
+  );
+  assert.equal(dropped, 0);
+  assert.equal(synced["2026-10-20"].length, 1);
 });
