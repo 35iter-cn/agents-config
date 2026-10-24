@@ -15,6 +15,7 @@ function answer(choice, confidence) {
 function harness(fetchImpl, extra = {}) {
   const logs = [];
   const calls = [];
+  const sleeps = [];
   const jev = createJev({
     env: { JEV_API_KEY: "k", ...extra.env },
     fetchImpl: async (...args) => {
@@ -24,10 +25,15 @@ function harness(fetchImpl, extra = {}) {
     log: (level, tag, record) => logs.push({ level, tag, record }),
     now: extra.now,
     timeoutMs: extra.timeoutMs ?? 50,
+    sleep: extra.sleep ?? ((ms) => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    }),
+    random: extra.random ?? (() => 0.5),
     base: "https://jev.test",
     model: "typesafe/jev",
   });
-  return { jev, logs, calls };
+  return { jev, logs, calls, sleeps };
 }
 
 test("TC-J1 no key returns nokey without calling fetch", async () => {
@@ -57,7 +63,7 @@ test("TC-J3 low confidence yields null choice and low-confidence fallback", asyn
   assert.equal(result.fallback, "low-confidence");
 });
 
-test("TC-J4 abort yields timeout without retry", async () => {
+test("TC-J4 abort retries twice then reports timeout", async () => {
   let calls = 0;
   const hanging = (url, init) => {
     calls += 1;
@@ -69,13 +75,15 @@ test("TC-J4 abort yields timeout without retry", async () => {
       });
     });
   };
-  const { jev } = harness(hanging, { timeoutMs: 20 });
+  const { jev, logs } = harness(hanging, { timeoutMs: 20 });
   const result = await jev.judgeChoice({ id: "x", state: "s", instructions: "i", criteria });
   assert.equal(result.fallback, "timeout");
-  assert.equal(calls, 1);
+  assert.equal(calls, 3);
+  assert.equal(result.attempts, 3);
+  assert.equal(logs[0].record.attempts, 3);
 });
 
-test("TC-J5 network error retries exactly once", async () => {
+test("TC-J5 network error retries twice before failing", async () => {
   let calls = 0;
   const { jev } = harness(async () => {
     calls += 1;
@@ -83,10 +91,10 @@ test("TC-J5 network error retries exactly once", async () => {
   });
   const result = await jev.judgeChoice({ id: "x", state: "s", instructions: "i", criteria });
   assert.equal(result.fallback, "error");
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
-test("TC-J6 5xx retries once then falls back to error", async () => {
+test("TC-J6 5xx retries twice then falls back to error", async () => {
   let calls = 0;
   const { jev } = harness(async () => {
     calls += 1;
@@ -94,7 +102,7 @@ test("TC-J6 5xx retries once then falls back to error", async () => {
   });
   const result = await jev.judgeChoice({ id: "x", state: "s", instructions: "i", criteria });
   assert.equal(result.fallback, "error");
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
 test("TC-J7 429 is not retried", async () => {
@@ -131,6 +139,28 @@ test("TC-J9 identical state and criteria hit the cache", async () => {
   await jev.judgeChoice({ id: "x", state: "same", instructions: "i", criteria });
   assert.equal(calls, 1);
   assert.equal(logs.length, 2);
+});
+
+test("TC-J11 backoff doubles from 500ms with jitter", async () => {
+  const { jev, sleeps } = harness(async () => {
+    throw new Error("boom");
+  });
+  await jev.judgeChoice({ id: "x", state: "s", instructions: "i", criteria });
+  assert.deepEqual(sleeps, [500, 1000]);
+});
+
+test("TC-J12 a retry that succeeds clears the fallback", async () => {
+  let calls = 0;
+  const { jev, sleeps } = harness(async () => {
+    calls += 1;
+    if (calls < 3) return { ok: false, status: 503, text: async () => "down" };
+    return answer("a", 0.92);
+  });
+  const result = await jev.judgeChoice({ id: "x", state: "s", instructions: "i", criteria });
+  assert.equal(result.fallback, null);
+  assert.equal(result.choice, "a");
+  assert.equal(result.attempts, 3);
+  assert.deepEqual(sleeps, [500, 1000]);
 });
 
 test("TC-J10 judgeScore reads the noul answer", async () => {

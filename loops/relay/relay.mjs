@@ -29,7 +29,6 @@ export const paths = {
   sessionsDir: join(HOME, ".pi/agent/sessions", `--${join(HOME, "code").replace(/^\//, "").replace(/[/\\:]/g, "-")}--`),
   promptFile: join(ROOT, "prompts/thread.md"),
   candidateRulesFile: join(ROOT, "prompts/candidate-rules.md"),
-  usageDir: join(CFG_DIR, "logs/usage"),
 };
 
 export function usage() {
@@ -65,7 +64,7 @@ async function main() {
     stateFile: join(CFG_DIR, `relay-${mode}.json`),
   };
   const jev = createJev({ env: { ...process.env, ...readEnv(join(CFG_DIR, "jev.env")) }, log: defaultLog });
-  const usageRecorder = createUsage({ dir: platformPaths.usageDir, judge: jev, log: defaultLog });
+  const usageRecorder = createUsage({ dir: join(paths.logDir, mode), judge: jev, log: defaultLog });
   const core = createCore({ adapter, paths: platformPaths, deps: { jev, usage: usageRecorder } });
   core.pruneLogs();
   setInterval(() => core.pruneLogs(), 86_400_000).unref();

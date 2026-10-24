@@ -24,6 +24,8 @@ loops/
     └── *.test.mjs           与源码同目录的用例（`node --test`）
 ```
 
+`agent-hours/` 是工时链路的判定段（spec 06）：每 30 分钟读一次 Pi 插件写的账本，按 session 划单元、交 Jev 判 `count / skip / review`，有新增就推一条飞书。状态在 `~/.config/agent-hours/`（`decisions.json` 缓存、`review/` 队列、`digest/` 每日一行），Clock 写入尚未接。
+
 一个平台一个进程：`relay@feishu` / `relay@slack` / `relay@telegram`，由同一个 systemd 模板实例化。核里没有平台字面量，平台差异只在 `adapters/<platform>.mjs`。
 
 ## 安装
@@ -33,6 +35,11 @@ loops/
 ln -sf "$(pwd)/loops/intake/systemd/intake.service" ~/.config/systemd/user/
 ln -sf "$(pwd)/loops/intake/systemd/intake.timer"   ~/.config/systemd/user/
 systemctl --user enable --now intake.timer
+
+# 定时型（工时判定）
+ln -sf "$(pwd)/loops/agent-hours/systemd/agent-hours.service" ~/.config/systemd/user/
+ln -sf "$(pwd)/loops/agent-hours/systemd/agent-hours.timer"   ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now agent-hours.timer
 
 # 常驻型（模板 unit，一次链接，按实例启用）
 ln -sf "$(pwd)/loops/relay/systemd/relay@.service" ~/.config/systemd/user/
