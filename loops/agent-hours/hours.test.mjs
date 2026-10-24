@@ -7,10 +7,13 @@ import {
   acquireLock,
   buildUnits,
   chunkMessage,
+  clearOverride,
   decideUnit,
   formatReport,
+  listReviews,
   readLedger,
   run,
+  setOverride,
   unitHash,
   unitState,
   DEFAULTS,
@@ -360,4 +363,82 @@ test("report header counts each verdict and totals counted minutes", () => {
   assert.match(report, /计入 1 \/ 不计 0 \/ 待确认 1/);
   assert.match(report, /合计 10 分钟/);
   assert.match(report, /待确认 .*low-margin/);
+});
+
+test("a manual override wins over both the cached verdict and a fresh judge call", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: null, confidence: null, probabilities: { count: 0.73, skip: 0.27 }, fallback: "low-confidence" }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+
+  setOverride({ dir, key, kind: "count", note: "MagicDoor 事务（PR 审批状态确认），人工裁定计入" });
+  const second = fakeJudge([]);
+  const outcome = await run({ now, dir, judge: second, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.fresh.length, 1);
+  assert.equal(outcome.fresh[0].result.kind, "count");
+  assert.equal(outcome.fresh[0].result.overridden, true);
+  assert.equal(second.calls.length, 0);
+
+  const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  assert.equal(decisions[key].result.kind, "count");
+  assert.equal(decisions[key].override.kind, "count");
+  const override = readEvents(dir).find((event) => event.event === "override");
+  assert.equal(override.kind, "count");
+  assert.equal(override.previous, "review");
+});
+
+test("an override survives a changed input hash and re-judging is skipped", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  setOverride({ dir, key, kind: "count" });
+
+  writeFileSync(
+    path.join(dir, "ledger", "s1.jsonl"),
+    `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5, { userText: "换了请求" }))}\n`,
+  );
+  const grown = fakeJudge([]);
+  const outcome = await run({ now, dir, judge: grown, notifyImpl: () => ({ ok: true }) });
+  assert.equal(grown.calls.length, 0);
+  assert.equal(outcome.fresh.length, 1);
+  const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  assert.equal(decisions[key].override.kind, "count");
+});
+
+test("clearing an override sends the unit back to the judge", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  setOverride({ dir, key, kind: "skip" });
+  assert.equal(clearOverride({ dir, key }).kind, "skip");
+  assert.equal(clearOverride({ dir, key }), null);
+
+  const back = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge: back, notifyImpl: () => ({ ok: true }) });
+  assert.equal(back.calls.length, 1);
+  assert.equal(outcome.fresh[0].result.kind, "count");
+  assert.equal(outcome.fresh[0].result.overridden, undefined);
+});
+
+test("listReviews shows the review queue with the override state", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: null, confidence: null, probabilities: { count: 0.73, skip: 0.27 }, fallback: "low-confidence" }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  const before = listReviews({ dir });
+  assert.equal(before.length, 1);
+  assert.equal(before[0].key, key);
+  assert.equal(before[0].reason, "low-confidence");
+  assert.equal(before[0].override, null);
+  setOverride({ dir, key, kind: "count" });
+  assert.equal(listReviews({ dir })[0].override, "count");
+});
+
+test("setOverride rejects unknown units and unknown kinds", () => {
+  const { dir } = sandbox();
+  assert.throws(() => setOverride({ dir, key: "nope", kind: "count" }), /unknown unit/);
+  const judge = fakeJudge([]);
+  assert.equal(typeof judge, "object");
 });

@@ -136,9 +136,81 @@ export function unitHash(unit) {
   return createHash("sha1").update(`${requests}\u0001${outputs}`).digest("hex").slice(0, 16);
 }
 
+function overrideResult(cached) {
+  return {
+    kind: cached.override.kind,
+    reason: "override",
+    p: cached.result?.p ?? null,
+    margin: cached.result?.margin ?? null,
+    cached: true,
+    overridden: true,
+    notifiedHash: cached.notifiedHash ?? null,
+  };
+}
+
+export function setOverride({ dir = CFG_DIR, key, kind, note = "", now = Date.now(), tz = DEFAULTS.tz } = {}) {
+  if (kind !== "count" && kind !== "skip") throw new Error(`override kind must be count or skip, got ${kind}`);
+  const file = join(dir, "decisions.json");
+  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const entry = cache[key];
+  if (!entry) throw new Error(`unknown unit: ${key}`);
+  entry.override = { kind, note: String(note).trim(), at: new Date(now).toISOString() };
+  entry.notifiedHash = null;
+  writeJsonAtomic(file, cache);
+  appendEvent(
+    { event: "override", key, kind, note: entry.override.note, previous: entry.result?.kind ?? null, previousReason: entry.result?.reason ?? null },
+    { dir: join(dir, "logs"), now, tz },
+  );
+  return entry;
+}
+
+export function clearOverride({ dir = CFG_DIR, key, now = Date.now(), tz = DEFAULTS.tz } = {}) {
+  const file = join(dir, "decisions.json");
+  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const entry = cache[key];
+  if (!entry?.override) return null;
+  const removed = entry.override;
+  delete entry.override;
+  delete entry.hash;
+  entry.notifiedHash = null;
+  writeJsonAtomic(file, cache);
+  appendEvent({ event: "override_cleared", key, kind: removed.kind, note: removed.note }, { dir: join(dir, "logs"), now, tz });
+  return removed;
+}
+
+export function listReviews({ dir = CFG_DIR } = {}) {
+  const reviewDir = join(dir, "review");
+  if (!existsSync(reviewDir)) return [];
+  const file = join(dir, "decisions.json");
+  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const latest = new Map();
+  for (const name of readdirSync(reviewDir).filter((entry) => entry.endsWith(".jsonl")).sort()) {
+    for (const line of readFileSync(join(reviewDir, name), "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const item = JSON.parse(line);
+        latest.set(item.key, { ...item, day: name.slice(0, -6) });
+      } catch {
+        continue;
+      }
+    }
+  }
+  return [...latest.values()].map((item) => ({
+    key: item.key,
+    day: item.day,
+    reason: item.reason,
+    p: item.p ?? null,
+    span: item.span ?? null,
+    requests: item.requests ?? [],
+    override: cache[item.key]?.override?.kind ?? null,
+    current: cache[item.key]?.result?.kind ?? null,
+  }));
+}
+
 export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now(), cache = {} }) {
   const hash = unitHash(unit);
   const cached = cache[unit.key];
+  if (cached?.override) return overrideResult(cached);
   if (cached && cached.hash === hash) return { ...cached.result, cached: true, notifiedHash: cached.notifiedHash ?? null };
 
   const longest = unit.runs.reduce((max, run) => Math.max(max, run.durationMs), 0);
@@ -371,9 +443,14 @@ export async function run({
     const previous = cache[unit.key];
     const notifiedHash = previous?.notifiedHash ?? null;
     const hash = unitHash(unit);
-    const changed = !previous || previous.hash !== hash;
+    const override = previous?.override ?? null;
+    const changed =
+      !previous ||
+      previous.hash !== hash ||
+      previous.result?.kind !== result.kind ||
+      (override?.kind ?? null) !== (result.overridden ? result.kind : null);
     if (changed) {
-      cache[unit.key] = { hash, result, notifiedHash, judgedAt: new Date(now).toISOString() };
+      cache[unit.key] = { hash, result, notifiedHash, judgedAt: new Date(now).toISOString(), ...(override ? { override } : {}) };
     }
     if (!dryRun && changed) {
       const event = {
@@ -385,6 +462,7 @@ export async function run({
         durationMs: unit.lastEnd - unit.startedAt,
         kind: result.kind,
         reason: result.reason,
+        overridden: Boolean(result.overridden),
         p: result.p,
         margin: result.margin,
         confidence: result.confidence ?? null,
@@ -612,11 +690,75 @@ function resolveEntry() {
   }
 }
 
+function parseArgs(argv) {
+  const flags = new Set();
+  const values = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith("--")) continue;
+    const eq = arg.indexOf("=");
+    if (eq !== -1) {
+      values[arg.slice(2, eq)] = arg.slice(eq + 1);
+      continue;
+    }
+    const next = argv[index + 1];
+    if (next && !next.startsWith("--")) {
+      values[arg.slice(2)] = next;
+      index += 1;
+      continue;
+    }
+    flags.add(arg.slice(2));
+  }
+  return { flags, values };
+}
+
+function formatReview(item) {
+  const span = item.span ? `${item.span[0]} → ${item.span[1]}` : item.day;
+  const p = item.p ? `count ${item.p.count} / skip ${item.p.skip}` : "no probability";
+  const state = item.override ? `override=${item.override}` : item.current ?? "unknown";
+  const ask = String(item.requests?.[0] ?? "").replace(/\s+/g, " ").slice(0, 60);
+  return `${item.key}\n  ${span} · ${item.reason} · ${p} · ${state}\n  问：${ask}`;
+}
+
 async function main(argv) {
-  const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
-  const dryRun = flags.has("--dry-run");
-  const dryRunClock = flags.has("--dry-run-clock");
-  const notify = !flags.has("--no-notify");
+  const { flags, values } = parseArgs(argv);
+  if (flags.has("review")) {
+    const items = listReviews({ dir: CFG_DIR });
+    process.stdout.write(items.length ? `${items.map(formatReview).join("\n")}\n` : "(no review units)\n");
+    return;
+  }
+  if (values.override) {
+    const kind = values.kind ?? "count";
+    const release = acquireLock(join(CFG_DIR, ".lock"));
+    if (!release) {
+      process.stderr.write("[hours] skip: another round holds the lock\n");
+      return;
+    }
+    try {
+      const entry = setOverride({ key: values.override, kind, note: values.note ?? "" });
+      process.stdout.write(`override ${values.override} → ${entry.override.kind}${entry.override.note ? ` (${entry.override.note})` : ""}\n`);
+    } finally {
+      release();
+    }
+    return;
+  }
+  if (values["clear-override"]) {
+    const release = acquireLock(join(CFG_DIR, ".lock"));
+    if (!release) {
+      process.stderr.write("[hours] skip: another round holds the lock\n");
+      return;
+    }
+    try {
+      const removed = clearOverride({ key: values["clear-override"] });
+      process.stdout.write(removed ? `cleared override on ${values["clear-override"]}\n` : `no override on ${values["clear-override"]}\n`);
+    } finally {
+      release();
+    }
+    return;
+  }
+  const dryRun = flags.has("dry-run");
+  const dryRunClock = flags.has("dry-run-clock");
+  const notify = !flags.has("no-notify");
   const release = acquireLock(join(CFG_DIR, ".lock"));
   if (!release) {
     process.stderr.write("[hours] skip: another round holds the lock\n");
