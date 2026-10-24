@@ -17,6 +17,7 @@ const LEDGER_DIR = join(CFG_DIR, "ledger");
 const DECISIONS_FILE = join(CFG_DIR, "decisions.json");
 const REVIEW_DIR = join(CFG_DIR, "review");
 const DIGEST_DIR = join(CFG_DIR, "digest");
+const LOG_DIR = join(HOME, ".config/taskradar/logs/hours");
 const JEV_ENV = join(HOME, ".config/taskradar/jev.env");
 const RELAY_ENTRY = join(ROOT, "../relay/relay.mjs");
 
@@ -92,7 +93,7 @@ export function buildUnits(records, { gapMs = DEFAULTS.gapMinutes * 60_000 } = {
     if (!String(record.userText ?? "").trim()) continue;
     const startedAt = Date.parse(record.startedAt);
     if (Number.isNaN(startedAt)) continue;
-    const run = { startedAt, durationMs: Number(record.durationMs) || 0, userText: record.userText, output: record.output ?? "" };
+    const run = { startedAt, durationMs: Number(record.durationMs) || 0, userText: record.userText, output: record.output ?? "", source: record.source ?? null };
     run.endedAt = startedAt + run.durationMs;
     const bucket = bySession.get(record.sessionId) ?? [];
     bucket.push(run);
@@ -136,7 +137,7 @@ export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now()
 
   const longest = unit.runs.reduce((max, run) => Math.max(max, run.durationMs), 0);
   if (longest >= cfg.reviewLongRunHours * 3600 * 1000) {
-    return { kind: "review", reason: "long-run", p: null, margin: null, cached: false };
+    return { kind: "review", reason: "long-run", p: null, margin: null, cached: false, confidence: null, attempts: null, elapsedMs: null };
   }
 
   const verdict = await judge.judgeChoice({
@@ -145,16 +146,17 @@ export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now()
     instructions: JUDGE_INSTRUCTIONS,
     criteria: JUDGE_CRITERIA,
   });
+  const meta = { confidence: verdict.confidence ?? null, attempts: verdict.attempts ?? null, elapsedMs: verdict.elapsedMs ?? null };
 
   const probabilities = verdict.probabilities ?? null;
   const count = probabilities?.count;
   const skip = probabilities?.skip;
   const margin = typeof count === "number" && typeof skip === "number" ? Math.abs(count - skip) : null;
 
-  if (verdict.fallback) return { kind: "review", reason: verdict.fallback, p: probabilities, margin, cached: false };
-  if (typeof count !== "number" || margin === null) return { kind: "review", reason: "no-probability", p: probabilities, margin, cached: false };
-  if (margin < cfg.marginMin) return { kind: "review", reason: "low-margin", p: probabilities, margin, cached: false };
-  return { kind: count >= cfg.countMinP ? "count" : "skip", reason: null, p: probabilities, margin, cached: false };
+  if (verdict.fallback) return { kind: "review", reason: verdict.fallback, p: probabilities, margin, cached: false, ...meta };
+  if (typeof count !== "number" || margin === null) return { kind: "review", reason: "no-probability", p: probabilities, margin, cached: false, ...meta };
+  if (margin < cfg.marginMin) return { kind: "review", reason: "low-margin", p: probabilities, margin, cached: false, ...meta };
+  return { kind: count >= cfg.countMinP ? "count" : "skip", reason: null, p: probabilities, margin, cached: false, ...meta };
 }
 
 export function writeJsonAtomic(file, value) {
@@ -262,6 +264,18 @@ function appendDigest(line, { dir = CFG_DIR, now, tz }) {
   appendFileSync(join(digestDir, `${formatDay(now, tz)}.md`), `${line}\n`);
 }
 
+function appendEvent(record, { dir = LOG_DIR, now, tz } = {}) {
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, `${formatDay(now, tz)}.jsonl`), `${JSON.stringify({ ts: new Date(now).toISOString(), ...record })}\n`);
+}
+
+function reviewSummary(unit) {
+  return {
+    requests: unit.runs.map((run) => preview(run.userText, 200)),
+    outputs: unit.runs.map((run) => preview(run.output, 200)),
+  };
+}
+
 function appendReview(day, payload, { dir = CFG_DIR } = {}) {
   const reviewDir = join(dir, "review");
   mkdirSync(reviewDir, { recursive: true });
@@ -285,6 +299,7 @@ export async function run({
   dryRun = false,
   notify = true,
   notifyImpl = notifyFeishu,
+  logDir = join(dir, "logs"),
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
   const cfg = loadConfig(dir);
@@ -306,15 +321,34 @@ export async function run({
     if (changed) {
       cache[unit.key] = { hash, result, notifiedHash, judgedAt: new Date(now).toISOString() };
     }
-    if (!dryRun && result.kind === "review" && changed) {
-      appendReview(formatDay(unit.startedAt, cfg.tz), {
+    if (!dryRun && changed) {
+      const event = {
+        event: "unit",
         key: unit.key,
-        reason: result.reason,
+        session: unit.sessionId,
+        source: unit.runs[0]?.source ?? null,
         span: [new Date(unit.startedAt).toISOString(), new Date(unit.lastEnd).toISOString()],
+        durationMs: unit.lastEnd - unit.startedAt,
+        kind: result.kind,
+        reason: result.reason,
         p: result.p,
-        requests: unit.runs.map((run) => preview(run.userText, 200)),
-        outputs: unit.runs.map((run) => preview(run.output, 200)),
-      }, { dir });
+        margin: result.margin,
+        confidence: result.confidence ?? null,
+        attempts: result.attempts ?? null,
+        elapsedMs: result.elapsedMs ?? null,
+        review: result.kind === "review",
+        ...(result.kind === "review" ? reviewSummary(unit) : {}),
+      };
+      appendEvent(event, { dir: logDir, now, tz: cfg.tz });
+      if (result.kind === "review") {
+        appendReview(formatDay(unit.startedAt, cfg.tz), {
+          key: unit.key,
+          reason: result.reason,
+          span: event.span,
+          p: result.p,
+          ...reviewSummary(unit),
+        }, { dir });
+      }
     }
     if (notifiedHash !== hash) fresh.push({ unit, result, hash });
   }
@@ -326,6 +360,7 @@ export async function run({
     if (report && notify && cfg.notify.enabled) {
       const sent = notifyImpl(report, { platform: cfg.notify.platform });
       delivered = sent.ok;
+      appendEvent({ event: "notify", platform: cfg.notify.platform, ok: sent.ok, chars: report.length, units: fresh.length, ...(sent.ok ? {} : { output: String(sent.output ?? "") }) }, { dir: logDir, now, tz: cfg.tz });
       if (!sent.ok) log(`[error] notify: ${sent.output}`);
       else {
         for (const item of fresh) cache[item.unit.key].notifiedHash = item.hash;
@@ -340,6 +375,7 @@ export async function run({
       `- ${formatClock(now, cfg.tz)} 单元 ${units.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
       { dir, now, tz: cfg.tz },
     );
+    appendEvent({ event: "round", units: units.length, fresh: fresh.length, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
   }
 
   return { units: units.length, fresh, report, delivered, cache };
@@ -359,7 +395,7 @@ async function main(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
   const dryRun = flags.has("--dry-run");
   const notify = !flags.has("--no-notify");
-  const outcome = await run({ dryRun, notify });
+  const outcome = await run({ dryRun, notify, logDir: LOG_DIR });
   if (dryRun) process.stdout.write(`${outcome.report || "(no new units)"}\n`);
   process.stderr.write(`[hours] units=${outcome.units} fresh=${outcome.fresh.length} notified=${outcome.delivered}\n`);
 }

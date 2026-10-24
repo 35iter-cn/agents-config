@@ -205,6 +205,59 @@ test("units that ended inside the settle window are left for the next run", asyn
   assert.equal(judge.calls.length, 0);
 });
 
+function readEvents(dir, day = "2026-10-24") {
+  return readFileSync(path.join(dir, "logs", `${day}.jsonl`), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+}
+
+test("a run writes one event stream with unit, notify and round lines", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, attempts: 1, elapsedMs: 1200, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true, output: "sent" }) });
+  const events = readEvents(dir);
+  assert.deepEqual(events.map((event) => event.event), ["unit", "notify", "round"]);
+  const [unit, notify, round] = events;
+  assert.equal(unit.kind, "count");
+  assert.equal(unit.review, false);
+  assert.equal(unit.confidence, 0.9);
+  assert.equal(unit.attempts, 1);
+  assert.equal(unit.elapsedMs, 1200);
+  assert.deepEqual(unit.span, ["2026-10-24T01:00:00.000Z", "2026-10-24T01:15:00.000Z"]);
+  assert.equal(unit.key.startsWith("s1:"), true);
+  assert.equal(unit.session, "s1");
+  assert.equal(unit.source, "interactive");
+  assert.equal(notify.ok, true);
+  assert.equal(notify.units, 1);
+  assert.equal(round.units, 1);
+  assert.equal(round.fresh, 1);
+  assert.deepEqual(round.counts, { count: 1 });
+});
+
+test("review units carry the flag, reason and the request/output excerpts in the same stream", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: null, confidence: null, attempts: 3, elapsedMs: 90000, probabilities: null, fallback: "timeout" }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true, output: "sent" }) });
+  const [unit] = readEvents(dir);
+  assert.equal(unit.review, true);
+  assert.equal(unit.kind, "review");
+  assert.equal(unit.reason, "timeout");
+  assert.equal(unit.attempts, 3);
+  assert.equal(unit.requests.length, 2);
+  assert.equal(unit.outputs.length, 2);
+});
+
+test("unchanged units are not re-appended to the stream on a later round", async () => {
+  const { dir, now } = sandbox();
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true, output: "sent" }) });
+  await run({ now: now + 30 * MINUTE, dir, judge, notifyImpl: () => ({ ok: true, output: "sent" }) });
+  const events = readEvents(dir);
+  assert.equal(events.filter((event) => event.event === "unit").length, 1);
+  assert.equal(events.filter((event) => event.event === "round").length, 2);
+});
+
 test("dry run writes nothing", async () => {
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
@@ -213,6 +266,7 @@ test("dry run writes nothing", async () => {
   assert.ok(outcome.report.includes("工时判定"));
   assert.equal(existsSync(path.join(dir, "decisions.json")), false);
   assert.equal(existsSync(path.join(dir, "digest")), false);
+  assert.equal(existsSync(path.join(dir, "logs")), false);
 });
 
 test("ledger reader ignores records older than the window", () => {
