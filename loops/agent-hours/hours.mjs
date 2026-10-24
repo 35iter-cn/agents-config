@@ -285,7 +285,7 @@ export function formatEntry(unit, result, { tz }) {
   return lines.join("\n");
 }
 
-export function formatReport(fresh, { tz, now = Date.now() }) {
+export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {}) {
   if (!fresh.length) return "";
   const counts = fresh.reduce((acc, item) => {
     acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
@@ -294,13 +294,21 @@ export function formatReport(fresh, { tz, now = Date.now() }) {
   const countedMinutes = fresh
     .filter((item) => item.result.kind === "count")
     .reduce((sum, item) => sum + (item.unit.lastEnd - item.unit.startedAt) / 60_000, 0);
-  const head = [
-    `工时判定 · ${formatClock(now, tz)}`,
-    `新增 ${fresh.length} 个单元：计入 ${counts.count ?? 0} / 不计 ${counts.skip ?? 0} / 待确认 ${counts.review ?? 0}`,
-    `判定为计入的单元跨度合计 ${Math.round(countedMinutes)} 分钟（未去重，写入 Clock 时才取并集）`,
-  ].join("\n");
-  const body = fresh.map((item) => formatEntry(item.unit, item.result, { tz })).join("\n\n");
-  return `${head}\n\n${body}`;
+  const lines = [
+    `**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`,
+    `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}`,
+    `计入跨度 ${Math.round(countedMinutes)} 分钟`,
+  ];
+  if (clock) {
+    const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
+    const bits = [`Clock 写 ${wrote} 段`];
+    if (clock.deleted) bits.push(`删 ${clock.deleted} 段`);
+    if (clock.conflict) bits.push(`冲突 ${clock.conflictMinutes} 分钟`);
+    if (clock.failed) bits.push(`失败 ${clock.failed}`);
+    if (clock.blocked?.length) bits.push(`超限跳过 ${clock.blocked.length} 天`);
+    lines.push(bits.join(" · "));
+  }
+  return lines.join("\n");
 }
 
 function notifyFeishu(text, { platform }) {
@@ -495,7 +503,7 @@ export async function run({
 
   const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
 
-  const report = formatReport(fresh, { tz: cfg.tz, now });
+  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null });
   let delivered = false;
   if (!dryRun) {
     writeJsonAtomic(decisionsFile, pruneDecisions(cache, { now }));

@@ -1,9 +1,9 @@
 [Unit]
-Description=schedule agent-hours judging every 30min while environment is alive
+Description=schedule the daily agent-hours summary at 21:00
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=30min
+OnCalendar=*-*-* 21:00:00
+Persistent=true
 AccuracySec=1min
 
 [Install]

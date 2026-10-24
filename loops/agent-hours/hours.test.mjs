@@ -174,7 +174,7 @@ test("a run judges, notifies once and records the notified hash", async () => {
   assert.equal(first.fresh.length, 1);
   assert.equal(first.delivered, true);
   assert.equal(sent.length, 1);
-  assert.match(sent[0], /工时判定/);
+  assert.match(sent[0], /\*\*工时\*\*/);
 
   const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
   const entry = Object.values(decisions)[0];
@@ -269,7 +269,7 @@ test("dry run writes nothing", async () => {
   const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
   const outcome = await run({ now, dir, judge, dryRun: true, notifyImpl: () => ({ ok: true }) });
   assert.equal(outcome.fresh.length, 1);
-  assert.ok(outcome.report.includes("工时判定"));
+  assert.ok(outcome.report.includes("**工时**"));
   assert.equal(existsSync(path.join(dir, "decisions.json")), false);
   assert.equal(existsSync(path.join(dir, "digest")), false);
   assert.equal(existsSync(path.join(dir, "logs")), false);
@@ -348,7 +348,7 @@ test("the round budget stops judging and leaves the rest for the next round", as
   assert.equal(round.processed, 1);
 });
 
-test("report header counts each verdict and totals counted minutes", () => {
+test("report is a summary: verdict counts, counted minutes and where the review units sit", () => {
   const units = buildUnits([
     rec("2026-10-24T01:00:00.000Z", 10, { sessionId: "a" }),
     rec("2026-10-24T01:00:00.000Z", 5, { sessionId: "b" }),
@@ -360,9 +360,28 @@ test("report header counts each verdict and totals counted minutes", () => {
     ],
     { tz: DEFAULTS.tz, now: Date.parse("2026-10-24T02:00:00.000Z") },
   );
-  assert.match(report, /计入 1 \/ 不计 0 \/ 待确认 1/);
-  assert.match(report, /合计 10 分钟/);
-  assert.match(report, /待确认 .*low-margin/);
+  const lines = report.split("\n");
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^\*\*工时\*\* 2026-10-24 10:00$/);
+  assert.match(lines[1], /新增 2 单元 · 计入 1 · 不计 0 · 待确认 1/);
+  assert.match(lines[2], /计入跨度 10 分钟/);
+});
+
+test("a report without review units omits the review count and adds the clock summary", () => {
+  const units = buildUnits([rec("2026-10-24T01:00:00.000Z", 10)]);
+  const report = formatReport(
+    [{ unit: units[0], result: { kind: "count", p: { count: 0.9 }, margin: 0.8 } }],
+    {
+      tz: DEFAULTS.tz,
+      now: Date.parse("2026-10-24T13:00:00.000Z"),
+      clock: { created: 1, patched: 2, deleted: 0, conflict: 1, conflictMinutes: 29, failed: 0, blocked: [] },
+    },
+  );
+  const lines = report.split("\n");
+  assert.equal(lines.length, 4);
+  assert.match(lines[0], /2026-10-24 21:00/);
+  assert.doesNotMatch(lines[1], /待确认/);
+  assert.equal(lines[3], "Clock 写 3 段 · 冲突 29 分钟");
 });
 
 test("a manual override wins over both the cached verdict and a fresh judge call", async () => {
