@@ -9,6 +9,8 @@ Personal AI agent configuration and skill tree for Claude Code.
 | `skills/` | Canonical skill source of truth (synced via `scripts/sync-skills.mjs`) |
 | `cli/` | User CLI scripts (synced via `scripts/sync-cli.mjs` → `~/.local/bin`) |
 | `scripts/` | Tooling: skill/cli sync, instruction symlink management |
+| `loops/` | 定时扫描与常驻会话桥（`intake` / `relay`），见 `loops/README.md` |
+| `packages/` | Pi 包（本地安装，`pi install <abs path>`）；`agent-ledger/` 记账本 |
 | `instructions/` | Per-host instruction overrides |
 
 ## Skill buckets
