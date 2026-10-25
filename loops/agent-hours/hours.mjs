@@ -272,10 +272,16 @@ function preview(text, limit) {
 
 const BADGE = { count: "计入", skip: "不计", review: "待确认" };
 
+export function formatDuration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  if (total < 60) return `${total} 分钟`;
+  const hours = Math.round((total / 60) * 10) / 10;
+  return `${hours.toFixed(1).replace(/\.0$/, "")} 小时`;
+}
+
 export function formatEntry(unit, result, { tz }) {
-  const minutes = Math.round((unit.lastEnd - unit.startedAt) / 60_000);
   const span = `${formatClock(unit.startedAt, tz)}–${formatClock(unit.lastEnd, tz)}`;
-  const head = `${BADGE[result.kind]} ${span} · ${minutes}min · ${unit.runs.length} 轮 · ${unit.sessionId.slice(0, 18)}`;
+  const head = `${BADGE[result.kind]} ${span} · ${formatDuration((unit.lastEnd - unit.startedAt) / 60_000)} · ${unit.runs.length} 轮 · ${unit.sessionId.slice(0, 18)}`;
   const prob = result.p ? ` · p=${Number(result.p.count).toFixed(2)}` : "";
   const reason = result.kind === "review" ? ` · ${result.reason}` : "";
   const last = unit.runs.at(-1);
@@ -297,13 +303,13 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {})
   const lines = [
     `**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`,
     `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}`,
-    `计入跨度 ${Math.round(countedMinutes)} 分钟`,
+    `计入跨度 ${formatDuration(countedMinutes)}`,
   ];
   if (clock) {
     const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
     const bits = [`Clock 写 ${wrote} 段`];
     if (clock.deleted) bits.push(`删 ${clock.deleted} 段`);
-    if (clock.conflict) bits.push(`冲突 ${clock.conflictMinutes} 分钟`);
+    if (clock.conflict) bits.push(`冲突 ${formatDuration(clock.conflictMinutes)}`);
     if (clock.failed) bits.push(`失败 ${clock.failed}`);
     if (clock.blocked?.length) bits.push(`超限跳过 ${clock.blocked.length} 天`);
     lines.push(bits.join(" · "));
@@ -678,7 +684,7 @@ export async function syncClock({
   }
 
   appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
-  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${summary.conflictMinutes} 分钟）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
+  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${formatDuration(summary.conflictMinutes)}）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
   return { summary, line };
 }
 
