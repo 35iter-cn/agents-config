@@ -1084,6 +1084,9 @@ function collectVerifyWarnings(topic, state, specFiles, planFiles) {
       })
       .filter(Boolean),
   );
+  for (const m of (state.body || '').matchAll(/^> artifact D-(\d+) \(/gm)) {
+    knownD.add(m[1]);
+  }
   while ((match = dRefRe.exec(state.body)) !== null) {
     if (seenD.has(match[1])) continue;
     seenD.add(match[1]);
