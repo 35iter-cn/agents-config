@@ -9,6 +9,7 @@ import {
   filterShort,
   groupByDay,
   oversizeDays,
+  countedSegments,
   planReconcile,
   pruneMissing,
   pruneSynced,
@@ -214,4 +215,95 @@ test("TC-C14 rows older than the verification window are kept untouched", () => 
   );
   assert.equal(dropped, 0);
   assert.equal(synced["2026-10-20"].length, 1);
+});
+
+function unitOf(key, runs) {
+  return { key, runs };
+}
+
+test("countedSegments merges only inside a unit and skips excluded runs", () => {
+  const base = at("2026-10-24T09:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [
+        { startedAt: base, endedAt: base + 5 * MIN },
+        { startedAt: base + 7 * MIN, endedAt: base + 12 * MIN },
+        { startedAt: base + 15 * MIN, endedAt: base + 20 * MIN },
+      ]),
+      result: { kind: "count" },
+    },
+    {
+      unit: unitOf("u2", [{ startedAt: base + 21 * MIN, endedAt: base + 26 * MIN }]),
+      result: { kind: "count" },
+    },
+  ];
+  const segments = countedSegments(judged, { gapMs: 2 * MIN });
+  assert.equal(segments.length, 3);
+  assert.equal(segments[0].start, base);
+  assert.equal(segments[0].end, base + 12 * MIN);
+  assert.equal(segments[1].start, base + 15 * MIN);
+  assert.equal(segments[2].start, base + 21 * MIN);
+  assert.deepEqual(segments[2].unitKeys, ["u2"]);
+});
+
+test("countedSegments never merges across a run excluded by the split verdict", () => {
+  const base = at("2026-10-24T09:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [
+        { startedAt: base, endedAt: base + 5 * MIN },
+        { startedAt: base + 6 * MIN, endedAt: base + 8 * MIN },
+        { startedAt: base + 9 * MIN, endedAt: base + 14 * MIN },
+      ]),
+      result: {
+        kind: "count",
+        split: true,
+        runs: [
+          { runHash: "a", kind: "count" },
+          { runHash: "b", kind: "skip" },
+          { runHash: "c", kind: "count" },
+        ],
+      },
+    },
+  ];
+  const segments = countedSegments(judged, { gapMs: 2 * MIN });
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].end, base + 5 * MIN);
+  assert.equal(segments[1].start, base + 9 * MIN);
+  assert.equal(segments[0].origin, "run-split");
+});
+
+test("buildPlan reports the planned minutes and keeps one minute segments", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [
+        { startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 20 * MIN },
+        { startedAt: now - 2 * HOUR + 22 * MIN, endedAt: now - 2 * HOUR + 24 * MIN },
+      ]),
+      result: { kind: "count" },
+    },
+  ];
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced: {} });
+  assert.equal(plan.targets.length, 1);
+  assert.equal(plan.minutes, 24);
+  assert.equal(CLOCK_DEFAULTS.mergeGapMinutes, 2);
+  assert.equal(CLOCK_DEFAULTS.minSegmentMinutes, 1);
+  assert.equal(CLOCK_DEFAULTS.maxWritesPerRun, 120);
+});
+
+test("buildPlan merges segments that touch after minute alignment", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [
+        { startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 5 * MIN },
+        { startedAt: now - 2 * HOUR + 5 * MIN + 20_000, endedAt: now - 2 * HOUR + 10 * MIN },
+      ]),
+      result: { kind: "count" },
+    },
+  ];
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced: {} });
+  assert.equal(plan.targets.length, 1);
+  assert.equal(plan.targets[0].end - plan.targets[0].start, 10 * MIN);
 });

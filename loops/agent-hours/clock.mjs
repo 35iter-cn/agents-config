@@ -6,12 +6,12 @@ export const CLOCK_DEFAULTS = {
   baseUrl: "https://focus.35iter.cn",
   activityName: "clock",
   activityId: null,
-  minSegmentMinutes: 5,
+  minSegmentMinutes: 1,
   warnDailyHours: 12,
   changeThresholdMs: MINUTE_MS,
-  unionGapMinutes: 15,
+  mergeGapMinutes: 2,
   backfillHours: 48,
-  maxWritesPerRun: 50,
+  maxWritesPerRun: 120,
   syncedTtlDays: 7,
 };
 
@@ -46,8 +46,43 @@ export function unionSegments(segments, gapMs) {
   return out;
 }
 
-export function alignSegment({ start, end }) {
-  return { start: Math.floor(start / MINUTE_MS) * MINUTE_MS, end: Math.ceil(end / MINUTE_MS) * MINUTE_MS };
+export function alignSegment(segment) {
+  return {
+    ...segment,
+    start: Math.floor(segment.start / MINUTE_MS) * MINUTE_MS,
+    end: Math.ceil(segment.end / MINUTE_MS) * MINUTE_MS,
+  };
+}
+
+export function mergeSegments(segments, gapMs) {
+  const sorted = [...segments].sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const segment of sorted) {
+    const last = out[out.length - 1];
+    if (last && segment.start - last.end <= gapMs) {
+      last.end = Math.max(last.end, segment.end);
+      if (segment.origin && segment.origin !== last.origin) last.origin = "mixed";
+      last.unitKeys = [...new Set([...(last.unitKeys ?? []), ...(segment.unitKeys ?? [])])];
+      continue;
+    }
+    out.push({ ...segment, unitKeys: [...(segment.unitKeys ?? [])] });
+  }
+  return out;
+}
+
+export function countedSegments(judged, { gapMs }) {
+  const out = [];
+  for (const entry of judged) {
+    if (entry.result.kind !== "count") continue;
+    const origin = entry.result.split ? "run-split" : "unit";
+    const runs = entry.unit.runs
+      .map((run, index) => ({ run, verdict: entry.result.runs?.[index] }))
+      .filter(({ run, verdict }) => run.endedAt > run.startedAt && (!entry.result.split || verdict?.kind === "count"))
+      .map(({ run }) => ({ start: run.startedAt, end: run.endedAt, origin, unitKeys: [entry.unit.key] }))
+      .sort((a, b) => a.start - b.start);
+    out.push(...mergeSegments(runs, gapMs));
+  }
+  return out;
 }
 
 export function filterShort(segments, minMs) {
@@ -57,7 +92,7 @@ export function filterShort(segments, minMs) {
 export function clipToWindow(segments, { now, hours }) {
   const from = now - hours * HOUR_MS;
   return segments
-    .map((segment) => ({ start: Math.max(segment.start, from), end: segment.end }))
+    .map((segment) => ({ ...segment, start: Math.max(segment.start, from) }))
     .filter((segment) => segment.end > segment.start);
 }
 
@@ -98,11 +133,9 @@ export function planReconcile({ targets, current, thresholdMs = MINUTE_MS }) {
 }
 
 export function buildPlan({ judged, now, cfg, synced }) {
-  const counted = judged.filter((entry) => entry.result.kind === "count");
-  const runs = counted.flatMap((entry) => runSegments(entry.unit.runs));
-  const merged = unionSegments(runs, cfg.unionGapMinutes * MINUTE_MS);
-  const clipped = clipToWindow(merged, { now, hours: cfg.backfillHours });
-  const aligned = clipped.map(alignSegment);
+  const segments = countedSegments(judged, { gapMs: cfg.mergeGapMinutes * MINUTE_MS });
+  const clipped = clipToWindow(segments, { now, hours: cfg.backfillHours });
+  const aligned = mergeSegments(clipped.map(alignSegment), 0);
   const targets = filterShort(aligned, cfg.minSegmentMinutes * MINUTE_MS);
   const oversize = oversizeDays(targets, { tz: cfg.tz, warnHours: cfg.warnDailyHours });
   const blocked = new Set(oversize.map((item) => item.day));
@@ -114,6 +147,7 @@ export function buildPlan({ judged, now, cfg, synced }) {
     .map((item) => ({ id: item.id, start: item.start, end: item.end }));
   return {
     targets: usable,
+    minutes: Math.round(usable.reduce((sum, segment) => sum + (segment.end - segment.start), 0) / MINUTE_MS),
     blocked: oversize,
     dropped: targets.length - usable.length,
     ...planReconcile({ targets: usable, current, thresholdMs: cfg.changeThresholdMs }),
