@@ -689,6 +689,14 @@ export async function run({
   return { units: candidates.length, fresh, report, delivered, cache, clock: clockOutcome?.summary ?? null };
 }
 
+export function planOperations(plan, { budget = Infinity } = {}) {
+  const ops = [];
+  for (const id of plan.remove) ops.push({ op: "remove", id });
+  for (const item of plan.patch) ops.push({ op: "patch", id: item.id, start: item.start, end: item.end });
+  for (const segment of plan.create) ops.push({ op: "create", segment });
+  return ops.slice(0, budget);
+}
+
 export async function syncClock({
   judged,
   now,
@@ -774,11 +782,31 @@ export async function syncClock({
   const created = [];
   const patched = [];
   const deleted = [];
-  let budget = clockCfg.maxWritesPerRun;
 
-  for (const segment of plan.create) {
-    if (budget <= 0) break;
-    budget -= 1;
+  for (const op of planOperations(plan, { budget: clockCfg.maxWritesPerRun })) {
+    if (op.op === "remove") {
+      const result = await api.remove(op.id);
+      if (result.ok) {
+        deleted.push(op.id);
+        appendEvent({ event: "clock", action: "delete", id: op.id }, { dir: logDir, now, tz: cfg.tz });
+        continue;
+      }
+      summary.failed += 1;
+      appendEvent({ event: "clock", action: "delete-failed", id: op.id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    if (op.op === "patch") {
+      const result = await api.patch(op.id, { start: op.start, end: op.end });
+      if (result.ok) {
+        patched.push({ id: op.id, start: op.start, end: op.end });
+        appendEvent({ event: "clock", action: "patch", id: op.id, start: iso(op.start), end: iso(op.end) }, { dir: logDir, now, tz: cfg.tz });
+        continue;
+      }
+      summary.failed += 1;
+      appendEvent({ event: "clock", action: "patch-failed", id: op.id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
+      continue;
+    }
+    const segment = op.segment;
     const result = await api.create({ activityId, start: segment.start, end: segment.end });
     if (result.ok) {
       created.push({ id: result.data.id, start: segment.start, end: segment.end, origin: segment.origin ?? "unit", unitKeys: segment.unitKeys ?? [] });
@@ -793,32 +821,6 @@ export async function syncClock({
     }
     summary.failed += 1;
     appendEvent({ event: "clock", action: "create-failed", code: result.code, status: result.status, start: iso(segment.start) }, { dir: logDir, now, tz: cfg.tz });
-  }
-
-  for (const item of plan.patch) {
-    if (budget <= 0) break;
-    budget -= 1;
-    const result = await api.patch(item.id, { start: item.start, end: item.end });
-    if (result.ok) {
-      patched.push(item);
-      appendEvent({ event: "clock", action: "patch", id: item.id, start: iso(item.start), end: iso(item.end) }, { dir: logDir, now, tz: cfg.tz });
-      continue;
-    }
-    summary.failed += 1;
-    appendEvent({ event: "clock", action: "patch-failed", id: item.id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
-  }
-
-  for (const id of plan.remove) {
-    if (budget <= 0) break;
-    budget -= 1;
-    const result = await api.remove(id);
-    if (result.ok) {
-      deleted.push(id);
-      appendEvent({ event: "clock", action: "delete", id }, { dir: logDir, now, tz: cfg.tz });
-      continue;
-    }
-    summary.failed += 1;
-    appendEvent({ event: "clock", action: "delete-failed", id, code: result.code, status: result.status }, { dir: logDir, now, tz: cfg.tz });
   }
 
   if (created.length || patched.length || deleted.length) {
