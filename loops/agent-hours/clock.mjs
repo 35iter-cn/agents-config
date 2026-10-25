@@ -132,7 +132,30 @@ export function planReconcile({ targets, current, thresholdMs = MINUTE_MS }) {
   return { create, patch, remove };
 }
 
-export function buildPlan({ judged, now, cfg, synced }) {
+export function subtractCoverage(segments, coverage) {
+  const covered = [];
+  let rest = [...segments];
+  for (const block of [...coverage].sort((a, b) => a.start - b.start)) {
+    const next = [];
+    for (const segment of rest) {
+      if (block.end <= segment.start || block.start >= segment.end) {
+        next.push(segment);
+        continue;
+      }
+      if (block.start <= segment.start && block.end >= segment.end) {
+        covered.push({ start: segment.start, end: segment.end, unitKeys: [...(segment.unitKeys ?? [])] });
+        continue;
+      }
+      covered.push({ start: Math.max(block.start, segment.start), end: Math.min(block.end, segment.end) });
+      if (block.start > segment.start) next.push({ ...segment, end: block.start });
+      if (block.end < segment.end) next.push({ ...segment, start: block.end });
+    }
+    rest = next;
+  }
+  return { segments: rest, covered };
+}
+
+export function buildPlan({ judged, now, cfg, synced, coverage = [] }) {
   const segments = countedSegments(judged, { gapMs: cfg.mergeGapMinutes * MINUTE_MS });
   const clipped = clipToWindow(segments, { now, hours: cfg.backfillHours });
   const aligned = mergeSegments(clipped.map(alignSegment), 0);
@@ -140,17 +163,20 @@ export function buildPlan({ judged, now, cfg, synced }) {
   const oversize = oversizeDays(targets, { tz: cfg.tz, warnHours: cfg.warnDailyHours });
   const blocked = new Set(oversize.map((item) => item.day));
   const usable = targets.filter((segment) => !blocked.has(dayKey(segment.start, cfg.tz)));
+  const { segments: open, covered } = subtractCoverage(usable, coverage);
   const from = now - cfg.backfillHours * HOUR_MS;
   const current = Object.values(synced ?? {})
     .flat()
     .filter((item) => item.end > from)
     .map((item) => ({ id: item.id, start: item.start, end: item.end }));
   return {
-    targets: usable,
+    targets: open,
     minutes: Math.round(usable.reduce((sum, segment) => sum + (segment.end - segment.start), 0) / MINUTE_MS),
+    covered,
+    coveredMinutes: Math.round(covered.reduce((sum, segment) => sum + (segment.end - segment.start), 0) / MINUTE_MS),
     blocked: oversize,
     dropped: targets.length - usable.length,
-    ...planReconcile({ targets: usable, current, thresholdMs: cfg.changeThresholdMs }),
+    ...planReconcile({ targets: open, current, thresholdMs: cfg.changeThresholdMs }),
   };
 }
 

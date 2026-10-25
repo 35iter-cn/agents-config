@@ -11,6 +11,7 @@ import {
   oversizeDays,
   countedSegments,
   planReconcile,
+  subtractCoverage,
   pruneMissing,
   pruneSynced,
   unionSegments,
@@ -306,4 +307,54 @@ test("buildPlan merges segments that touch after minute alignment", () => {
   const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced: {} });
   assert.equal(plan.targets.length, 1);
   assert.equal(plan.targets[0].end - plan.targets[0].start, 10 * MIN);
+});
+
+test("a target fully inside a foreign period counts as recorded and is not written", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 27 * MIN }]),
+      result: { kind: "count" },
+    },
+  ];
+  const coverage = [{ start: now - 2 * HOUR - MIN, end: now - 2 * HOUR + 29 * MIN }];
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced: {}, coverage });
+  assert.deepEqual(plan.create, []);
+  assert.deepEqual(plan.targets, []);
+  assert.equal(plan.covered.length, 1);
+  assert.equal(plan.coveredMinutes, 27);
+  assert.equal(plan.minutes, 27);
+});
+
+test("a partially covered target keeps only the uncovered remainder", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const judged = [
+    {
+      unit: unitOf("u1", [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 30 * MIN }]),
+      result: { kind: "count" },
+    },
+  ];
+  const coverage = [{ start: now - 2 * HOUR + 10 * MIN, end: now - 2 * HOUR + 20 * MIN }];
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced: {}, coverage });
+  assert.equal(plan.create.length, 2);
+  assert.equal(plan.create[0].start, now - 2 * HOUR);
+  assert.equal(plan.create[0].end, now - 2 * HOUR + 10 * MIN);
+  assert.equal(plan.create[1].start, now - 2 * HOUR + 20 * MIN);
+  assert.equal(plan.create[1].end, now - 2 * HOUR + 30 * MIN);
+  assert.equal(plan.coveredMinutes, 10);
+  assert.equal(plan.minutes, 30);
+});
+
+test("subtractCoverage ignores foreign periods that miss the target and keeps unit keys", () => {
+  const base = { start: 0, end: 10 * MIN, unitKeys: ["u1"] };
+  const inside = subtractCoverage([base], [{ start: MIN, end: 2 * MIN }]);
+  assert.deepEqual(inside.segments, [
+    { start: 0, end: MIN, unitKeys: ["u1"] },
+    { start: 2 * MIN, end: 10 * MIN, unitKeys: ["u1"] },
+  ]);
+  const outside = subtractCoverage([base], [{ start: 20 * MIN, end: 30 * MIN }]);
+  assert.deepEqual(outside.segments, [base]);
+  assert.deepEqual(outside.covered, []);
+  const all = subtractCoverage([base], [{ start: 0, end: 10 * MIN }]);
+  assert.deepEqual(all.covered, [{ start: 0, end: 10 * MIN, unitKeys: ["u1"] }]);
 });

@@ -11,6 +11,7 @@ import {
   decideUnit,
   formatDuration,
   formatReport,
+  humanCoverage,
   listReviews,
   planOperations,
   readDecisions,
@@ -692,4 +693,14 @@ test("plan operations free space before creating finer segments", () => {
   const ops = planOperations(plan, { budget: 10 });
   assert.deepEqual(ops.map((op) => op.op), ["remove", "patch", "create", "create"]);
   assert.deepEqual(planOperations(plan, { budget: 2 }).map((op) => op.op), ["remove", "patch"]);
+});
+
+test("human coverage keeps only foreign periods of the same activity", () => {
+  const periods = [
+    { id: "own", activityId: "activity_work_001", start: 0, end: 10 * MINUTE },
+    { id: "user", activityId: "activity_work_001", start: 20 * MINUTE, end: 30 * MINUTE },
+    { id: "break", activityId: "activity_break_001", start: 40 * MINUTE, end: 50 * MINUTE },
+  ];
+  const covered = humanCoverage(periods, { ownIds: new Set(["own"]), activityId: "activity_work_001" });
+  assert.deepEqual(covered, [{ start: 20 * MINUTE, end: 30 * MINUTE }]);
 });
