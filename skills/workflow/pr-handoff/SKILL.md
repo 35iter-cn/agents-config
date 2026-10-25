@@ -7,7 +7,7 @@ date_added: "2026-05-27"
 
 ## Overview
 
-Keep branch fresh, run pre-push checks, analyze diff, then create or update PR with complete body and screenshots.
+Keep branch fresh, run pre-push checks, analyze diff, then create or update PR with complete body and every screenshot the task produced.
 
 ## When to Use
 
@@ -42,7 +42,7 @@ One step that handles PR state check to body creation:
 1. **Check PR** — `gh pr view`. No PR / CLOSED → create; OPEN → update.
 2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
 3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
-4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely).
+4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely). Pass `--attach` for each screenshot of this task in this same command (see Attach screenshots).
 5. **Link backend dependency (frontend PRs)** — If context (diff, issue, conversation) suggests this frontend PR depends on a backend change (new fields/endpoints, companion backend PR), do BOTH:
    - **Body**: add the backend PR link in clickable Markdown — `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)` — in a visible spot (Related Links / dependency note). Never bare text (`backend PR #NNN`), never backticked code style (`` `https://…` ``), never a relative path (`backend/pull/NNN`).
    - **Label**: `gh pr edit <number> --repo <repo> --add-label "waiting for backend"` — on create AND update.
@@ -50,15 +50,21 @@ One step that handles PR state check to body creation:
 
 ### Attach screenshots
 
-**Goal: embed session screenshots into the PR body.**
+**Goal: every screenshot this task produced is embedded in the PR body.**
 
-Run only when the session already produced UI screenshots (walkthrough/dev captures); skip silently when none exist. Do not stage a capture session just for this step.
+Trigger: image files exist for this task — web E2E / walkthrough captures from `magicdoor-e2e` or `agent-browser`, App captures from `react-native-android-e2e` / `adb exec-out screencap`, dev screenshots saved anywhere under the session workspace. E2E runs make screenshots the normal case, so a UI change handed off with screenshots left on disk is an incomplete handoff.
 
-**Tool:** `gh ≥ 2.99` native `--attach` flag on `gh pr create` / `gh pr edit`. The old `attach-pr-images` sub-skill is deprecated and removed.
+No screenshot exists: skip this step silently. Do not stage a capture session only to fill the PR.
 
-- `gh pr edit <n> --attach './img.png#Alt text'` — without a body flag the attachment is appended to the existing body; with `--body-file`, `![alt](./img.png)` references in the body are rewritten to the uploaded asset URL.
-- Alt text follows `#` after the path; up to 50 files per command.
-- On update flows, run after every full body replace — a replaced body wipes previously embedded images unless re-attached in the same command.
+**Tool:** `gh ≥ 2.99` native `--attach` on `gh pr create` / `gh pr edit`, in the **same command** as the body so a body replace can never strip earlier images. The old `attach-pr-images` sub-skill is deprecated and removed.
+
+- `gh pr create --body-file body.md --attach './login.png#Login error state'` / `gh pr edit <n> --body-file body.md --attach ...`
+- Alt text follows `#` after the path; without it the filename is used. Up to 50 files per command.
+- Attachments are appended to the body, and a `![alt](./login.png)` reference already written in the body is rewritten to the uploaded asset URL. Reference each screenshot where it belongs in the body, using the attached file's basename as the relative path.
+- Screenshots are evidence, not decoration: the caption states what each one proves (before/after, error state, empty state) so a reviewer can map image to claim.
+- `gh pr edit <n> --attach ...` without a body flag appends to the existing body — use it only for a late extra capture, never instead of attaching during the body step.
+
+**Done when:** `gh pr view <n> --json body` shows one uploaded asset URL (`github.com/user-attachments/assets/...` or `user-images.githubusercontent.com/...`) per screenshot, with a count equal to the screenshots produced.
 
 ### Merge follow-up (MagicDoor company-portal test env)
 
@@ -70,7 +76,7 @@ After a company-portal PR merges to master, the `Deploy To Test Environment` wor
 
 ### Verify
 
-`gh pr view` to confirm PR is created/updated and visible.
+`gh pr view` to confirm PR is created/updated and visible, and that its body carries the screenshot asset URLs (count matches the files attached).
 
 ## Core Flow
 
@@ -93,6 +99,8 @@ flowchart TD
 - Using wrong LMB when origin HEAD differs from local main.
 - Resetting reviewers on an existing PR — assignment is create-only; update never touches reviewers.
 - Attaching screenshots before the body step — on update flows re-run `--attach` after any full body replace, or pass `--attach` in the same command as `--body-file`.
+- Screenshots exist on disk but the PR body has none — attach them in the same command as the body.
+- Replacing the body later with a plain `--body-file` and dropping the previously embedded images.
 - Frontend PR depends on a backend change but ships without the `waiting for backend` label.
 - Writing the backend PR link as bare text (`backend PR #NNN`), backticked code (`` `https://…` ``), or a relative path — none are clickable; always `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)`.
 
