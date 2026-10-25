@@ -182,11 +182,6 @@ export function createCore({ adapter, paths, deps = {} }) {
     }
   }
 
-  function logDirText() {
-    if (!paths.home || !logDir.startsWith(paths.home)) return logDir;
-    return `~${logDir.slice(paths.home.length)}`;
-  }
-
   function regexVariant(root) {
     return CANDIDATE_LINE.test(root) ? "candidate_rules" : "task_skeleton";
   }
@@ -203,7 +198,6 @@ export function createCore({ adapter, paths, deps = {} }) {
       root_section: rootSectionText(root, inbound.text),
       reply_rules: adapter.replyRules ?? "",
       chunk_limit: adapter.chunkLimit,
-      log_dir: logDirText(),
       candidate_rules: rules ? `\n\n${rules}` : "",
     });
   }
