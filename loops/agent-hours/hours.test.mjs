@@ -12,6 +12,7 @@ import {
   formatDuration,
   formatReport,
   listReviews,
+  planOperations,
   readDecisions,
   readLedger,
   run,
@@ -677,4 +678,18 @@ test("a single run unit with low confidence keeps its reason, caches it and is n
   const again = fakeJudge([]);
   await run({ now: now + 30 * MINUTE, dir, judge: again, notifyImpl: () => ({ ok: true }) });
   assert.equal(again.calls.length, 0);
+});
+
+test("plan operations free space before creating finer segments", () => {
+  const plan = {
+    remove: ["stale"],
+    patch: [{ id: "coarse", start: 0, end: 5 * MINUTE }],
+    create: [
+      { start: 6 * MINUTE, end: 10 * MINUTE },
+      { start: 11 * MINUTE, end: 15 * MINUTE },
+    ],
+  };
+  const ops = planOperations(plan, { budget: 10 });
+  assert.deepEqual(ops.map((op) => op.op), ["remove", "patch", "create", "create"]);
+  assert.deepEqual(planOperations(plan, { budget: 2 }).map((op) => op.op), ["remove", "patch"]);
 });
