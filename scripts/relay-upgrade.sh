@@ -96,18 +96,21 @@ while true; do
   sleep 10
 done
 
-echo "relay-upgrade: 0 in-flight job(s), restarting $platform"
+before_pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value || true)"
+echo "relay-upgrade: 0 in-flight job(s), restarting $platform (old pid ${before_pid:-none})"
 systemctl --user restart "relay@$platform.service"
 sleep 10
 
-if systemctl --user is-active --quiet "relay@$platform.service"; then
-  pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value)"
-  echo "relay-upgrade: OK $platform active (pid $pid)"
-  notify "🔄 relay-$platform 已重启，健康检查通过（pid $pid，$(date '+%Y-%m-%d %H:%M')）"
+pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value || true)"
+entered="$(systemctl --user show "relay@$platform.service" -p ActiveEnterTimestamp --value || true)"
+
+if systemctl --user is-active --quiet "relay@$platform.service" && [[ -n "${pid:-}" && "$pid" != "0" && "$pid" != "${before_pid:-}" ]]; then
+  echo "relay-upgrade: OK $platform active (pid $pid, entered ${entered:-?})"
+  notify "🔄 relay-$platform 已重启，健康检查通过（pid ${before_pid:-none} → $pid，$(date '+%Y-%m-%d %H:%M')）"
   exit 0
 fi
 
-echo "relay-upgrade: FAILED $platform" >&2
+echo "relay-upgrade: FAILED $platform — is-active or MainPID unchanged (before=${before_pid:-none} now=${pid:-none}, entered ${entered:-?})" >&2
 journalctl --user -u "relay@$platform.service" -n 30 --no-pager >&2
-notify "🔴 relay-$platform 重启后未通过健康检查，需要人工看一下（journalctl --user -u relay@$platform）"
+notify "🔴 relay-$platform 重启后未通过健康检查（服务未 active 或 MainPID 未变，旧进程还在），需要人工看一下（journalctl --user -u relay@$platform）"
 exit 1
