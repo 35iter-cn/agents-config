@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -169,10 +169,13 @@ function sandbox() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-"));
   mkdirSync(path.join(dir, "ledger"), { recursive: true });
   const now = Date.parse("2026-10-24T02:00:00.000Z");
+  const ledgerFile = path.join(dir, "ledger", "s1.jsonl");
   writeFileSync(
-    path.join(dir, "ledger", "s1.jsonl"),
+    ledgerFile,
     `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5))}\n${JSON.stringify(rec("2026-10-24T01:10:00.000Z", 5))}\n`,
   );
+  const stamp = now / 1000;
+  utimesSync(ledgerFile, stamp, stamp);
   return { dir, now };
 }
 
@@ -435,7 +438,7 @@ test("a manual override wins over both the cached verdict and a fresh judge call
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
   const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")).units)[0];
 
-  setOverride({ dir, key, kind: "count", note: "MagicDoor 事务（PR 审批状态确认），人工裁定计入" });
+  setOverride({ dir, key, kind: "count", note: "MagicDoor 事务（PR 审批状态确认），人工裁定计入", now });
   const second = fakeJudge([]);
   const outcome = await run({ now, dir, judge: second, notifyImpl: () => ({ ok: true }) });
   assert.equal(outcome.fresh.length, 1);
