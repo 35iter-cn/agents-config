@@ -31,7 +31,7 @@ export const DEFAULTS = {
   countMinP: 0.5,
   marginMin: 0.1,
   reviewLongRunHours: 4,
-  maxUnitsPerRun: 30,
+  maxJudgeCallsPerRun: 60,
   notify: { platform: "feishu", enabled: true },
   clock: { ...CLOCK_DEFAULTS },
 };
@@ -42,6 +42,10 @@ const LOCK_STALE_MS = 10 * 60 * 1000;
 const USER_TEXT_LIMIT = 1200;
 const OUTPUT_LIMIT = 1200;
 const DECISIONS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DECISIONS_VERSION = 2;
+
+export const SPLIT_REASONS = new Set(["low-confidence", "low-margin", "no-probability"]);
+export const PENDING_REASONS = new Set(["nokey", "circuit", "timeout", "http_429", "http_402", "error"]);
 const REQUEST_PREVIEW = 60;
 const OUTPUT_PREVIEW = 100;
 
@@ -136,6 +140,26 @@ export function unitHash(unit) {
   return createHash("sha1").update(`${requests}\u0001${outputs}`).digest("hex").slice(0, 16);
 }
 
+export function promptsVersion() {
+  return createHash("sha1").update(`${JUDGE_INSTRUCTIONS}\u0000${JSON.stringify(JUDGE_CRITERIA)}`).digest("hex").slice(0, 8);
+}
+
+export function runState(run) {
+  const request = String(run.userText ?? "").trim().slice(0, USER_TEXT_LIMIT);
+  const output = String(run.output ?? "").trim().slice(0, OUTPUT_LIMIT);
+  return `【用户请求】\n${request}\n\n【agent 产出】\n${output || "(无)"}`;
+}
+
+export function runHash(run) {
+  const material = `${promptsVersion()}\u0000${run.userText ?? ""}\u0000${run.output ?? ""}`;
+  return createHash("sha1").update(material).digest("hex").slice(0, 16);
+}
+
+export function notifiedSig(unit, result) {
+  const runs = (result?.runs ?? []).map((item) => `${item.runHash}:${item.kind}:${item.reason ?? ""}`).join("|");
+  return createHash("sha1").update(`${unitHash(unit)}\u0000${result?.kind ?? ""}\u0000${result?.reason ?? ""}\u0000${runs}`).digest("hex").slice(0, 16);
+}
+
 function overrideResult(cached) {
   return {
     kind: cached.override.kind,
@@ -144,19 +168,21 @@ function overrideResult(cached) {
     margin: cached.result?.margin ?? null,
     cached: true,
     overridden: true,
-    notifiedHash: cached.notifiedHash ?? null,
+    notifiedSig: cached.notifiedSig ?? null,
+    runs: cached.result?.runs ?? null,
+    split: cached.result?.split ?? false,
   };
 }
 
 export function setOverride({ dir = CFG_DIR, key, kind, note = "", now = Date.now(), tz = DEFAULTS.tz } = {}) {
   if (kind !== "count" && kind !== "skip") throw new Error(`override kind must be count or skip, got ${kind}`);
   const file = join(dir, "decisions.json");
-  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
-  const entry = cache[key];
+  const cache = readDecisions(file);
+  const entry = cache.units[key];
   if (!entry) throw new Error(`unknown unit: ${key}`);
   entry.override = { kind, note: String(note).trim(), at: new Date(now).toISOString() };
-  entry.notifiedHash = null;
-  writeJsonAtomic(file, cache);
+  entry.notifiedSig = null;
+  writeDecisions(file, cache);
   appendEvent(
     { event: "override", key, kind, note: entry.override.note, previous: entry.result?.kind ?? null, previousReason: entry.result?.reason ?? null },
     { dir: join(dir, "logs"), now, tz },
@@ -166,14 +192,15 @@ export function setOverride({ dir = CFG_DIR, key, kind, note = "", now = Date.no
 
 export function clearOverride({ dir = CFG_DIR, key, now = Date.now(), tz = DEFAULTS.tz } = {}) {
   const file = join(dir, "decisions.json");
-  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
-  const entry = cache[key];
+  const cache = readDecisions(file);
+  const entry = cache.units[key];
   if (!entry?.override) return null;
   const removed = entry.override;
   delete entry.override;
   delete entry.hash;
-  entry.notifiedHash = null;
-  writeJsonAtomic(file, cache);
+  delete entry.result?.runs;
+  entry.notifiedSig = null;
+  writeDecisions(file, cache);
   appendEvent({ event: "override_cleared", key, kind: removed.kind, note: removed.note }, { dir: join(dir, "logs"), now, tz });
   return removed;
 }
@@ -182,7 +209,7 @@ export function listReviews({ dir = CFG_DIR } = {}) {
   const reviewDir = join(dir, "review");
   if (!existsSync(reviewDir)) return [];
   const file = join(dir, "decisions.json");
-  const cache = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const cache = readDecisions(file);
   const latest = new Map();
   for (const name of readdirSync(reviewDir).filter((entry) => entry.endsWith(".jsonl")).sort()) {
     for (const line of readFileSync(join(reviewDir, name), "utf8").split("\n")) {
@@ -202,39 +229,138 @@ export function listReviews({ dir = CFG_DIR } = {}) {
     p: item.p ?? null,
     span: item.span ?? null,
     requests: item.requests ?? [],
-    override: cache[item.key]?.override?.kind ?? null,
-    current: cache[item.key]?.result?.kind ?? null,
+    override: cache.units[item.key]?.override?.kind ?? null,
+    current: cache.units[item.key]?.result?.kind ?? null,
+    split: cache.units[item.key]?.result?.runs ?? null,
   }));
 }
 
-export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now(), cache = {} }) {
+export function readDecisions(file) {
+  if (!existsSync(file)) return { version: DECISIONS_VERSION, units: {}, splits: {} };
+  let parsed = null;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return { version: DECISIONS_VERSION, units: {}, splits: {} };
+  }
+  if (!parsed || typeof parsed !== "object") return { version: DECISIONS_VERSION, units: {}, splits: {} };
+  if (parsed.version) return { version: DECISIONS_VERSION, units: parsed.units ?? {}, splits: parsed.splits ?? {} };
+  const backup = file.replace(/\.json$/, ".v1.bak.json");
+  if (!existsSync(backup)) writeFileSync(backup, `${JSON.stringify(parsed, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  return { version: DECISIONS_VERSION, units: parsed, splits: {} };
+}
+
+export function writeDecisions(file, cache) {
+  writeJsonAtomic(file, { version: DECISIONS_VERSION, units: cache.units ?? {}, splits: cache.splits ?? {} });
+}
+
+export function verdictToResult(verdict, cfg = DEFAULTS) {
+  const probabilities = verdict.probabilities ?? null;
+  const count = probabilities?.count;
+  const skip = probabilities?.skip;
+  const margin = typeof count === "number" && typeof skip === "number" ? Math.abs(count - skip) : null;
+  const meta = { p: probabilities, margin, confidence: verdict.confidence ?? null, attempts: verdict.attempts ?? null, elapsedMs: verdict.elapsedMs ?? null };
+  if (verdict.fallback) return { kind: "review", reason: verdict.fallback, cached: false, ...meta };
+  if (typeof count !== "number" || margin === null) return { kind: "review", reason: "no-probability", cached: false, ...meta };
+  if (margin < cfg.marginMin) return { kind: "review", reason: "low-margin", cached: false, ...meta };
+  return { kind: count >= cfg.countMinP ? "count" : "skip", reason: null, cached: false, ...meta };
+}
+
+export function isPending(result) {
+  return Boolean(result) && result.kind === "review" && PENDING_REASONS.has(result.reason);
+}
+
+export function hasOpenRun(result) {
+  return Boolean(result?.runs?.some((item) => item.kind === "review" && PENDING_REASONS.has(item.reason)));
+}
+
+export function aggregateSplit(unit, runs) {
+  const counted = runs.filter((item) => item.kind === "count").length;
+  const unsettled = runs.some((item) => item.kind === "review");
+  if (counted === 0) return { kind: unsettled ? "review" : "skip", reason: unsettled ? "pending" : null, split: true };
+  return { kind: "count", reason: unsettled ? "partial" : null, split: true };
+}
+
+async function splitUnit(unit, { judge, cfg, splits, calls, now, maxCalls }) {
+  const runs = [];
+  for (const run of unit.runs) {
+    const key = runHash(run);
+    const cached = splits[key];
+    if (cached) {
+      runs.push({ runHash: key, kind: cached.kind, reason: cached.reason ?? null, start: run.startedAt, end: run.endedAt });
+      continue;
+    }
+    if (calls.n >= maxCalls) {
+      runs.push({ runHash: key, kind: "review", reason: "deferred", start: run.startedAt, end: run.endedAt });
+      continue;
+    }
+    calls.n += 1;
+    const verdict = await judge.judgeChoice({
+      id: `hours:run:${key}`,
+      state: runState(run),
+      instructions: JUDGE_INSTRUCTIONS,
+      criteria: JUDGE_CRITERIA,
+    });
+    const result = verdictToResult(verdict, cfg);
+    if (!(result.kind === "review" && PENDING_REASONS.has(result.reason))) {
+      splits[key] = {
+        kind: result.kind,
+        reason: result.reason ?? null,
+        p: result.p ?? null,
+        margin: result.margin ?? null,
+        confidence: result.confidence ?? null,
+        judgedAt: new Date(now).toISOString(),
+      };
+    }
+    runs.push({ runHash: key, kind: result.kind, reason: result.reason ?? null, start: run.startedAt, end: run.endedAt });
+  }
+  return runs;
+}
+
+export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now(), cache = {}, calls = { n: 0 } } = {}) {
+  const units = cache.units ?? cache;
+  const splits = cache.splits ?? {};
   const hash = unitHash(unit);
-  const cached = cache[unit.key];
+  const cached = units[unit.key];
   if (cached?.override) return overrideResult(cached);
-  if (cached && cached.hash === hash) return { ...cached.result, cached: true, notifiedHash: cached.notifiedHash ?? null };
+  const needsSplit = cached && SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
+  const reopen = cached && cached.hash === hash && !needsSplit && hasOpenRun(cached.result);
+  if (cached && cached.hash === hash && !needsSplit && !reopen && !isPending(cached.result)) {
+    return { ...cached.result, cached: true, notifiedSig: cached.notifiedSig ?? null };
+  }
+
+  if (reopen) {
+    const runs = await splitUnit(unit, { judge, cfg, splits, calls, now, maxCalls: cfg.maxJudgeCallsPerRun });
+    return {
+      ...aggregateSplit(unit, runs),
+      p: cached.result.p,
+      margin: cached.result.margin,
+      confidence: cached.result.confidence,
+      attempts: cached.result.attempts,
+      elapsedMs: cached.result.elapsedMs,
+      cached: false,
+      runs,
+    };
+  }
 
   const longest = unit.runs.reduce((max, run) => Math.max(max, run.durationMs), 0);
   if (longest >= cfg.reviewLongRunHours * 3600 * 1000) {
-    return { kind: "review", reason: "long-run", p: null, margin: null, cached: false, confidence: null, attempts: null, elapsedMs: null };
+    return { kind: "review", reason: "long-run", p: null, margin: null, cached: false, confidence: null, attempts: null, elapsedMs: null, runs: null };
   }
 
+  calls.n += 1;
   const verdict = await judge.judgeChoice({
     id: `hours:${unit.key}`,
     state: unitState(unit),
     instructions: JUDGE_INSTRUCTIONS,
     criteria: JUDGE_CRITERIA,
   });
-  const meta = { confidence: verdict.confidence ?? null, attempts: verdict.attempts ?? null, elapsedMs: verdict.elapsedMs ?? null };
+  const result = verdictToResult(verdict, cfg);
+  if (result.kind !== "review" || !SPLIT_REASONS.has(result.reason)) return { ...result, runs: null };
 
-  const probabilities = verdict.probabilities ?? null;
-  const count = probabilities?.count;
-  const skip = probabilities?.skip;
-  const margin = typeof count === "number" && typeof skip === "number" ? Math.abs(count - skip) : null;
-
-  if (verdict.fallback) return { kind: "review", reason: verdict.fallback, p: probabilities, margin, cached: false, ...meta };
-  if (typeof count !== "number" || margin === null) return { kind: "review", reason: "no-probability", p: probabilities, margin, cached: false, ...meta };
-  if (margin < cfg.marginMin) return { kind: "review", reason: "low-margin", p: probabilities, margin, cached: false, ...meta };
-  return { kind: count >= cfg.countMinP ? "count" : "skip", reason: null, p: probabilities, margin, cached: false, ...meta };
+  const runs = await splitUnit(unit, { judge, cfg, splits, calls, now, maxCalls: cfg.maxJudgeCallsPerRun });
+  const aggregate = aggregateSplit(unit, runs);
+  return { ...aggregate, p: result.p, margin: result.margin, confidence: result.confidence, attempts: result.attempts, elapsedMs: result.elapsedMs, cached: false, runs };
 }
 
 export function writeJsonAtomic(file, value) {
@@ -245,12 +371,17 @@ export function writeJsonAtomic(file, value) {
 }
 
 export function pruneDecisions(cache, { now = Date.now(), ttlMs = DECISIONS_TTL_MS } = {}) {
-  const kept = {};
-  for (const [key, entry] of Object.entries(cache)) {
+  const units = {};
+  for (const [key, entry] of Object.entries(cache.units ?? {})) {
     const judgedAt = Date.parse(entry.judgedAt ?? "");
-    if (Number.isNaN(judgedAt) || now - judgedAt <= ttlMs) kept[key] = entry;
+    if (Number.isNaN(judgedAt) || now - judgedAt <= ttlMs) units[key] = entry;
   }
-  return kept;
+  const splits = {};
+  for (const [key, entry] of Object.entries(cache.splits ?? {})) {
+    const judgedAt = Date.parse(entry.judgedAt ?? "");
+    if (Number.isNaN(judgedAt) || now - judgedAt <= ttlMs) splits[key] = entry;
+  }
+  return { version: DECISIONS_VERSION, units, splits };
 }
 
 export function formatClock(ms, tz) {
@@ -297,13 +428,21 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {})
     acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
     return acc;
   }, {});
-  const countedMinutes = fresh
-    .filter((item) => item.result.kind === "count")
-    .reduce((sum, item) => sum + (item.unit.lastEnd - item.unit.startedAt) / 60_000, 0);
+  const splitCount = fresh.filter((item) => item.result.split).length;
+  const countedMinutes = typeof clock?.minutes === "number"
+    ? clock.minutes
+    : fresh
+      .filter((item) => item.result.kind === "count")
+      .reduce((sum, item) => {
+        const runs = item.result.split
+          ? item.unit.runs.filter((run, index) => item.result.runs?.[index]?.kind === "count")
+          : item.unit.runs;
+        return sum + runs.reduce((inner, run) => inner + run.durationMs / 60_000, 0);
+      }, 0);
   const lines = [
     `**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`,
-    `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}`,
-    `计入跨度 ${formatDuration(countedMinutes)}`,
+    `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`,
+    `计入时长 ${formatDuration(countedMinutes)}`,
   ];
   if (clock) {
     const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
@@ -434,7 +573,7 @@ export async function run({
 } = {}) {
   const cfg = loadConfig(dir);
   const decisionsFile = join(dir, "decisions.json");
-  const cache = existsSync(decisionsFile) ? JSON.parse(readFileSync(decisionsFile, "utf8")) : {};
+  const cache = readDecisions(decisionsFile);
   const engine = judge ?? createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
 
   const windowStart = now - LEDGER_WINDOW_MS;
@@ -444,34 +583,36 @@ export async function run({
   const units = candidates;
   const roundStartedAt = Date.now();
   const needsJudge = (unit) => {
-    const cached = cache[unit.key];
+    const cached = cache.units[unit.key];
     if (cached?.override) return false;
-    return !cached || cached.hash !== unitHash(unit);
+    if (!cached || cached.hash !== unitHash(unit)) return true;
+    if (isPending(cached.result) || hasOpenRun(cached.result)) return true;
+    return SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
   };
 
   const fresh = [];
   const judged = [];
   let leftover = 0;
-  let judgedCount = 0;
+  const calls = { n: 0 };
   for (const unit of units) {
-    if (needsJudge(unit) && (judgedCount >= cfg.maxUnitsPerRun || Date.now() - roundStartedAt >= budgetMs)) {
+    if (needsJudge(unit) && (calls.n >= cfg.maxJudgeCallsPerRun || Date.now() - roundStartedAt >= budgetMs)) {
       leftover += 1;
       log(`[hours] ${unit.key} left for the next round`);
       continue;
     }
-    const result = await decideUnit(unit, { judge: engine, cfg, now, cache });
-    if (needsJudge(unit)) judgedCount += 1;
-    const previous = cache[unit.key];
-    const notifiedHash = previous?.notifiedHash ?? null;
+    const result = await decideUnit(unit, { judge: engine, cfg, now, cache, calls });
+    const previous = cache.units[unit.key];
+    const previousSig = previous?.notifiedSig ?? null;
     const hash = unitHash(unit);
+    const sig = notifiedSig(unit, result);
     const override = previous?.override ?? null;
     const changed =
       !previous ||
       previous.hash !== hash ||
-      previous.result?.kind !== result.kind ||
+      previousSig !== sig ||
       (override?.kind ?? null) !== (result.overridden ? result.kind : null);
     if (changed) {
-      cache[unit.key] = { hash, result, notifiedHash, judgedAt: new Date(now).toISOString(), ...(override ? { override } : {}) };
+      cache.units[unit.key] = { hash, result, notifiedSig: previousSig, judgedAt: new Date(now).toISOString(), ...(override ? { override } : {}) };
     }
     if (!dryRun && changed) {
       const event = {
@@ -490,6 +631,8 @@ export async function run({
         attempts: result.attempts ?? null,
         elapsedMs: result.elapsedMs ?? null,
         review: result.kind === "review",
+        split: Boolean(result.split),
+        ...(result.runs ? { runs: result.runs.map((item) => ({ runHash: item.runHash, kind: item.kind, reason: item.reason, start: item.start, end: item.end })) } : {}),
         ...(result.kind === "review" ? reviewSummary(unit) : {}),
       };
       appendEvent(event, { dir: logDir, now, tz: cfg.tz });
@@ -504,7 +647,7 @@ export async function run({
       }
     }
     judged.push({ unit, result });
-    if (notifiedHash !== hash) fresh.push({ unit, result, hash });
+    if (previousSig !== sig) fresh.push({ unit, result, sig });
   }
 
   const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
@@ -512,15 +655,15 @@ export async function run({
   const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null });
   let delivered = false;
   if (!dryRun) {
-    writeJsonAtomic(decisionsFile, pruneDecisions(cache, { now }));
+    writeDecisions(decisionsFile, pruneDecisions(cache, { now }));
     if (report && notify && cfg.notify.enabled) {
       const sent = notifyImpl(report, { platform: cfg.notify.platform });
       delivered = sent.ok;
       appendEvent({ event: "notify", platform: cfg.notify.platform, ok: sent.ok, chars: report.length, units: fresh.length, ...(sent.ok ? {} : { output: String(sent.output ?? "") }) }, { dir: logDir, now, tz: cfg.tz });
       if (!sent.ok) log(`[error] notify: ${sent.output}`);
       else {
-        for (const item of fresh) cache[item.unit.key].notifiedHash = item.hash;
-        writeJsonAtomic(decisionsFile, pruneDecisions(cache, { now }));
+        for (const item of fresh) cache.units[item.unit.key].notifiedSig = item.sig;
+        writeDecisions(decisionsFile, pruneDecisions(cache, { now }));
       }
     }
     const counts = fresh.reduce((acc, item) => {
@@ -531,7 +674,7 @@ export async function run({
       `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
       { dir, now, tz: cfg.tz },
     );
-    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, truncated: candidates.length - units.length, leftover, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
     if (clockOutcome?.line) appendDigest(`  - clock：${clockOutcome.line}`, { dir, now, tz: cfg.tz });
   }
 
@@ -576,8 +719,8 @@ export async function syncClock({
     }
     for (const segment of plan.create) log(`[clock] plan ${iso(segment.start)} → ${iso(segment.end)} (${minute(segment)}min)`);
     return {
-      summary: { targets: plan.targets.length, create: plan.create.length, patch: plan.patch.length, remove: plan.remove.length, blocked: plan.blocked, dropped: plan.dropped },
-      line: `计划 ${plan.targets.length} 段（新建 ${plan.create.length}、改 ${plan.patch.length}、删 ${plan.remove.length}）`,
+      summary: { targets: plan.targets.length, minutes: plan.minutes, create: plan.create.length, patch: plan.patch.length, remove: plan.remove.length, blocked: plan.blocked, dropped: plan.dropped },
+      line: `计划 ${plan.targets.length} 段 / ${formatDuration(plan.minutes)}（新建 ${plan.create.length}、改 ${plan.patch.length}、删 ${plan.remove.length}）`,
     };
   }
 
@@ -609,6 +752,7 @@ export async function syncClock({
   const plan = buildPlan({ judged, now, cfg: clockCfg, synced });
   const summary = {
     targets: plan.targets.length,
+    minutes: plan.minutes,
     create: plan.create.length,
     patch: plan.patch.length,
     remove: plan.remove.length,
@@ -629,7 +773,7 @@ export async function syncClock({
     budget -= 1;
     const result = await api.create({ activityId, start: segment.start, end: segment.end });
     if (result.ok) {
-      created.push({ id: result.data.id, start: segment.start, end: segment.end });
+      created.push({ id: result.data.id, start: segment.start, end: segment.end, origin: segment.origin ?? "unit", unitKeys: segment.unitKeys ?? [] });
       appendEvent({ event: "clock", action: "create", id: result.data.id, start: iso(segment.start), end: iso(segment.end), minutes: minute(segment) }, { dir: logDir, now, tz: cfg.tz });
       continue;
     }

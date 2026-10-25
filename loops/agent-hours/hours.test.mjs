@@ -12,8 +12,11 @@ import {
   formatDuration,
   formatReport,
   listReviews,
+  readDecisions,
   readLedger,
   run,
+  runHash,
+  runState,
   setOverride,
   unitHash,
   unitState,
@@ -121,10 +124,17 @@ test("a confident probability split counts, an inverted one skips", async () => 
   assert.equal((await decideUnit(unit, { judge })).kind, "skip");
 });
 
-test("low margin, judge fallback and very long runs all land in review", async () => {
+test("low margin splits into runs and settles as pending when every run stays undecided", async () => {
   const [unit] = buildUnits([rec("2026-10-24T01:00:00.000Z", 5)]);
-  const lowMargin = fakeJudge([{ choice: "count", confidence: 0.55, probabilities: { count: 0.54, skip: 0.46 }, fallback: null }]);
-  assert.equal((await decideUnit(unit, { judge: lowMargin })).reason, "low-margin");
+  const lowMargin = fakeJudge([
+    { choice: "count", confidence: 0.55, probabilities: { count: 0.54, skip: 0.46 }, fallback: null },
+    { choice: "count", confidence: 0.55, probabilities: { count: 0.54, skip: 0.46 }, fallback: null },
+  ]);
+  const split = await decideUnit(unit, { judge: lowMargin });
+  assert.equal(split.kind, "review");
+  assert.equal(split.reason, "pending");
+  assert.equal(split.split, true);
+  assert.equal(split.runs[0].kind, "review");
 
   const failed = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
   const failedResult = await decideUnit(unit, { judge: failed });
@@ -178,9 +188,10 @@ test("a run judges, notifies once and records the notified hash", async () => {
   assert.match(sent[0], /\*\*工时\*\*/);
 
   const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
-  const entry = Object.values(decisions)[0];
+  assert.equal(decisions.version, 2);
+  const entry = Object.values(decisions.units)[0];
   assert.equal(entry.result.kind, "count");
-  assert.equal(entry.notifiedHash, entry.hash);
+  assert.equal(typeof entry.notifiedSig, "string");
   assert.ok(existsSync(path.join(dir, "digest")));
 
   const second = await run({ now: now + 30 * MINUTE, dir, judge, notifyImpl: (text) => (sent.push(text), { ok: true }) });
@@ -199,7 +210,7 @@ test("review units are queued and a failed notify leaves them un-notified", asyn
   const entry = JSON.parse(readFileSync(reviewFile, "utf8").trim().split("\n")[0]);
   assert.equal(entry.reason, "http_429");
   const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
-  assert.equal(Object.values(decisions)[0].notifiedHash, null);
+  assert.equal(Object.values(decisions.units)[0].notifiedSig, null);
 });
 
 test("units that ended inside the settle window are left for the next run", async () => {
@@ -238,7 +249,7 @@ test("a run writes one event stream with unit, notify and round lines", async ()
   assert.equal(round.units, 1);
   assert.equal(round.processed, 1);
   assert.equal(round.leftover, 0);
-  assert.equal(round.truncated, 0);
+  assert.equal(typeof round.calls, "number");
   assert.deepEqual(round.counts, { count: 1 });
 });
 
@@ -365,7 +376,7 @@ test("report is a summary: verdict counts, counted minutes and where the review 
   assert.equal(lines.length, 3);
   assert.match(lines[0], /^\*\*工时\*\* 2026-10-24 10:00$/);
   assert.match(lines[1], /新增 2 单元 · 计入 1 · 不计 0 · 待确认 1/);
-  assert.match(lines[2], /计入跨度 10 分钟/);
+  assert.match(lines[2], /计入时长 10 分钟/);
 });
 
 test("durations switch to hours once they pass an hour", () => {
@@ -390,7 +401,7 @@ test("a report longer than an hour shows hours instead of raw minutes", () => {
       clock: { created: 1, patched: 0, deleted: 0, conflict: 1, conflictMinutes: 75, failed: 0, blocked: [] },
     },
   );
-  assert.match(report, /计入跨度 1\.2 小时/);
+  assert.match(report, /计入时长 1\.2 小时/);
   assert.match(report, /冲突 1\.3 小时/);
 });
 
@@ -415,7 +426,7 @@ test("a manual override wins over both the cached verdict and a fresh judge call
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: null, confidence: null, probabilities: { count: 0.73, skip: 0.27 }, fallback: "low-confidence" }]);
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
-  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")).units)[0];
 
   setOverride({ dir, key, kind: "count", note: "MagicDoor 事务（PR 审批状态确认），人工裁定计入" });
   const second = fakeJudge([]);
@@ -426,8 +437,8 @@ test("a manual override wins over both the cached verdict and a fresh judge call
   assert.equal(second.calls.length, 0);
 
   const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
-  assert.equal(decisions[key].result.kind, "count");
-  assert.equal(decisions[key].override.kind, "count");
+  assert.equal(decisions.units[key].result.kind, "count");
+  assert.equal(decisions.units[key].override.kind, "count");
   const override = readEvents(dir).find((event) => event.event === "override");
   assert.equal(override.kind, "count");
   assert.equal(override.previous, "review");
@@ -437,7 +448,7 @@ test("an override survives a changed input hash and re-judging is skipped", asyn
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
-  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")).units)[0];
   setOverride({ dir, key, kind: "count" });
 
   writeFileSync(
@@ -449,14 +460,14 @@ test("an override survives a changed input hash and re-judging is skipped", asyn
   assert.equal(grown.calls.length, 0);
   assert.equal(outcome.fresh.length, 1);
   const decisions = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
-  assert.equal(decisions[key].override.kind, "count");
+  assert.equal(decisions.units[key].override.kind, "count");
 });
 
 test("clearing an override sends the unit back to the judge", async () => {
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
-  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")).units)[0];
   setOverride({ dir, key, kind: "skip" });
   assert.equal(clearOverride({ dir, key }).kind, "skip");
   assert.equal(clearOverride({ dir, key }), null);
@@ -472,11 +483,11 @@ test("listReviews shows the review queue with the override state", async () => {
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: null, confidence: null, probabilities: { count: 0.73, skip: 0.27 }, fallback: "low-confidence" }]);
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
-  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")))[0];
+  const key = Object.keys(JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8")).units)[0];
   const before = listReviews({ dir });
   assert.equal(before.length, 1);
   assert.equal(before[0].key, key);
-  assert.equal(before[0].reason, "low-confidence");
+  assert.equal(before[0].reason, "pending");
   assert.equal(before[0].override, null);
   setOverride({ dir, key, kind: "count" });
   assert.equal(listReviews({ dir })[0].override, "count");
@@ -493,7 +504,7 @@ test("units that hit the cache are kept in the round even past the judge quota",
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
-  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxUnitsPerRun: 0 }));
+  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxJudgeCallsPerRun: 0 }));
   const second = fakeJudge([]);
   await run({ now: now + 30 * MINUTE, dir, judge: second, notifyImpl: () => ({ ok: true }) });
   assert.equal(second.calls.length, 0);
@@ -509,10 +520,130 @@ test("a unit that needs judging is deferred, not dropped, when the quota is spen
     path.join(dir, "ledger", "s2.jsonl"),
     `${JSON.stringify(rec("2026-10-24T01:40:00.000Z", 5, { sessionId: "s2" }))}\n`,
   );
-  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxUnitsPerRun: 1 }));
+  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxJudgeCallsPerRun: 1 }));
   const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
   assert.equal(outcome.units, 2);
   const round = readEvents(dir).filter((event) => event.event === "round").pop();
   assert.equal(round.leftover, 1);
   assert.equal(round.processed, 1);
+});
+
+test("a run hash carries the prompt version and the run text", () => {
+  const [unit] = buildUnits([rec("2026-10-24T01:00:00.000Z", 5)]);
+  const run0 = unit.runs[0];
+  const first = runHash(run0);
+  assert.equal(first.length, 16);
+  assert.notEqual(first, runHash({ ...run0, userText: "换了请求" }));
+  assert.equal(first, runHash({ ...run0 }));
+  assert.match(runState(run0), /【用户请求】/);
+});
+
+const SPLIT_ROWS = () => [
+  rec("2026-10-24T01:00:00.000Z", 5, { userText: "客户 PR 评审", output: "批注三条" }),
+  rec("2026-10-24T01:10:00.000Z", 5, { userText: "relay 标记实现", output: "改了 core.mjs" }),
+];
+
+function splitSandbox() {
+  const sandboxDir = sandbox();
+  writeFileSync(
+    path.join(sandboxDir.dir, "ledger", "s1.jsonl"),
+    `${SPLIT_ROWS().map((row) => JSON.stringify(row)).join("\n")}\n`,
+  );
+  return sandboxDir;
+}
+
+const SANDBOX_UNIT = () => buildUnits(SPLIT_ROWS())[0];
+
+test("a v1 decisions file is migrated in place and its low confidence units split", async () => {
+  const { dir, now } = splitSandbox();
+  const unit = SANDBOX_UNIT();
+  writeFileSync(
+    path.join(dir, "decisions.json"),
+    JSON.stringify({ [unit.key]: { hash: unitHash(unit), result: { kind: "review", reason: "low-confidence", p: { count: 0.5, skip: 0.5 } }, notifiedHash: null, judgedAt: "2026-10-24T01:20:00.000Z" } }),
+  );
+  const judge = fakeJudge([
+    { choice: null, confidence: 0.2, probabilities: { count: 0.5, skip: 0.5 }, fallback: "low-confidence" },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+    { choice: "skip", confidence: 0.9, probabilities: { count: 0.1, skip: 0.9 }, fallback: null },
+  ]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const cache = readDecisions(path.join(dir, "decisions.json"));
+  assert.equal(cache.version, 2);
+  assert.equal(Object.keys(cache.splits).length, 2);
+  assert.equal(cache.units[unit.key].result.kind, "count");
+  assert.equal(cache.units[unit.key].result.split, true);
+  assert.equal(outcome.fresh[0].result.kind, "count");
+  assert.ok(existsSync(path.join(dir, "decisions.v1.bak.json")));
+  assert.equal(judge.calls.length, 3);
+});
+
+test("low confidence splits into runs, caches them and writes only the counted ones", async () => {
+  const { dir, now } = splitSandbox();
+  const judge = fakeJudge([
+    { choice: null, confidence: 0.12, probabilities: { count: 0.44, skip: 0.56 }, fallback: "low-confidence" },
+    { choice: "count", confidence: 0.78, probabilities: { count: 0.78, skip: 0.22 }, fallback: null },
+    { choice: "skip", confidence: 0.86, probabilities: { count: 0.07, skip: 0.93 }, fallback: null },
+  ]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.fresh.length, 1);
+  assert.equal(outcome.fresh[0].result.kind, "count");
+  assert.equal(outcome.fresh[0].result.split, true);
+  assert.equal(outcome.fresh[0].result.runs.length, 2);
+  assert.deepEqual(outcome.fresh[0].result.runs.map((item) => item.kind), ["count", "skip"]);
+
+  const again = fakeJudge([]);
+  const round = await run({ now: now + 30 * MINUTE, dir, judge: again, notifyImpl: () => ({ ok: true }) });
+  assert.equal(again.calls.length, 0);
+  assert.equal(round.fresh.length, 0);
+});
+
+test("a pending verdict turns into a verdict once and is not re-announced while pending", async () => {
+  const { dir, now } = sandbox();
+  const timeoutJudge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
+  const first = await run({ now, dir, judge: timeoutJudge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(first.fresh[0].result.kind, "review");
+  assert.equal(first.fresh[0].result.reason, "timeout");
+
+  const stillDown = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
+  const second = await run({ now: now + 30 * MINUTE, dir, judge: stillDown, notifyImpl: () => ({ ok: true }) });
+  assert.equal(stillDown.calls.length, 1);
+  assert.equal(second.fresh.length, 0);
+
+  const back = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const third = await run({ now: now + 60 * MINUTE, dir, judge: back, notifyImpl: () => ({ ok: true }) });
+  assert.equal(third.fresh.length, 1);
+  assert.equal(third.fresh[0].result.kind, "count");
+});
+
+test("a pending run inside a split unit keeps the settled runs and retries only the open one", async () => {
+  const { dir, now } = splitSandbox();
+  const judge = fakeJudge([
+    { choice: null, confidence: 0.12, probabilities: { count: 0.44, skip: 0.56 }, fallback: "low-confidence" },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+    { choice: null, confidence: null, probabilities: null, fallback: "circuit" },
+  ]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const result = outcome.fresh[0].result;
+  assert.equal(result.kind, "count");
+  assert.equal(result.reason, "partial");
+  assert.deepEqual(result.runs.map((item) => item.kind), ["count", "review"]);
+
+  const cache = readDecisions(path.join(dir, "decisions.json"));
+  assert.equal(Object.keys(cache.splits).length, 1);
+  const retry = fakeJudge([{ choice: "skip", confidence: 0.9, probabilities: { count: 0.1, skip: 0.9 }, fallback: null }]);
+  await run({ now: now + 30 * MINUTE, dir, judge: retry, notifyImpl: () => ({ ok: true }) });
+  assert.equal(retry.calls.length, 1);
+});
+
+test("the judge quota counts every split call", async () => {
+  const { dir, now } = splitSandbox();
+  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ maxJudgeCallsPerRun: 2 }));
+  const judge = fakeJudge([
+    { choice: null, confidence: 0.12, probabilities: { count: 0.44, skip: 0.56 }, fallback: "low-confidence" },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+  ]);
+  await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  const round = readEvents(dir).filter((event) => event.event === "round").pop();
+  assert.equal(round.calls, 2);
 });
