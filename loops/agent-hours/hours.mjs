@@ -245,12 +245,19 @@ export function readDecisions(file) {
   }
   if (!parsed || typeof parsed !== "object") return { version: DECISIONS_VERSION, units: {}, splits: {} };
   if (parsed.version) return { version: DECISIONS_VERSION, units: parsed.units ?? {}, splits: parsed.splits ?? {} };
-  const backup = file.replace(/\.json$/, ".v1.bak.json");
-  if (!existsSync(backup)) writeFileSync(backup, `${JSON.stringify(parsed, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   return { version: DECISIONS_VERSION, units: parsed, splits: {} };
 }
 
 export function writeDecisions(file, cache) {
+  if (existsSync(file)) {
+    const backup = file.replace(/\.json$/, ".v1.bak.json");
+    try {
+      const current = JSON.parse(readFileSync(file, "utf8"));
+      if (!current?.version && !existsSync(backup)) writeFileSync(backup, `${JSON.stringify(current, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    } catch {
+      // 保留损坏文件，不覆盖备份
+    }
+  }
   writeJsonAtomic(file, { version: DECISIONS_VERSION, units: cache.units ?? {}, splits: cache.splits ?? {} });
 }
 

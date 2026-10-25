@@ -276,13 +276,21 @@ test("unchanged units are not re-appended to the stream on a later round", async
   assert.equal(events.filter((event) => event.event === "round").length, 2);
 });
 
-test("dry run writes nothing", async () => {
+test("dry run writes nothing and leaves a v1 cache untouched", async () => {
   const { dir, now } = sandbox();
-  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const unit = SANDBOX_UNIT();
+  const v1 = { [unit.key]: { hash: "stale", result: { kind: "review", reason: "low-confidence" }, notifiedHash: null, judgedAt: "2026-10-24T01:20:00.000Z" } };
+  writeFileSync(path.join(dir, "decisions.json"), JSON.stringify(v1));
+  const judge = fakeJudge([
+    { choice: null, confidence: 0.12, probabilities: { count: 0.44, skip: 0.56 }, fallback: "low-confidence" },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+    { choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null },
+  ]);
   const outcome = await run({ now, dir, judge, dryRun: true, notifyImpl: () => ({ ok: true }) });
   assert.equal(outcome.fresh.length, 1);
   assert.ok(outcome.report.includes("**工时**"));
-  assert.equal(existsSync(path.join(dir, "decisions.json")), false);
+  assert.equal(readFileSync(path.join(dir, "decisions.json"), "utf8"), JSON.stringify(v1));
+  assert.equal(existsSync(path.join(dir, "decisions.v1.bak.json")), false);
   assert.equal(existsSync(path.join(dir, "digest")), false);
   assert.equal(existsSync(path.join(dir, "logs")), false);
 });
