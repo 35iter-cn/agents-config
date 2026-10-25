@@ -138,3 +138,12 @@ test("ctxOf carries every field the adapter needs and stays serializable", () =>
   assert.equal(ctxOf(sent).replyTo, "m-out");
   assert.equal(ctxOf({ ...sent, inbound: { ...sent.inbound, replyTo: "explicit" } }).replyTo, "explicit");
 });
+
+test("createJob keeps attachments and defaults to an empty list", () => {
+  const state = { meta: {} };
+  const attachments = [{ kind: "image", path: "/tmp/a.jpg" }];
+  const withFiles = createJob(state, { ...inbound, attachments }, nowIso);
+  assert.deepEqual(withFiles.inbound.attachments, attachments);
+  const without = createJob(state, inbound, nowIso);
+  assert.deepEqual(without.inbound.attachments, []);
+});

@@ -718,3 +718,40 @@ test("TC-V8 usage records one run per terminal job", async () => {
   assert.equal(runs[0].platform, "fake");
   assert.equal(runs[0].answer, "ok");
 });
+
+test("TC-40 attachments become @refs ahead of the prompt", async () => {
+  const captured = [];
+  const { core } = harness({
+    adapterOverrides: { worker: "pi" },
+    spawn: (bin, args) => {
+      captured.push({ bin, args });
+      return fakeChild({ stdout: "ok" });
+    },
+  });
+  await core.handle(
+    inbound({ text: "看图", attachments: [{ kind: "image", path: "/tmp/a.jpg" }, { kind: "image", path: "/tmp/b.png" }] }),
+  );
+  await tick();
+  assert.equal(captured.length, 1);
+  const args = captured[0].args;
+  const dash = args.indexOf("--");
+  assert.ok(dash > 0);
+  assert.deepEqual(args.slice(dash + 1, dash + 3), ["@/tmp/a.jpg", "@/tmp/b.png"]);
+  assert.match(args[args.length - 1], /看图/);
+});
+
+test("TC-41 no attachments keeps the argv shape unchanged", async () => {
+  const captured = [];
+  const { core } = harness({
+    adapterOverrides: { worker: "pi" },
+    spawn: (bin, args) => {
+      captured.push(args);
+      return fakeChild({ stdout: "ok" });
+    },
+  });
+  await core.handle(inbound({ text: "hi" }));
+  await tick();
+  const args = captured[0];
+  assert.equal(args.filter((arg) => arg.startsWith("@")).length, 0);
+  assert.equal(args[args.length - 2], "--");
+});

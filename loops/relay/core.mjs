@@ -226,7 +226,8 @@ export function createCore({ adapter, paths, deps = {} }) {
   }
 
   function spawnWorker(job, entry, inbound, prompt, full) {
-    const args = adapter.worker === "stub" ? ["-e", `console.log("[stub] session=${entry.session} full=${full}")`] : ["--print", "--session-id", entry.session, "--", prompt];
+    const refs = (inbound.attachments ?? []).map((attachment) => `@${attachment.path}`);
+    const args = adapter.worker === "stub" ? ["-e", `console.log("[stub] session=${entry.session} full=${full}")`] : ["--print", "--session-id", entry.session, "--", ...refs, prompt];
     const bin = adapter.worker === "stub" ? process.execPath : adapter.piBin;
     const command = adapter.buildWorker ? adapter.buildWorker({ prompt, full, session: entry.session }) : { bin, args };
     const started = now();
