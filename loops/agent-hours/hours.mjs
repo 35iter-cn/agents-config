@@ -330,7 +330,8 @@ export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now()
   const hash = unitHash(unit);
   const cached = units[unit.key];
   if (cached?.override) return overrideResult(cached);
-  const needsSplit = cached && SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
+  const splittable = unit.runs.length > 1;
+  const needsSplit = splittable && cached && SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
   const reopen = cached && cached.hash === hash && !needsSplit && hasOpenRun(cached.result);
   if (cached && cached.hash === hash && !needsSplit && !reopen && !isPending(cached.result)) {
     return { ...cached.result, cached: true, notifiedSig: cached.notifiedSig ?? null };
@@ -363,7 +364,7 @@ export async function decideUnit(unit, { judge, cfg = DEFAULTS, now = Date.now()
     criteria: JUDGE_CRITERIA,
   });
   const result = verdictToResult(verdict, cfg);
-  if (result.kind !== "review" || !SPLIT_REASONS.has(result.reason)) return { ...result, runs: null };
+  if (result.kind !== "review" || !SPLIT_REASONS.has(result.reason) || !splittable) return { ...result, runs: null };
 
   const runs = await splitUnit(unit, { judge, cfg, splits, calls, now, maxCalls: cfg.maxJudgeCallsPerRun });
   const aggregate = aggregateSplit(unit, runs);
@@ -594,7 +595,7 @@ export async function run({
     if (cached?.override) return false;
     if (!cached || cached.hash !== unitHash(unit)) return true;
     if (isPending(cached.result) || hasOpenRun(cached.result)) return true;
-    return SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
+    return unit.runs.length > 1 && SPLIT_REASONS.has(cached.result?.reason) && !cached.result?.runs;
   };
 
   const fresh = [];

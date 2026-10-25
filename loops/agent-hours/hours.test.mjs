@@ -124,17 +124,16 @@ test("a confident probability split counts, an inverted one skips", async () => 
   assert.equal((await decideUnit(unit, { judge })).kind, "skip");
 });
 
-test("low margin splits into runs and settles as pending when every run stays undecided", async () => {
+test("a single run unit is never split, even when the verdict is low margin", async () => {
   const [unit] = buildUnits([rec("2026-10-24T01:00:00.000Z", 5)]);
   const lowMargin = fakeJudge([
     { choice: "count", confidence: 0.55, probabilities: { count: 0.54, skip: 0.46 }, fallback: null },
-    { choice: "count", confidence: 0.55, probabilities: { count: 0.54, skip: 0.46 }, fallback: null },
   ]);
-  const split = await decideUnit(unit, { judge: lowMargin });
-  assert.equal(split.kind, "review");
-  assert.equal(split.reason, "pending");
-  assert.equal(split.split, true);
-  assert.equal(split.runs[0].kind, "review");
+  const result = await decideUnit(unit, { judge: lowMargin });
+  assert.equal(result.kind, "review");
+  assert.equal(result.reason, "low-margin");
+  assert.equal(result.runs, null);
+  assert.equal(lowMargin.calls.length, 1);
 
   const failed = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "timeout" }]);
   const failedResult = await decideUnit(unit, { judge: failed });
@@ -562,6 +561,12 @@ function splitSandbox() {
 
 const SANDBOX_UNIT = () => buildUnits(SPLIT_ROWS())[0];
 
+function singleSandbox() {
+  const box = sandbox();
+  writeFileSync(path.join(box.dir, "ledger", "s1.jsonl"), `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5))}\n`);
+  return box;
+}
+
 test("a v1 decisions file is migrated in place and its low confidence units split", async () => {
   const { dir, now } = splitSandbox();
   const unit = SANDBOX_UNIT();
@@ -654,4 +659,19 @@ test("the judge quota counts every split call", async () => {
   await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
   const round = readEvents(dir).filter((event) => event.event === "round").pop();
   assert.equal(round.calls, 2);
+});
+
+test("a single run unit with low confidence keeps its reason, caches it and is not re-judged", async () => {
+  const { dir, now } = singleSandbox();
+  const single = fakeJudge([{ choice: null, confidence: 0.12, probabilities: { count: 0.44, skip: 0.56 }, fallback: "low-confidence" }]);
+  const first = await run({ now, dir, judge: single, notifyImpl: () => ({ ok: true }) });
+  assert.equal(first.fresh[0].result.kind, "review");
+  assert.equal(first.fresh[0].result.reason, "low-confidence");
+  assert.equal(single.calls.length, 1);
+  const cache = readDecisions(path.join(dir, "decisions.json"));
+  assert.equal(Object.keys(cache.splits).length, 0);
+
+  const again = fakeJudge([]);
+  await run({ now: now + 30 * MINUTE, dir, judge: again, notifyImpl: () => ({ ok: true }) });
+  assert.equal(again.calls.length, 0);
 });
