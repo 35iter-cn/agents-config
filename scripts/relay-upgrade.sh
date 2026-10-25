@@ -10,6 +10,22 @@ fi
 state="$HOME/.config/taskradar/relay-$platform.json"
 wait_seconds="${RELAY_UPGRADE_WAIT:-0}"
 heartbeat_seconds="${RELAY_UPGRADE_HEARTBEAT:-300}"
+script_dir="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+notify() {
+  if [[ "${RELAY_UPGRADE_NOTIFY:-1}" == "0" ]]; then
+    return 0
+  fi
+  local bun_bin
+  bun_bin="$(command -v bun || true)"
+  if [[ -z "$bun_bin" ]]; then
+    echo "relay-upgrade: WARN bun not found, skipping notify" >&2
+    return 0
+  fi
+  if ! "$bun_bin" "$script_dir/../loops/relay/relay.mjs" notify "$platform" "$1"; then
+    echo "relay-upgrade: WARN notify failed" >&2
+  fi
+}
 
 snapshot() {
   node -e '
@@ -31,7 +47,7 @@ snapshot() {
 
 if [[ -z "${RELAY_UPGRADE_DETACHED:-}" ]] && grep -q "relay@" /proc/self/cgroup 2>/dev/null; then
   unit="relay-upgrade-$platform"
-  self="$(readlink -f "$0")"
+  self="$script_dir/$(basename "$0")"
   if systemctl --user is-active --quiet "$unit"; then
     echo "relay-upgrade: $unit is already waiting (journalctl --user -u $unit)" >&2
     exit 4
@@ -44,6 +60,7 @@ if [[ -z "${RELAY_UPGRADE_DETACHED:-}" ]] && grep -q "relay@" /proc/self/cgroup 
     --setenv=RELAY_UPGRADE_DETACHED=1 \
     --setenv=RELAY_UPGRADE_WAIT="$wait_seconds" \
     --setenv=RELAY_UPGRADE_HEARTBEAT="$heartbeat_seconds" \
+    --setenv=RELAY_UPGRADE_NOTIFY="${RELAY_UPGRADE_NOTIFY:-1}" \
     /bin/bash "$self" "$platform"; then
     echo "relay-upgrade: detached, follow with journalctl --user -u $unit"
     exit 0
@@ -84,10 +101,13 @@ systemctl --user restart "relay@$platform.service"
 sleep 10
 
 if systemctl --user is-active --quiet "relay@$platform.service"; then
-  echo "relay-upgrade: OK $platform active"
+  pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value)"
+  echo "relay-upgrade: OK $platform active (pid $pid)"
+  notify "🔄 relay-$platform 已重启，健康检查通过（pid $pid，$(date '+%Y-%m-%d %H:%M')）"
   exit 0
 fi
 
 echo "relay-upgrade: FAILED $platform" >&2
 journalctl --user -u "relay@$platform.service" -n 30 --no-pager >&2
+notify "🔴 relay-$platform 重启后未通过健康检查，需要人工看一下（journalctl --user -u relay@$platform）"
 exit 1
