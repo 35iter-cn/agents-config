@@ -105,7 +105,7 @@ Slack 判活只认协议级 ping/pong：30s 无 server ping 或 10s 无 pong 即
 - 发起方式：直接在任意 shell 跑 `scripts/relay-upgrade.sh <platform>` 即可。它发现自己还在 `relay@<platform>.service` 的 cgroup 里时，会自动 `systemd-run --user --collect` 成 `relay-upgrade-<platform>`（transient service，退出即清理）再干活，命令立即返回，重启不会把等待者一起杀掉；输出用 `journalctl --user -u relay-upgrade-<platform>` 看。若 `systemd-run` 失败则退化为原地等待并先打一条 WARN（此时重启可能把自己杀掉，探活会缺）。
 - 取消等待：`systemctl --user stop relay-upgrade-<platform>`（或 `pkill -f 'relay-upgrade.sh <platform>'`），relay 不受影响。
 - 重启探活后**主动推一条消息**给 Hao（复用 `relay.mjs notify <platform>`）：成功推 `🔄 relay-<platform> 已重启，健康检查通过（pid …）`，失败推 `🔴 … 需要人工看一下`。`RELAY_UPGRADE_NOTIFY=0` 可关掉；`bun` 缺失或推失败只打 WARN，不影响退出码。
-- 不要在等待窗口里手工 `systemctl stop` 后再串后续命令——历史事故原因见 topicbox spec 01 Notes。
+- 不要在等待窗口里手工 `systemctl stop relay@<platform>` 再串后续命令：等待者一停就没人做归零后的重启，relay 停在半路、后续命令会在错误前提上执行。要中断就只停等待者（上一条），relay 原样保留，下次空闲直接重跑脚本。
 
 ## 测试
 
