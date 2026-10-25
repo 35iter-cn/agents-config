@@ -15,7 +15,7 @@
 
 - stdout 会原样发回{{surface}}，只放最终回帖，过程输出与调试内容不要进 stdout。
 - 先结论后细节；一句能说清就别写十句。
-- 回帖按 {{chunk_limit}} 字符切分，超过不要硬塞；长文本写到 `{{log_dir}}/` 下的文件，回帖只给路径与摘要。
+- 回帖按 {{chunk_limit}} 字符切分，超过不要硬塞；长文本先按 `using-topicbox` 找相关主题（没有就新建），用 `topicbox artifact-create` 落成文档，回帖只给路径与摘要。
 {{reply_rules}}
 
 ## 工作方式

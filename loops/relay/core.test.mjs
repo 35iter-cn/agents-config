@@ -38,7 +38,7 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   mkdirSync(sessionsDir, { recursive: true });
   for (const name of sessions) writeFileSync(join(sessionsDir, `2026-01-01T00-00-00_${name}.jsonl`), "{}\n");
   const promptFile = join(dir, "thread.md");
-  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} logdir={{log_dir}} candidate={{candidate_rules}}");
+  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} candidate={{candidate_rules}}");
   const candidateRulesFile = join(dir, "candidate-rules.md");
   if (candidateRules) writeFileSync(candidateRulesFile, candidateRules);
   const stateFile = join(dir, "relay-fake.json");

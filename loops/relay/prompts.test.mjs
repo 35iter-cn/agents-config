@@ -33,3 +33,10 @@ test("TC-P3 boundary section holds four bullets with no repeated rule", () => {
   assert.equal(bullets.filter((line) => line.includes("Slack")).length, 1);
   assert.equal(bullets.filter((line) => /再发一遍|再往群里发一遍/.test(line)).length, 1);
 });
+
+test("TC-P4 long text lands in a topic, not in the log directory", () => {
+  const text = read("thread.md");
+  assert.doesNotMatch(text, /log_dir|logs\//);
+  assert.match(text, /using-topicbox/);
+  assert.match(text, /topicbox artifact-create/);
+});
