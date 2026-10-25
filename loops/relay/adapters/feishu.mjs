@@ -1,9 +1,14 @@
 #!/usr/bin/env bun
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { chunkText } from "../chunk.mjs";
 
 const CARD_LIMIT = 3000;
+const MAX_ATTACHMENTS = 4;
+const MAX_BYTES = 20 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+const UPLOAD_TTL_MS = 7 * 86_400_000;
+const EXT_BY_TYPE = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" };
 const BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
 const CLOCK = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -246,18 +251,90 @@ export function flattenCard(node, out = []) {
   return out;
 }
 
-export function textOfMessage(message) {
-  const type = message?.msg_type;
-  const body = String(message?.body?.content ?? "");
-  if (!body) return null;
+export function bodyOf(message) {
+  const raw = message?.body?.content ?? message?.content;
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
   try {
-    if (type === "text") return JSON.parse(body).text ?? "";
-    if (type === "interactive") return flattenCard(JSON.parse(body)).join("\n");
-    if (type === "post") return flattenCard(JSON.parse(body)).join("\n");
-    return null;
+    return JSON.parse(String(raw));
   } catch {
     return null;
   }
+}
+
+export function msgTypeOf(message) {
+  return message?.msg_type ?? message?.message_type ?? null;
+}
+
+export function textOfMessage(message) {
+  const type = msgTypeOf(message);
+  const body = bodyOf(message);
+  if (!body) return null;
+  if (type === "text") return body.text ?? "";
+  if (type === "interactive") return flattenCard(body).join("\n");
+  if (type === "post") return flattenCard(body).join("\n");
+  return null;
+}
+
+export function attachmentsOf(message) {
+  const type = msgTypeOf(message);
+  const body = bodyOf(message);
+  if (!body) return [];
+  if (type === "image") return body.image_key ? [{ kind: "image", key: body.image_key }] : [];
+  if (type === "file") return body.file_key ? [{ kind: "file", key: body.file_key, name: body.file_name ?? null }] : [];
+  if (type !== "post") return [];
+  const found = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    if (typeof node.image_key === "string") found.push({ kind: "image", key: node.image_key });
+    if (typeof node.file_key === "string") found.push({ kind: "file", key: node.file_key, name: node.file_name ?? null });
+    Object.values(node).forEach(walk);
+  };
+  walk(body.content);
+  return found;
+}
+
+export function uploadDirFor(configDir, chatId, date = new Date(), format = CLOCK) {
+  const day = format.format(date).slice(0, 10).replaceAll("-", "");
+  return join(configDir, "uploads", chatId, day);
+}
+
+export function pruneUploads(root, ttl = UPLOAD_TTL_MS, now = Date.now()) {
+  const cutoff = now - ttl;
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      try {
+        if (statSync(full).mtimeMs < cutoff) unlinkSync(full);
+      } catch {}
+    }
+    try {
+      if (!readdirSync(dir).length) rmdirSync(dir);
+    } catch {}
+  };
+  walk(root);
+}
+
+export function withTimeout(promise, ms) {
+  let timer = null;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
 
 export function createAdapter({ paths, readEnv, log: baseLog, createClient = defaultClientFactory, loadSdk = () => import("@larksuiteoapi/node-sdk"), readBootId: readId = readBootId }) {
@@ -319,6 +396,39 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
     return runtime;
   }
 
+  async function downloadAttachments(message) {
+    const all = attachmentsOf(message);
+    const picked = all.slice(0, MAX_ATTACHMENTS);
+    const dir = uploadDirFor(paths.configDir, message.chat_id ?? chatId);
+    const saved = [];
+    const failed = [];
+    for (const item of picked) {
+      try {
+        const res = await withTimeout(
+          client.im.v1.messageResource.get({
+            path: { message_id: message.message_id, file_key: item.key },
+            params: { type: item.kind },
+          }),
+          DOWNLOAD_TIMEOUT_MS,
+        );
+        const mime = String(res?.headers?.["content-type"] ?? res?.headers?.["Content-Type"] ?? "").split(";")[0].trim();
+        const file = join(dir, `${item.key.slice(0, 12)}.${EXT_BY_TYPE[mime] ?? "bin"}`);
+        mkdirSync(dir, { recursive: true });
+        await res.writeFile(file);
+        if (statSync(file).size > MAX_BYTES) {
+          unlinkSync(file);
+          failed.push(item);
+          continue;
+        }
+        saved.push({ kind: item.kind, path: file, name: item.name ?? null });
+      } catch (error) {
+        log("error", "attachment", message.message_id ?? "", String(error?.message ?? error));
+        failed.push(item);
+      }
+    }
+    return { saved, failed, truncated: Math.max(0, all.length - picked.length) };
+  }
+
   const adapter = {
     name: "feishu",
     surface: "本话题",
@@ -335,6 +445,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
       coreRef = core;
       state = core.state;
       await ensureRuntime();
+      pruneUploads(join(paths.configDir, "uploads"));
       const lark = await loadSdk();
 
       const dispatcher = new lark.default.EventDispatcher({}).register({
@@ -345,7 +456,13 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
             log("ignore", verdict.why, message.message_id ?? "");
             return { code: 0 };
           }
-          const text = stripMentions(textOf(message), message.mentions);
+          const parsed = await downloadAttachments(message);
+          const base = stripMentions(textOfMessage(message) ?? textOf(message), message.mentions);
+          const notes = [];
+          if (!base) notes.push(`（发了 ${parsed.saved.length} 个附件，未附文字）`);
+          if (parsed.failed.length) notes.push(`（${parsed.failed.length} 个附件下载失败，未能查看）`);
+          if (parsed.truncated) notes.push(`（还有 ${parsed.truncated} 个附件未处理，单条消息最多 ${MAX_ATTACHMENTS} 个）`);
+          const text = [base, ...notes].filter(Boolean).join("\n");
           if (!text) {
             log("ignore", "empty", message.message_id ?? "");
             return { code: 0 };
@@ -361,6 +478,7 @@ export function createAdapter({ paths, readEnv, log: baseLog, createClient = def
             chatId: message.chat_id ?? chatId,
             messageId: message.message_id,
             threadId: message.thread_id ?? null,
+            attachments: parsed.saved,
             rootText,
           };
           onMessage(inbound).catch((error) => log("error", "handle", String(error)));

@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationKey, sessionFor, textOf, textOfMessage, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter, readBootId, shouldAnnounceBoot, formatMinute, bootNoticeText, createBootWatch } from "./feishu.mjs";
+import { existsSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { conversationKey, sessionFor, textOf, textOfMessage, bodyOf, msgTypeOf, attachmentsOf, uploadDirFor, pruneUploads, withTimeout, stripMentions, isAcceptedSender, toCard, decideProgressMode, createRuntime, createAdapter, readBootId, shouldAnnounceBoot, formatMinute, bootNoticeText, createBootWatch } from "./feishu.mjs";
 
 function fakeClient({ reaction = { code: 0, data: { reaction_id: "r1" } }, reply = { code: 0, data: { message_id: "m-out" } }, patch = { code: 0 }, create = { code: 0, data: { message_id: "m-notify" } } } = {}) {
   const calls = [];
@@ -537,4 +540,146 @@ test("TC-B6 ws ready triggers exactly one boot notice through the adapter", asyn
   assert.equal(state.meta.bootNotice.bootId, "b-live");
   assert.equal(saves, 1);
   assert.equal(instances.readyCalls, 1);
+});
+
+const POST_WITH_IMAGE = JSON.stringify({
+  title: "",
+  content: [
+    [{ tag: "at", user_id: "@_user_1", user_name: "Doge", style: [] }, { tag: "text", text: " 看一下这张图", style: [] }],
+    [{ tag: "img", image_key: "img_v3_probe_123456", width: 1080, height: 2346 }],
+  ],
+});
+
+function imageHarness({ resource, message } = {}) {
+  const handlers = {};
+  const seen = [];
+  const client = {
+    im: {
+      v1: {
+        message: {
+          reply: async () => ({ code: 0, data: { message_id: "m-out" } }),
+          patch: async () => ({ code: 0 }),
+          get: async () => ({ code: 0, data: { items: [] } }),
+        },
+        messageReaction: { create: async () => ({ code: 0 }), delete: async () => ({ code: 0 }) },
+        messageResource: { get: async (args) => resource(args) },
+      },
+    },
+  };
+  const sdk = {
+    default: {
+      Client: function Client() {},
+      EventDispatcher: function EventDispatcher() {
+        this.register = (map) => { Object.assign(handlers, map); return this; };
+      },
+      WSClient: function WSClient() { this.start = () => {}; },
+      Domain: { Feishu: "feishu" },
+      LoggerLevel: { warn: 4 },
+    },
+  };
+  const configDir = mkdtempSync(join(tmpdir(), "relay-img-"));
+  const adapter = createAdapter({
+    paths: { configDir, home: tmpdir() },
+    readEnv: () => adapterEnv,
+    log: () => {},
+    createClient: async () => client,
+    loadSdk: async () => sdk,
+    readBootId: () => "b-img",
+  });
+  adapter.start({ onMessage: async (msg) => seen.push(msg), core: { state: { convs: {}, meta: { schemaVersion: 2 } }, save: () => {} } });
+  return { handlers, seen, configDir, message };
+}
+
+function okResource(contentType = "image/jpeg") {
+  return ({ headers, path, params }) => {
+    assert.equal(params.type, path.message_id ? params.type : params.type);
+    return {
+      headers: { "content-type": contentType },
+      writeFile: async (file) => writeFileSync(file, Buffer.from("jpeg-bytes")),
+    };
+  };
+}
+
+test("TC-31 a post body parses whether content arrives as string or object", () => {
+  const asString = { msg_type: "post", body: { content: POST_WITH_IMAGE } };
+  const asObject = { msg_type: "post", content: JSON.parse(POST_WITH_IMAGE) };
+  assert.equal(textOfMessage(asString).trim(), "看一下这张图");
+  assert.equal(textOfMessage(asObject).trim(), "看一下这张图");
+  assert.equal(textOf({ content: POST_WITH_IMAGE }), "");
+  assert.deepEqual(bodyOf({ content: "not-json" }), null);
+});
+
+test("TC-32 attachments are collected from image, file and post payloads", () => {
+  assert.deepEqual(attachmentsOf({ msg_type: "image", body: { content: JSON.stringify({ image_key: "img_v3_a" }) } }), [{ kind: "image", key: "img_v3_a" }]);
+  assert.deepEqual(attachmentsOf({ msg_type: "file", body: { content: JSON.stringify({ file_key: "file_v3_b", file_name: "a.pdf" }) } }), [{ kind: "file", key: "file_v3_b", name: "a.pdf" }]);
+  assert.deepEqual(attachmentsOf({ message_type: "post", content: POST_WITH_IMAGE }), [{ kind: "image", key: "img_v3_probe_123456" }]);
+  assert.deepEqual(attachmentsOf({ msg_type: "text", body: { content: '{"text":"hi"}' } }), []);
+});
+
+test("TC-33 event payloads report message_type while API payloads report msg_type", () => {
+  assert.equal(msgTypeOf({ message_type: "post" }), "post");
+  assert.equal(msgTypeOf({ msg_type: "image" }), "image");
+  assert.equal(msgTypeOf({}), null);
+});
+
+test("TC-34 uploads land under chat/date with a content-type extension", () => {
+  const dir = uploadDirFor("/cfg", "oc_1", new Date("2026-10-25T04:00:00Z"));
+  assert.equal(dir, "/cfg/uploads/oc_1/20261025");
+});
+
+test("TC-35 pruneUploads removes files older than the ttl", () => {
+  const root = mkdtempSync(join(tmpdir(), "relay-prune-"));
+  const fresh = join(root, "fresh.jpg");
+  const stale = join(root, "stale.jpg");
+  writeFileSync(fresh, "a");
+  writeFileSync(stale, "b");
+  pruneUploads(root, 1000, Date.now() + 5000);
+  assert.equal(existsSync(fresh), false);
+  assert.equal(existsSync(root), false);
+});
+
+test("TC-36 an image-only message is queued with a download path", async () => {
+  const { handlers, seen, configDir } = imageHarness({ resource: okResource() });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await handlers["im.message.receive_v1"]({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: "om_img_only", chat_id: "oc_1", message_type: "image", content: '{"image_key":"img_v3_probe_123456"}' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].text, /1 个附件/);
+  assert.equal(seen[0].attachments.length, 1);
+  assert.equal(seen[0].attachments[0].kind, "image");
+  assert.match(seen[0].attachments[0].path, new RegExp(`^${configDir}/uploads/oc_1/\\d{8}/img_v3_probe\\.jpg$`));
+  assert.equal(statSync(seen[0].attachments[0].path).size, 10);
+});
+
+test("TC-37 a post with text and image keeps both", async () => {
+  const { handlers, seen } = imageHarness({ resource: okResource("image/png") });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await handlers["im.message.receive_v1"]({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: "om_post", chat_id: "oc_1", message_type: "post", content: POST_WITH_IMAGE },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].text, /看一下这张图/);
+  assert.match(seen[0].attachments[0].path, /\.png$/);
+});
+
+test("TC-38 a failing download still queues the message with a note", async () => {
+  const { handlers, seen } = imageHarness({ resource: () => { throw new Error("gateway down"); } });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await handlers["im.message.receive_v1"]({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_ce8b91019c8e721b5b47ff89b4a78fba" } },
+    message: { message_id: "om_fail", chat_id: "oc_1", message_type: "image", content: '{"image_key":"img_v3_fail"}' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].text, /1 个附件下载失败/);
+  assert.deepEqual(seen[0].attachments, []);
+});
+
+test("TC-39 withTimeout rejects a hanging download", async () => {
+  await assert.rejects(() => withTimeout(new Promise(() => {}), 10), /timeout/);
 });
