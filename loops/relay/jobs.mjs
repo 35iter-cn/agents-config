@@ -41,6 +41,7 @@ export function createJob(state, inbound, nowIso = () => new Date().toISOString(
       threadId: inbound.threadId ?? null,
       replyTo: inbound.replyTo ?? null,
       channelPost: inbound.channelPost ?? null,
+      attachments: Array.isArray(inbound.attachments) ? inbound.attachments : [],
     },
     answer: null,
     parts: [],
