@@ -95,7 +95,16 @@ Slack 判活只认协议级 ping/pong：30s 无 server ping 或 10s 无 pong 即
 
 ## 升级
 
-`scripts/relay-upgrade.sh <platform>`：先轮询 state 直到无 `queued|running|answered`（上限 `RELAY_UPGRADE_WAIT`，默认 1200s），再 restart unit，10s 后探活；失败打印 journal 尾部并以非 0 退出。不要在等待窗口里手工 `systemctl stop` 后再串后续命令——历史事故原因见 topicbox spec 01 Notes。
+铁律：**只等 job 归零后重启，绝不打断进行中的任务**。任何情况下都不允许「等够时间就强杀」——`running` 被杀的代价是 worker 写操作半途而废且不自动重做（只能人工 `/重跑`）。
+
+`scripts/relay-upgrade.sh <platform>` 的规则：
+
+- 轮询 state，直到 `queued|running|answered` 三类 job 全部归零，才 `systemctl --user restart`，10s 后探活；失败打印 journal 尾部并以非 0 退出。
+- 等待**默认无上限**（`RELAY_UPGRADE_WAIT=0`）。设了正数上限时，超时只打印告警并 `exit 3`，**保持 relay 原样不动**，等下次空闲再跑；不存在「超时后照旧重启」的分支。
+- 日志按状态变化打一行（`N job(s) in flight (job-211,...)`），空闲时每 `RELAY_UPGRADE_HEARTBEAT`（默认 300s）打一次心跳，不刷屏。
+- 发起方式：直接在任意 shell 跑 `scripts/relay-upgrade.sh <platform>` 即可。它发现自己还在 `relay@<platform>.service` 的 cgroup 里时，会自动 `systemd-run --user --collect` 成 `relay-upgrade-<platform>`（transient service，退出即清理）再干活，命令立即返回，重启不会把等待者一起杀掉；输出用 `journalctl --user -u relay-upgrade-<platform>` 看。若 `systemd-run` 失败则退化为原地等待并先打一条 WARN（此时重启可能把自己杀掉，探活会缺）。
+- 取消等待：`systemctl --user stop relay-upgrade-<platform>`（或 `pkill -f 'relay-upgrade.sh <platform>'`），relay 不受影响。
+- 不要在等待窗口里手工 `systemctl stop` 后再串后续命令——历史事故原因见 topicbox spec 01 Notes。
 
 ## 测试
 
