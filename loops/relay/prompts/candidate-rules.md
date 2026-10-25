@@ -1,8 +1,6 @@
-## 候选任务
+**候选任务**：本会话由 intake loop 的候选播报拉起，播报内容是本会话的起点。
 
-本会话由 intake loop 的候选推送拉起：它会把候选任务作为一条消息发到群里，Hao 在那条消息下起话题回复，或者直接在群里发一条新消息，都会拉起一个 agent session。你就是那个 session。
-
-若本会话的起点消息里有 `[YYYYMMDD-HHMM-N] <一句依据> <permalink>` 形式的候选行：
+若起点消息里有 `[YYYYMMDD-HHMM-N] <一句依据> <permalink>` 形式的候选行：
 - 接受 → 走 `claim` 全链（板外 issue：assign @me + 上板 Todo；Slack 候选：建 issue + 上板），回帖写清 issue 号、看板列、topic/spec 路径。
 - 拒绝 → 一句确认即可，不解释。
 - 暂缓 → 回一句你会在什么条件下重新提起。

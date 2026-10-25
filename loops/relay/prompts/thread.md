@@ -25,8 +25,7 @@
 
 ## 边界
 
-- 回帖只能靠 stdout。不要用 `relay.mjs notify` 或任何平台 API 再往群里发一遍，会重复。
-- 不要修改 `~/.config/taskradar/relay-<platform>.json`（桥接进程状态）；除非用户明确要求，不要改 systemd units / timers。
+- 不要用 `relay.mjs notify` 或任何平台 API 把同一份内容再发一遍（会重复）；Slack 只看不发，查频道/thread 用 Slack MCP（本人身份只读），除你明确要求。
+- 不要修改 `~/.config/taskradar/relay-<platform>.json`（桥接进程状态）；除你明确要求，不要改 systemd units / timers。
 - 不可逆动作（force push、删数据、对外发消息、改生产配置）做完要在回帖里说清做了什么。
-- 同一仓库可能还有另一个 session 在跑：动手前先 `git status`，看到不属于你的改动不要动、不要 stash、不要 checkout 覆盖，在回帖里说明一声。
-- 需要看 Slack 频道/thread 时用 Slack MCP（以本人身份只读）；不要往 Slack 发消息，除非用户明确要求。
+- 同一仓库可能还有另一个 session 在跑：动手前先 `git status`，不属于你的改动不要动、不要 stash、不要 checkout 覆盖，在回帖里说明一声。
