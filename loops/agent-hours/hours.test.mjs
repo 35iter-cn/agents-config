@@ -9,6 +9,7 @@ import {
   chunkMessage,
   clearOverride,
   decideUnit,
+  formatDuration,
   formatReport,
   listReviews,
   readLedger,
@@ -365,6 +366,32 @@ test("report is a summary: verdict counts, counted minutes and where the review 
   assert.match(lines[0], /^\*\*工时\*\* 2026-10-24 10:00$/);
   assert.match(lines[1], /新增 2 单元 · 计入 1 · 不计 0 · 待确认 1/);
   assert.match(lines[2], /计入跨度 10 分钟/);
+});
+
+test("durations switch to hours once they pass an hour", () => {
+  assert.equal(formatDuration(0), "0 分钟");
+  assert.equal(formatDuration(59), "59 分钟");
+  assert.equal(formatDuration(60), "1 小时");
+  assert.equal(formatDuration(66), "1.1 小时");
+  assert.equal(formatDuration(90), "1.5 小时");
+  assert.equal(formatDuration(167), "2.8 小时");
+});
+
+test("a report longer than an hour shows hours instead of raw minutes", () => {
+  const units = buildUnits([
+    rec("2026-10-24T01:00:00.000Z", 50, { sessionId: "a" }),
+    rec("2026-10-24T02:00:00.000Z", 20, { sessionId: "b" }),
+  ]);
+  const report = formatReport(
+    units.map((unit) => ({ unit, result: { kind: "count", p: { count: 0.9 }, margin: 0.8 } })),
+    {
+      tz: DEFAULTS.tz,
+      now: Date.parse("2026-10-24T13:00:00.000Z"),
+      clock: { created: 1, patched: 0, deleted: 0, conflict: 1, conflictMinutes: 75, failed: 0, blocked: [] },
+    },
+  );
+  assert.match(report, /计入跨度 1\.2 小时/);
+  assert.match(report, /冲突 1\.3 小时/);
 });
 
 test("a report without review units omits the review count and adds the clock summary", () => {
