@@ -1,7 +1,7 @@
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { stripMentions, sessionFor, acceptsEvent, heartbeatVerdict, refreshDelayMs, alertAllowed, pruneThreads, defaults } from "./slack.mjs";
+import { stripMentions, sessionFor, acceptsEvent, heartbeatVerdict, refreshDelayMs, alertAllowed, pruneThreads, defaults, decideProgressMode, createRuntime } from "./slack.mjs";
 
 const base = { channel: defaults.channel, ts: "1792558469.808939", text: "帮我扫一下 <@U0A5T8AR9EU>", user: defaults.allowedUser };
 
@@ -94,4 +94,170 @@ test("slack announces readiness once and only from the start scope", () => {
   assert.doesNotMatch(helloBlock, /onReady/);
   assert.match(source, /let readyAnnounced = false;/);
   assert.match(source, /if \(!readyAnnounced\) \{/);
+});
+
+function fakeApi(handlers = {}) {
+  const calls = [];
+  const api = async (method, params) => {
+    calls.push([method, params]);
+    const handler = handlers[method];
+    const res = typeof handler === "function" ? handler(params) : handler;
+    return res ?? { ok: true };
+  };
+  return { api, calls };
+}
+
+function harness({ handlers, api, post, emoji } = {}) {
+  const logs = [];
+  const fake = api === undefined ? fakeApi(handlers) : { api, calls: [] };
+  const sent = [];
+  const runtime = createRuntime({
+    api: fake.api,
+    log: (level, ...args) => logs.push([level, ...args]),
+    channel: "C0C9N6SSH39",
+    post:
+      post ??
+      (async (thread, text) => {
+        sent.push([thread, text]);
+      }),
+    emoji,
+  });
+  return { runtime, calls: fake.calls, logs, sent };
+}
+
+function progressCtx(over = {}) {
+  return {
+    jobId: "j1",
+    key: "1792558469.808939",
+    chatId: "C0C9N6SSH39",
+    messageId: "1792558469.808939",
+    threadId: null,
+    replyTo: "1792558469.808939",
+    progress: null,
+    text: "hi",
+    rootText: "hi",
+    ...over,
+  };
+}
+
+test("AC-1 a reaction marks the user message while the job runs", async () => {
+  const { runtime, calls } = harness({ handlers: { "reactions.add": { ok: true } } });
+  const entry = await runtime.onProgress(progressCtx());
+  assert.deepEqual(entry, { mode: "reaction", messageId: "1792558469.808939", name: "thinking_face" });
+  assert.deepEqual(calls[0], ["reactions.add", { channel: "C0C9N6SSH39", timestamp: "1792558469.808939", name: "thinking_face" }]);
+});
+
+test("AC-1 without a message id nothing is marked", async () => {
+  const { runtime, calls } = harness({ handlers: {} });
+  assert.equal(await runtime.onProgress(progressCtx({ messageId: null })), null);
+  assert.equal(calls.length, 0);
+});
+
+test("AC-2 the reaction is removed after the job ends", async () => {
+  const { runtime, calls, logs } = harness({ handlers: { "reactions.remove": { ok: true } } });
+  const progress = { mode: "reaction", messageId: "1792558469.808939", name: "thinking_face" };
+  await runtime.onProgressDone(progressCtx({ progress }));
+  assert.deepEqual(calls[0], ["reactions.remove", { channel: "C0C9N6SSH39", timestamp: "1792558469.808939", name: "thinking_face" }]);
+  assert.deepEqual(logs, []);
+});
+
+test("AC-2 an already removed reaction is not an error", async () => {
+  const { runtime, logs } = harness({ handlers: { "reactions.remove": { ok: false, error: "no_reaction" } } });
+  const progress = { mode: "reaction", messageId: "1792558469.808939", name: "thinking_face" };
+  await runtime.onProgressDone(progressCtx({ progress }));
+  assert.deepEqual(logs, []);
+});
+
+test("AC-3 a missing scope falls back to a placeholder the answer replaces", async () => {
+  const { runtime, calls } = harness({
+    handlers: {
+      "reactions.add": { ok: false, error: "missing_scope" },
+      "chat.postMessage": { ok: true, ts: "1792559000.000001" },
+      "chat.update": { ok: true },
+    },
+  });
+  const progress = await runtime.onProgress(progressCtx());
+  assert.deepEqual(progress, { mode: "placeholder", messageId: "1792559000.000001", pending: true });
+  assert.equal(calls[1][0], "chat.postMessage");
+  assert.equal(calls[1][1].text, "⏳ 正在处理…");
+
+  const sent = await runtime.reply(progressCtx({ progress }), "答案");
+  assert.deepEqual(sent, { messageId: "1792559000.000001", patched: true });
+  assert.deepEqual(calls[2], ["chat.update", { channel: "C0C9N6SSH39", ts: "1792559000.000001", text: "答案" }]);
+  assert.equal(progress.pending, false);
+
+  await runtime.onProgressDone(progressCtx({ progress }));
+  assert.equal(calls.length, 3);
+});
+
+test("AC-3 a placeholder the answer never used is deleted", async () => {
+  const { runtime, calls } = harness({ handlers: { "chat.delete": { ok: true } } });
+  const progress = { mode: "placeholder", messageId: "1792559000.000001", pending: true };
+  await runtime.onProgressDone(progressCtx({ progress }));
+  assert.deepEqual(calls[0], ["chat.delete", { channel: "C0C9N6SSH39", ts: "1792559000.000001" }]);
+});
+
+test("AC-3 a placeholder that is already gone is not an error", async () => {
+  const { runtime, logs } = harness({ handlers: { "chat.delete": { ok: false, error: "message_not_found" } } });
+  const progress = { mode: "placeholder", messageId: "1792559000.000001", pending: true };
+  await runtime.onProgressDone(progressCtx({ progress }));
+  assert.deepEqual(logs, []);
+});
+
+test("an unrelated progress error leaves the message unmarked", async () => {
+  const { runtime, calls, logs } = harness({ handlers: { "reactions.add": { ok: false, error: "ratelimited" } } });
+  assert.equal(await runtime.onProgress(progressCtx()), null);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(logs, [["warn", "progress-unavailable", "ratelimited"]]);
+});
+
+test("AC-4 replies carry the thread and return the ts", async () => {
+  const { runtime, calls } = harness({ handlers: { "chat.postMessage": { ok: true, ts: "1792559000.000002" } } });
+  const sent = await runtime.reply(progressCtx(), "答案");
+  assert.deepEqual(sent, { messageId: "1792559000.000002" });
+  assert.deepEqual(calls[0], ["chat.postMessage", { channel: "C0C9N6SSH39", text: "答案", thread_ts: "1792558469.808939" }]);
+});
+
+test("AC-4 editing updates the existing message", async () => {
+  const { runtime, calls } = harness({ handlers: { "chat.update": { ok: true } } });
+  assert.equal(await runtime.edit(progressCtx(), "1792559000.000002", "改过的答案"), true);
+  assert.deepEqual(calls[0], ["chat.update", { channel: "C0C9N6SSH39", ts: "1792559000.000002", text: "改过的答案" }]);
+});
+
+test("AC-4 a failed edit reports false instead of throwing", async () => {
+  const { runtime, logs } = harness({ handlers: { "chat.update": { ok: false, error: "message_not_found" } } });
+  assert.equal(await runtime.edit(progressCtx(), "1792559000.000002", "改过的答案"), false);
+  assert.deepEqual(logs, [["warn", "edit", "message_not_found"]]);
+});
+
+test("AC-5 without a bot token the runtime stays webhook only", async () => {
+  const { runtime, sent, logs } = harness({ api: null });
+  assert.equal(await runtime.onProgress(progressCtx()), null);
+  assert.equal(await runtime.reply(progressCtx(), "答案"), null);
+  assert.deepEqual(sent, [["1792558469.808939", "答案"]]);
+  assert.equal(await runtime.edit(progressCtx(), "1792559000.000002", "x"), false);
+  await runtime.onProgressDone(progressCtx({ progress: { mode: "reaction", messageId: "m" } }));
+  assert.deepEqual(logs, []);
+});
+
+test("AC-5 a failing postMessage still delivers through the webhook", async () => {
+  const { runtime, sent, logs } = harness({ handlers: { "chat.postMessage": { ok: false, error: "not_in_channel" } } });
+  assert.equal(await runtime.reply(progressCtx(), "答案"), null);
+  assert.deepEqual(sent, [["1792558469.808939", "答案"]]);
+  assert.equal(logs[0][0], "warn");
+});
+
+test("the progress emoji is configurable", async () => {
+  const { runtime, calls } = harness({ handlers: { "reactions.add": { ok: true } }, emoji: "hourglass_flowing_sand" });
+  assert.equal((await runtime.onProgress(progressCtx())).name, "hourglass_flowing_sand");
+  assert.equal(calls[0][1].name, "hourglass_flowing_sand");
+});
+
+test("decideProgressMode maps slack errors onto the degradation ladder", () => {
+  assert.equal(decideProgressMode(null), "reaction");
+  assert.equal(decideProgressMode("already_reacted"), "reaction");
+  assert.equal(decideProgressMode("missing_scope"), "placeholder");
+  assert.equal(decideProgressMode("not_allowed_token_type"), "placeholder");
+  assert.equal(decideProgressMode("invalid_auth"), "placeholder");
+  assert.equal(decideProgressMode("ratelimited"), "none");
 });

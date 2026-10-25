@@ -13,6 +13,90 @@ const PASSING_SUBTYPES = ["thread_broadcast", "file_share"];
 const CHUNK_LIMIT = 3500;
 const THREAD_RETENTION_MS = 30 * 86_400_000;
 
+export const PROGRESS_EMOJI = "thinking_face";
+const PLACEHOLDER_TEXT = "⏳ 正在处理…";
+const PERMISSION_ERRORS = new Set(["missing_scope", "not_allowed_token_type", "invalid_auth", "not_authed", "account_inactive", "token_revoked"]);
+const ALREADY_PROGRESSED = new Set(["already_reacted"]);
+const ALREADY_CLEANED = new Set(["no_reaction", "message_not_found"]);
+
+export function decideProgressMode(error) {
+  if (!error || ALREADY_PROGRESSED.has(error)) return "reaction";
+  if (PERMISSION_ERRORS.has(error)) return "placeholder";
+  return "none";
+}
+
+export function createRuntime({ api, log, channel, post, emoji = PROGRESS_EMOJI }) {
+  async function postMessage(ctx, text) {
+    const res = await api("chat.postMessage", { channel, text, ...(ctx.replyTo ? { thread_ts: ctx.replyTo } : {}) });
+    if (!res.ok) throw new Error(`postMessage ${res.error}`);
+    return { messageId: res.ts };
+  }
+
+  return {
+    async reply(ctx, text) {
+      if (!api) {
+        await post(ctx.replyTo ?? null, text);
+        return null;
+      }
+      const entry = ctx.progress;
+      if (entry?.mode === "placeholder" && entry.messageId && entry.pending) {
+        const patched = await api("chat.update", { channel, ts: entry.messageId, text });
+        if (patched.ok) {
+          entry.pending = false;
+          return { messageId: entry.messageId, patched: true };
+        }
+        log("warn", "placeholder-update", patched.error);
+      }
+      try {
+        return await postMessage(ctx, text);
+      } catch (error) {
+        log("warn", "postMessage", String(error?.message ?? error));
+        if (!post) throw error;
+        await post(ctx.replyTo ?? null, text);
+        return null;
+      }
+    },
+
+    async edit(ctx, messageId, text) {
+      if (!api || !messageId) return false;
+      const res = await api("chat.update", { channel, ts: messageId, text });
+      if (res.ok) return true;
+      log("warn", "edit", res.error);
+      return false;
+    },
+
+    async onProgress(ctx) {
+      if (!api || !ctx.messageId) return null;
+      const res = await api("reactions.add", { channel, timestamp: ctx.messageId, name: emoji });
+      const mode = decideProgressMode(res.ok ? null : res.error);
+      if (mode === "reaction") return { mode: "reaction", messageId: ctx.messageId, name: emoji };
+      if (mode === "placeholder") {
+        const sent = await api("chat.postMessage", { channel, text: PLACEHOLDER_TEXT, ...(ctx.replyTo ? { thread_ts: ctx.replyTo } : {}) }).catch((error) => {
+          log("warn", "placeholder", String(error?.message ?? error));
+          return { ok: false };
+        });
+        if (sent.ok) return { mode: "placeholder", messageId: sent.ts, pending: true };
+      }
+      log("warn", "progress-unavailable", res.error ?? "unknown");
+      return null;
+    },
+
+    async onProgressDone(ctx) {
+      const entry = ctx.progress;
+      if (!api || !entry) return;
+      if (entry.mode === "reaction") {
+        const res = await api("reactions.remove", { channel, timestamp: entry.messageId ?? ctx.messageId, name: entry.name ?? emoji });
+        if (!res.ok && !ALREADY_CLEANED.has(res.error)) log("warn", "progress-remove", res.error);
+        return;
+      }
+      if (entry.mode === "placeholder" && entry.messageId && entry.pending) {
+        const res = await api("chat.delete", { channel, ts: entry.messageId });
+        if (!res.ok && !ALREADY_CLEANED.has(res.error)) log("warn", "progress-delete", res.error);
+      }
+    },
+  };
+}
+
 export const replyRules = "- 你的 stdout 会以 app `Intake Notifier` 的身份发回本 thread（不是你本人账号）。\n- 用 Slack mrkdwn：不要用 `#` 标题、不要用 Markdown 表格；粗体 `*x*`、代码块、短列表可用。";
 
 export const defaults = {
@@ -72,6 +156,8 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
   const channel = env.RELAY_SLACK_CHANNEL ?? defaults.channel;
   const allowedUser = env.RELAY_ALLOWED_USER ?? env.SLACKD_ALLOWED_USER ?? defaults.allowedUser;
   const botUser = env.SLACKD_BOT_USER ?? defaults.botUser;
+  const botToken = env.SLACK_BOT_TOKEN;
+  const progressEmoji = env.SLACK_PROGRESS_EMOJI ?? PROGRESS_EMOJI;
   const log = baseLog;
   const typing = { timer: null, cursor: 0, busy: false, keys: new Set() };
   let state = null;
@@ -90,6 +176,18 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     const body = JSON.stringify(thread ? { text, thread_ts: thread } : { text });
     const res = await fetch(webhookUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body });
     if (!res.ok) throw new Error(`webhook ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+
+  function apiFor(token) {
+    return async (method, params) => {
+      const res = await fetch(`https://slack.com/api/${method}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify(params),
+      });
+      const body = await res.json().catch(() => null);
+      return body ?? { ok: false, error: "unreadable-body" };
+    };
   }
 
   async function fetchRoot(thread) {
@@ -273,6 +371,14 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     });
   }
 
+  const runtime = createRuntime({
+    api: botToken ? apiFor(botToken) : null,
+    log,
+    channel,
+    post,
+    emoji: progressEmoji,
+  });
+
   const adapter = {
     name: "slack",
     surface: "本 thread",
@@ -314,6 +420,7 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
           key: thread,
           session: sessionFor(thread),
           dedupeId: event.ts,
+          messageId: event.ts,
           authorId: event.user,
           text,
           chatId: channel,
@@ -388,8 +495,19 @@ export function createAdapter({ paths, readEnv, log: baseLog }) {
     },
 
     async reply(ctx, text) {
-      await post(ctx.replyTo ?? null, text);
-      return null;
+      return runtime.reply(ctx, text);
+    },
+
+    async edit(ctx, messageId, text) {
+      return runtime.edit(ctx, messageId, text);
+    },
+
+    async onProgress(ctx) {
+      return runtime.onProgress(ctx);
+    },
+
+    async onProgressDone(ctx) {
+      return runtime.onProgressDone(ctx);
     },
   };
 
