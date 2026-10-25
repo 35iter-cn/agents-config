@@ -456,6 +456,7 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {})
     const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
     const bits = [`Clock 写 ${wrote} 段`];
     if (clock.deleted) bits.push(`删 ${clock.deleted} 段`);
+    if (clock.covered) bits.push(`人工已记 ${formatDuration(clock.coveredMinutes)}`);
     if (clock.conflict) bits.push(`冲突 ${formatDuration(clock.conflictMinutes)}`);
     if (clock.failed) bits.push(`失败 ${clock.failed}`);
     if (clock.blocked?.length) bits.push(`超限跳过 ${clock.blocked.length} 天`);
@@ -697,6 +698,13 @@ export function planOperations(plan, { budget = Infinity } = {}) {
   return ops.slice(0, budget);
 }
 
+export function humanCoverage(periods, { ownIds, activityId }) {
+  return (periods ?? [])
+    .filter((item) => item.activityId === activityId && !ownIds.has(item.id))
+    .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
+    .map((item) => ({ start: item.start, end: item.end }));
+}
+
 export async function syncClock({
   judged,
   now,
@@ -761,14 +769,19 @@ export async function syncClock({
   }
 
   const windowFrom = now - (clockCfg.backfillHours + 6) * 3_600_000;
-  const liveIds = await fetchLiveIds(api, { from: windowFrom, to: now + 3_600_000 });
+  const live = await fetchLivePeriods(api, { from: windowFrom, to: now + 3_600_000 });
+  const liveIds = live ? new Set(live.map((item) => item.id)) : null;
   const { synced, dropped } = liveIds ? pruneMissing(stored, liveIds, { windowFrom }) : { synced: stored, dropped: 0 };
   if (dropped) appendEvent({ event: "clock", action: "forget-missing", dropped }, { dir: logDir, now, tz: cfg.tz });
 
-  const plan = buildPlan({ judged, now, cfg: clockCfg, synced });
+  const ownIds = new Set(Object.values(stored).flat().map((item) => item.id));
+  const coverage = humanCoverage(live ?? [], { ownIds, activityId });
+  const plan = buildPlan({ judged, now, cfg: clockCfg, synced, coverage });
   const summary = {
     targets: plan.targets.length,
     minutes: plan.minutes,
+    covered: plan.covered.length,
+    coveredMinutes: plan.coveredMinutes,
     create: plan.create.length,
     patch: plan.patch.length,
     remove: plan.remove.length,
@@ -838,21 +851,23 @@ export async function syncClock({
   }
 
   appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
-  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${formatDuration(summary.conflictMinutes)}）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
+  const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length}${plan.covered.length ? ` / 人工已记 ${plan.covered.length} 段（${formatDuration(plan.coveredMinutes)}）` : ""} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${formatDuration(summary.conflictMinutes)}）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
   return { summary, line };
 }
 
-async function fetchLiveIds(api, { from, to }) {
-  const ids = new Set();
+async function fetchLivePeriods(api, { from, to }) {
+  const out = [];
   let offset = 0;
   for (;;) {
     const result = await api.list({ start: from, end: to, limit: 100, offset });
     if (!result.ok) return null;
-    for (const item of result.data?.periods ?? []) ids.add(item.id);
+    for (const item of result.data?.periods ?? []) {
+      out.push({ id: item.id, activityId: item.activityId ?? item.activity?.id ?? null, start: Date.parse(item.start), end: Date.parse(item.end) });
+    }
     if (!result.data?.hasMore || offset >= 900) break;
     offset += 100;
   }
-  return ids;
+  return out;
 }
 
 function resolveEntry() {
