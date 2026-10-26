@@ -186,7 +186,9 @@ export function readRecords(dir = defaultLedgerDir(), { fsImpl = fs } = {}) {
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        records.push(JSON.parse(line));
+        const record = JSON.parse(line);
+        if (record?.kind === "open") continue;
+        records.push(record);
       } catch {
         continue;
       }
