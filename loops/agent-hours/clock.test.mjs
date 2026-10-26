@@ -358,3 +358,31 @@ test("subtractCoverage ignores foreign periods that miss the target and keeps un
   const all = subtractCoverage([base], [{ start: 0, end: 10 * MIN }]);
   assert.deepEqual(all.covered, [{ start: 0, end: 10 * MIN, unitKeys: ["u1"] }]);
 });
+
+test("TC-C13 synced segments outside this round's judged units are neither patched nor removed", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const skipped = { key: "s1:2026-10-24T09:00:00.000Z", runs: [{ startedAt: now - 3 * HOUR, endedAt: now - 3 * HOUR + 30 * MIN }] };
+  const judgedUnit = { key: "s2:2026-10-24T10:00:00.000Z", runs: [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 30 * MIN }] };
+  const judged = [{ unit: judgedUnit, result: { kind: "count" } }];
+  const synced = {
+    "2026-10-24": [
+      { id: "a-skipped", start: now - 3 * HOUR, end: now - 3 * HOUR + 30 * MIN, unitKeys: [skipped.key] },
+      { id: "b-judged", start: now - 2 * HOUR, end: now - 2 * HOUR + 10 * MIN, unitKeys: [judgedUnit.key] },
+    ],
+  };
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
+  assert.equal(plan.remove.includes("a-skipped"), false);
+  assert.equal(plan.patch.some((item) => item.id === "a-skipped"), false);
+  assert.deepEqual(plan.patch.map((item) => item.id), ["b-judged"]);
+});
+
+test("TC-C14 a unit re-judged from count to skip still loses its segment", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const unit = { key: "s1:2026-10-24T10:00:00.000Z", runs: [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 30 * MIN }] };
+  const synced = {
+    "2026-10-24": [{ id: "old", start: now - 2 * HOUR, end: now - 2 * HOUR + 30 * MIN, unitKeys: [unit.key] }],
+  };
+  const plan = buildPlan({ judged: [{ unit, result: { kind: "skip" } }], now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
+  assert.deepEqual(plan.remove, ["old"]);
+  assert.equal(plan.create.length, 0);
+});

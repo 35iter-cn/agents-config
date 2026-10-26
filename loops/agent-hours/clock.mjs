@@ -165,9 +165,11 @@ export function buildPlan({ judged, now, cfg, synced, coverage = [] }) {
   const usable = targets.filter((segment) => !blocked.has(dayKey(segment.start, cfg.tz)));
   const { segments: open, covered } = subtractCoverage(usable, coverage);
   const from = now - cfg.backfillHours * HOUR_MS;
+  const judgedKeys = new Set(judged.map((entry) => entry.unit.key));
   const current = Object.values(synced ?? {})
     .flat()
     .filter((item) => item.end > from)
+    .filter((item) => (item.unitKeys ?? []).some((key) => judgedKeys.has(key)))
     .map((item) => ({ id: item.id, start: item.start, end: item.end }));
   return {
     targets: open,
