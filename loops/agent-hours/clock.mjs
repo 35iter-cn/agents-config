@@ -10,6 +10,8 @@ export const CLOCK_DEFAULTS = {
   warnDailyHours: 12,
   changeThresholdMs: MINUTE_MS,
   mergeGapMinutes: 2,
+  gapCapMinutes: 5,
+  gapMode: "stitch",
   backfillHours: 48,
   maxWritesPerRun: 120,
   syncedTtlDays: 7,
@@ -70,7 +72,28 @@ export function mergeSegments(segments, gapMs) {
   return out;
 }
 
-export function countedSegments(judged, { gapMs }) {
+export function stitchRuns(runs, capMs) {
+  const out = [];
+  for (const run of runs) {
+    const last = out[out.length - 1];
+    if (!last) {
+      out.push({ start: run.start, end: run.end, origin: run.origin, unitKeys: [...(run.unitKeys ?? [])] });
+      continue;
+    }
+    const gap = run.start - last.end;
+    const start = gap <= 0 ? last.end : run.start - Math.min(gap, capMs);
+    if (run.origin && run.origin !== last.origin) last.origin = "mixed";
+    last.unitKeys = [...new Set([...(last.unitKeys ?? []), ...(run.unitKeys ?? [])])];
+    if (start <= last.end) {
+      last.end = Math.max(last.end, run.end);
+      continue;
+    }
+    out.push({ start, end: run.end, origin: run.origin, unitKeys: [...(run.unitKeys ?? [])] });
+  }
+  return out;
+}
+
+export function countedSegments(judged, { gapMs, capMs = null }) {
   const out = [];
   for (const entry of judged) {
     if (entry.result.kind !== "count") continue;
@@ -80,7 +103,7 @@ export function countedSegments(judged, { gapMs }) {
       .filter(({ run, verdict }) => run.endedAt > run.startedAt && (!entry.result.split || verdict?.kind === "count"))
       .map(({ run }) => ({ start: run.startedAt, end: run.endedAt, origin, unitKeys: [entry.unit.key] }))
       .sort((a, b) => a.start - b.start);
-    out.push(...mergeSegments(runs, gapMs));
+    out.push(...(capMs === null ? mergeSegments(runs, gapMs) : stitchRuns(runs, capMs)));
   }
   return out;
 }
@@ -156,7 +179,9 @@ export function subtractCoverage(segments, coverage) {
 }
 
 export function buildPlan({ judged, now, cfg, synced, coverage = [] }) {
-  const segments = countedSegments(judged, { gapMs: cfg.mergeGapMinutes * MINUTE_MS });
+  const segments = cfg.gapMode === "merge"
+    ? countedSegments(judged, { gapMs: cfg.mergeGapMinutes * MINUTE_MS })
+    : countedSegments(judged, { capMs: cfg.gapCapMinutes * MINUTE_MS });
   const clipped = clipToWindow(segments, { now, hours: cfg.backfillHours });
   const aligned = mergeSegments(clipped.map(alignSegment), 0);
   const targets = filterShort(aligned, cfg.minSegmentMinutes * MINUTE_MS);
@@ -165,9 +190,11 @@ export function buildPlan({ judged, now, cfg, synced, coverage = [] }) {
   const usable = targets.filter((segment) => !blocked.has(dayKey(segment.start, cfg.tz)));
   const { segments: open, covered } = subtractCoverage(usable, coverage);
   const from = now - cfg.backfillHours * HOUR_MS;
+  const judgedKeys = new Set(judged.map((entry) => entry.unit.key));
   const current = Object.values(synced ?? {})
     .flat()
     .filter((item) => item.end > from)
+    .filter((item) => (item.unitKeys ?? []).some((key) => judgedKeys.has(key)))
     .map((item) => ({ id: item.id, start: item.start, end: item.end }));
   return {
     targets: open,

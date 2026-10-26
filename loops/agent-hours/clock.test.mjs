@@ -11,6 +11,7 @@ import {
   oversizeDays,
   countedSegments,
   planReconcile,
+  stitchRuns,
   subtractCoverage,
   pruneMissing,
   pruneSynced,
@@ -357,4 +358,81 @@ test("subtractCoverage ignores foreign periods that miss the target and keeps un
   assert.deepEqual(outside.covered, []);
   const all = subtractCoverage([base], [{ start: 0, end: 10 * MIN }]);
   assert.deepEqual(all.covered, [{ start: 0, end: 10 * MIN, unitKeys: ["u1"] }]);
+});
+
+test("TC-C13 synced segments outside this round's judged units are neither patched nor removed", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const skipped = { key: "s1:2026-10-24T09:00:00.000Z", runs: [{ startedAt: now - 3 * HOUR, endedAt: now - 3 * HOUR + 30 * MIN }] };
+  const judgedUnit = { key: "s2:2026-10-24T10:00:00.000Z", runs: [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 30 * MIN }] };
+  const judged = [{ unit: judgedUnit, result: { kind: "count" } }];
+  const synced = {
+    "2026-10-24": [
+      { id: "a-skipped", start: now - 3 * HOUR, end: now - 3 * HOUR + 30 * MIN, unitKeys: [skipped.key] },
+      { id: "b-judged", start: now - 2 * HOUR, end: now - 2 * HOUR + 10 * MIN, unitKeys: [judgedUnit.key] },
+    ],
+  };
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
+  assert.equal(plan.remove.includes("a-skipped"), false);
+  assert.equal(plan.patch.some((item) => item.id === "a-skipped"), false);
+  assert.deepEqual(plan.patch.map((item) => item.id), ["b-judged"]);
+});
+
+test("TC-C14 a unit re-judged from count to skip still loses its segment", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const unit = { key: "s1:2026-10-24T10:00:00.000Z", runs: [{ startedAt: now - 2 * HOUR, endedAt: now - 2 * HOUR + 30 * MIN }] };
+  const synced = {
+    "2026-10-24": [{ id: "old", start: now - 2 * HOUR, end: now - 2 * HOUR + 30 * MIN, unitKeys: [unit.key] }],
+  };
+  const plan = buildPlan({ judged: [{ unit, result: { kind: "skip" } }], now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
+  assert.deepEqual(plan.remove, ["old"]);
+  assert.equal(plan.create.length, 0);
+});
+
+test("TC-C15 stitch absorbs a gap under the cap and keeps the tail untouched", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:10:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:13:00Z"), end: at("2026-10-24T10:20:00Z"), unitKeys: ["u1"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].start, first.start);
+  assert.equal(out[0].end, second.end);
+  assert.equal(out[0].end - out[0].start, 20 * MIN);
+  assert.deepEqual(out[0].unitKeys, ["u1"]);
+});
+
+test("TC-C16 stitch caps a long gap at five minutes and leaves the rest empty", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:10:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:22:00Z"), end: at("2026-10-24T10:30:00Z"), unitKeys: ["u1"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 2);
+  assert.equal(out[1].start, second.start - 5 * MIN);
+  assert.equal(out[1].end, second.end);
+  assert.equal(out[1].start - out[0].end, 7 * MIN);
+});
+
+test("TC-C17 parallel runs merge into one segment without overlap", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:20:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:10:00Z"), end: at("2026-10-24T10:30:00Z"), unitKeys: ["u2"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].start, first.start);
+  assert.equal(out[0].end, second.end);
+  assert.deepEqual(out[0].unitKeys, ["u1", "u2"]);
+});
+
+test("TC-C18 gapCapMinutes zero records only run time and gapMode merge restores the old binary switch", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const unit = {
+    key: "s1:2026-10-24T10:00:00.000Z",
+    runs: [
+      { startedAt: at("2026-10-24T10:00:00Z"), endedAt: at("2026-10-24T10:10:00Z") },
+      { startedAt: at("2026-10-24T10:13:00Z"), endedAt: at("2026-10-24T10:20:00Z") },
+    ],
+  };
+  const judged = [{ unit, result: { kind: "count" } }];
+  const zero = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ, gapCapMinutes: 0 }, synced: {} });
+  assert.equal(zero.targets.length, 2);
+  const merged = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ, gapMode: "merge" }, synced: {} });
+  assert.equal(merged.targets.length, 2);
+  assert.equal(merged.targets[0].end - merged.targets[0].start, 10 * MIN);
+  assert.equal(merged.targets[1].end - merged.targets[1].start, 7 * MIN);
 });

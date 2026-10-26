@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -16,6 +16,10 @@ import {
   planOperations,
   readDecisions,
   readLedger,
+  readOpenRuns,
+  readRecords,
+  readDayTotal,
+  formatDelta,
   run,
   runHash,
   runState,
@@ -703,4 +707,168 @@ test("human coverage keeps only foreign periods of the same activity", () => {
   ];
   const covered = humanCoverage(periods, { ownIds: new Set(["own"]), activityId: "activity_work_001" });
   assert.deepEqual(covered, [{ start: 20 * MINUTE, end: 30 * MINUTE }]);
+});
+
+function openRec(startedAt, sessionId = "s1") {
+  return {
+    v: 1,
+    kind: "open",
+    id: `${sessionId}:${startedAt}`,
+    sessionId,
+    sessionFile: "/s/x.jsonl",
+    source: "interactive",
+    startedAt,
+  };
+}
+
+function addOpen(dir, record) {
+  appendFileSync(path.join(dir, "ledger", `${record.sessionId}.jsonl`), `${JSON.stringify(record)}\n`);
+}
+
+function readRoundEvents(dir, day = "2026-10-24") {
+  const file = path.join(dir, "logs", `${day}.jsonl`);
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.event === "round");
+}
+
+test("settle rides on gapMinutes: 14:59 waits, 15:00 releases", async () => {
+  const { dir } = sandbox();
+  const lastEnd = Date.parse("2026-10-24T01:15:00.000Z");
+  const early = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const waited = await run({ now: lastEnd + 15 * MINUTE - 1_000, dir, judge: early, notifyImpl: () => ({ ok: true }) });
+  assert.equal(waited.units, 0);
+  assert.equal(early.calls.length, 0);
+
+  const onTime = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const released = await run({ now: lastEnd + 15 * MINUTE, dir, judge: onTime, notifyImpl: () => ({ ok: true }) });
+  assert.equal(released.units, 1);
+  assert.equal(onTime.calls.length, 1);
+});
+
+test("a session with an unclosed open run is skipped and counted as openSkipped", async () => {
+  const { dir, now } = sandbox();
+  addOpen(dir, openRec("2026-10-24T01:58:00.000Z"));
+  const judge = fakeJudge([]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 0);
+  assert.equal(judge.calls.length, 0);
+  const rounds = readRoundEvents(dir);
+  assert.ok(rounds.at(-1).openSkipped >= 1);
+});
+
+test("an open run in one session does not block judgments in another", async () => {
+  const { dir, now } = sandbox();
+  addOpen(dir, openRec("2026-10-24T01:58:00.000Z", "s1"));
+  appendFileSync(
+    path.join(dir, "ledger", "s2.jsonl"),
+    `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5, { sessionId: "s2" }))}\n`,
+  );
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 1);
+  assert.equal(outcome.fresh.length, 1);
+  assert.equal(outcome.fresh[0].unit.sessionId, "s2");
+  const rounds = readRoundEvents(dir);
+  assert.equal(rounds.at(-1).openSkipped, 1);
+});
+
+test("a stale open run older than four hours no longer blocks judgment", async () => {
+  const { dir, now } = sandbox();
+  const stale = new Date(now - 5 * 60 * MINUTE).toISOString();
+  addOpen(dir, openRec(stale));
+  const rows = readRecords(path.join(dir, "ledger"), { now });
+  assert.equal(rows.filter((row) => row.kind === "open").length, 1);
+  assert.equal(readOpenRuns(rows, { now }).size, 0);
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 1);
+});
+
+test("one unit is judged exactly once across the open to closed transition", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-open-"));
+  mkdirSync(path.join(dir, "ledger"), { recursive: true });
+  const startedAt = "2026-10-24T01:58:00.000Z";
+  const ledgerFile = path.join(dir, "ledger", "s1.jsonl");
+  writeFileSync(ledgerFile, `${JSON.stringify(openRec(startedAt))}\n`);
+
+  const whileRunning = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const skipped = await run({ now: Date.parse("2026-10-24T02:00:00.000Z"), dir, judge: whileRunning, notifyImpl: () => ({ ok: true }) });
+  assert.equal(skipped.units, 0);
+  assert.equal(whileRunning.calls.length, 0);
+
+  appendFileSync(ledgerFile, `${JSON.stringify(rec(startedAt, 5))}\n`);
+  const settled = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const first = await run({ now: Date.parse("2026-10-24T02:18:00.000Z"), dir, judge: settled, notifyImpl: () => ({ ok: true }) });
+  assert.equal(first.units, 1);
+  assert.equal(settled.calls.length, 1);
+  const unitEvents = readEvents(dir).filter((event) => event.event === "unit");
+  assert.equal(unitEvents.length, 1);
+  assert.equal(unitEvents[0].span[1], "2026-10-24T02:03:00.000Z");
+
+  const before = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  const again = fakeJudge([]);
+  const second = await run({ now: Date.parse("2026-10-24T02:30:00.000Z"), dir, judge: again, notifyImpl: () => ({ ok: true }) });
+  assert.equal(second.fresh.length, 0);
+  assert.equal(again.calls.length, 0);
+  const after = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  assert.deepEqual(Object.values(after.units).map((entry) => entry.hash), Object.values(before.units).map((entry) => entry.hash));
+});
+
+test("readDayTotal reads today's total from the daily endpoint", async () => {
+  const now = Date.parse("2026-10-24T05:00:00.000Z");
+  const calls = [];
+  const client = {
+    async daily(args) {
+      calls.push(args);
+      return { ok: true, data: [{ date: "2026-10-24", totalDuration: 158 * MINUTE, periodCount: 8 }] };
+    },
+  };
+  const total = await readDayTotal(client, { now, tz: "Asia/Shanghai" });
+  assert.deepEqual(total, { minutes: 158, segments: 8 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].tz, "Asia/Shanghai");
+
+  const empty = { async daily() { return { ok: true, data: [{ date: "2026-10-23", totalDuration: 10 * MINUTE, periodCount: 1 }] }; } };
+  assert.deepEqual(await readDayTotal(empty, { now, tz: "Asia/Shanghai" }), { minutes: 0, segments: 0 });
+
+  const broken = { async daily() { return { ok: false, code: "server" }; } };
+  assert.equal(await readDayTotal(broken, { now, tz: "Asia/Shanghai" }), null);
+});
+
+test("the report leads with today's total and this round's delta", () => {
+  const now = Date.parse("2026-10-24T05:00:00.000Z");
+  const fresh = [{ unit: buildUnits([rec("2026-10-24T01:00:00.000Z", 5)])[0], result: { kind: "count" } }];
+  const report = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 2, patched: 5, deleted: 0 },
+    today: { before: { minutes: 122, segments: 6 }, after: { minutes: 158, segments: 8 } },
+  });
+  assert.match(report, /今日累计 2\.6 小时（8 段）/);
+  assert.match(report, /本轮 \+36 分钟/);
+  assert.doesNotMatch(report, /计入时长/);
+
+  const dropped = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 0, patched: 1, deleted: 0 },
+    today: { before: { minutes: 158, segments: 8 }, after: { minutes: 146, segments: 7 } },
+  });
+  assert.match(dropped, /本轮 −12 分钟/);
+
+  const flat = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 0, patched: 0, deleted: 0 },
+    today: { before: { minutes: 158, segments: 8 }, after: { minutes: 158, segments: 8 } },
+  });
+  assert.match(flat, /本轮 ±0 分钟/);
+
+  const noClock = formatReport(fresh, { tz: "Asia/Shanghai", now });
+  assert.doesNotMatch(noClock, /今日累计/);
+  assert.match(noClock, /计入时长/);
+  assert.equal(formatDelta(-12), "−12 分钟");
 });

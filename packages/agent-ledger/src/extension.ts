@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { appendLedger, createRunTracker, defaultLedgerDir } from "./ledger.mjs";
+import { appendLedger, buildOpenRecord, createRunTracker, defaultLedgerDir, detectSource } from "./ledger.mjs";
 
 export default function (pi: ExtensionAPI) {
   const tracker = createRunTracker();
@@ -26,9 +26,19 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("agent_start", () => {
+  pi.on("agent_start", (_event, ctx) => {
     try {
-      tracker.start();
+      const track = tracker.start();
+      if (!track) return;
+      appendLedger(
+        buildOpenRecord({
+          sessionId: ctx.sessionManager.getSessionId(),
+          sessionFile: ctx.sessionManager.getSessionFile(),
+          source: detectSource(),
+          startedAtMs: track.startedAtMs,
+        }),
+        { dir: ledgerDir },
+      );
     } catch {
       return;
     }

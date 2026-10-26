@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   appendLedger,
   assistantText,
+  buildOpenRecord,
   buildRecord,
   createRunTracker,
   detectSource,
@@ -258,5 +259,49 @@ test("readRecords skips unparsable lines and summarize groups by local day", () 
       ["2026-10-24", 1, 10],
       ["2026-10-23", 1, 30],
     ],
+  );
+});
+
+test("agent_start yields one open record whose id matches the eventual closed record", () => {
+  const clock = fixedClock();
+  const tracker = createRunTracker({ now: clock.now, env: () => ({ RELAY_PLATFORM: "feishu" }) });
+  tracker.begin("查一下工时");
+  const opened = tracker.start();
+  assert.deepEqual(Object.keys(opened), ["startedAtMs"]);
+  assert.equal(tracker.start(), null);
+  const open = buildOpenRecord({
+    sessionId: "fs-th-1",
+    sessionFile: "/s/1_fs-th-1.jsonl",
+    source: "relay",
+    startedAtMs: opened.startedAtMs,
+  });
+  assert.equal(open.kind, "open");
+  assert.equal(open.durationMs, undefined);
+  assert.equal(open.userText, undefined);
+  assert.equal(open.output, undefined);
+  clock.advance(90_000);
+  const closed = tracker.drain({ sessionId: "fs-th-1", sessionFile: "/s/1_fs-th-1.jsonl" });
+  assert.equal(open.id, closed.id);
+});
+
+test("readRecords drops open lines so summary counts stay unchanged", () => {
+  const dir = path.join(tempDir(), "ledger");
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAtMs = Date.parse("2026-10-24T01:00:00.000Z");
+  const open = buildOpenRecord({ sessionId: "s1", sessionFile: "/s/1.jsonl", source: "relay", startedAtMs });
+  const closed = buildRecord({
+    sessionId: "s1",
+    source: "relay",
+    startedAtMs,
+    endedAtMs: startedAtMs + 10 * 60_000,
+    texts: ["a"],
+  });
+  fs.writeFileSync(path.join(dir, "s1.jsonl"), `${JSON.stringify(open)}\n${JSON.stringify(closed)}\n`);
+  const records = readRecords(dir);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].kind, undefined);
+  assert.deepEqual(
+    summarize(records, { tz: "Asia/Shanghai" }).map((entry) => [entry.day, entry.runs, entry.minutes]),
+    [["2026-10-24", 1, 10]],
   );
 });

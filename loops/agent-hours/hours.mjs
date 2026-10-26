@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createJev } from "../relay/jev.mjs";
-import { buildPlan, CLOCK_DEFAULTS, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
+import { buildPlan, CLOCK_DEFAULTS, dayKey, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
 import { createClockClient, pickActivity } from "./clock-client.mjs";
 
 const HOME = process.env.HOME ?? homedir();
@@ -27,7 +27,6 @@ const RELAY_ENTRY = join(ROOT, "../relay/relay.mjs");
 export const DEFAULTS = {
   tz: "Asia/Shanghai",
   gapMinutes: 15,
-  settleMinutes: 5,
   countMinP: 0.5,
   marginMin: 0.1,
   reviewLongRunHours: 4,
@@ -75,7 +74,7 @@ export function loadConfig(dir = CFG_DIR) {
   };
 }
 
-export function readLedger(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDGER_WINDOW_MS } = {}) {
+export function readRecords(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDGER_WINDOW_MS } = {}) {
   if (!existsSync(dir)) return [];
   const records = [];
   for (const name of readdirSync(dir).filter((entry) => entry.endsWith(".jsonl"))) {
@@ -93,6 +92,25 @@ export function readLedger(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDG
     }
   }
   return records;
+}
+
+export function readLedger(dir = LEDGER_DIR, options = {}) {
+  return readRecords(dir, options).filter((record) => !record.kind);
+}
+
+export const OPEN_STALE_MS = 4 * 60 * 60 * 1000;
+
+export function readOpenRuns(records, { now = Date.now() } = {}) {
+  const closed = new Set(records.filter((record) => record.kind !== "open").map((record) => record.id));
+  const sessions = new Set();
+  for (const record of records) {
+    if (record.kind !== "open") continue;
+    if (closed.has(record.id)) continue;
+    const startedAt = Date.parse(record.startedAt);
+    if (!Number.isFinite(startedAt) || now - startedAt > OPEN_STALE_MS) continue;
+    sessions.add(record.sessionId);
+  }
+  return sessions;
 }
 
 export function buildUnits(records, { gapMs = DEFAULTS.gapMinutes * 60_000 } = {}) {
@@ -418,6 +436,12 @@ export function formatDuration(minutes) {
   return `${hours.toFixed(1).replace(/\.0$/, "")} 小时`;
 }
 
+export function formatDelta(minutes) {
+  const total = Math.round(Number(minutes) || 0);
+  if (total === 0) return "±0 分钟";
+  return total > 0 ? `+${formatDuration(total)}` : `−${formatDuration(-total)}`;
+}
+
 export function formatEntry(unit, result, { tz }) {
   const span = `${formatClock(unit.startedAt, tz)}–${formatClock(unit.lastEnd, tz)}`;
   const head = `${BADGE[result.kind]} ${span} · ${formatDuration((unit.lastEnd - unit.startedAt) / 60_000)} · ${unit.runs.length} 轮 · ${unit.sessionId.slice(0, 18)}`;
@@ -430,7 +454,7 @@ export function formatEntry(unit, result, { tz }) {
   return lines.join("\n");
 }
 
-export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {}) {
+export function formatReport(fresh, { tz, now = Date.now(), clock = null, today = null } = {}) {
   if (!fresh.length) return "";
   const counts = fresh.reduce((acc, item) => {
     acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
@@ -447,11 +471,15 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {})
           : item.unit.runs;
         return sum + runs.reduce((inner, run) => inner + run.durationMs / 60_000, 0);
       }, 0);
-  const lines = [
-    `**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`,
-    `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`,
-    `计入时长 ${formatDuration(countedMinutes)}`,
-  ];
+  const lines = [`**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`];
+  const after = today?.after ?? null;
+  const before = today?.before ?? null;
+  if (after) {
+    lines.push(`今日累计 ${formatDuration(after.minutes)}（${after.segments} 段）`);
+    if (before) lines.push(`本轮 ${formatDelta(after.minutes - before.minutes)}`);
+  }
+  lines.push(`新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`);
+  if (!after) lines.push(`计入时长 ${formatDuration(countedMinutes)}`);
   if (clock) {
     const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
     const bits = [`Clock 写 ${wrote} 段`];
@@ -586,9 +614,14 @@ export async function run({
   const engine = judge ?? createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
 
   const windowStart = now - LEDGER_WINDOW_MS;
-  const candidates = buildUnits(readLedger(join(dir, "ledger"), { now }))
+  const rows = readRecords(join(dir, "ledger"), { now });
+  const closedRows = rows.filter((row) => !row.kind);
+  const openSessions = readOpenRuns(rows, { now });
+  const allUnits = buildUnits(closedRows);
+  const candidates = allUnits
     .filter((unit) => unit.lastEnd >= windowStart)
-    .filter((unit) => now - unit.lastEnd >= cfg.settleMinutes * 60_000);
+    .filter((unit) => now - unit.lastEnd >= cfg.gapMinutes * 60_000 && !openSessions.has(unit.sessionId));
+  const openSkipped = allUnits.filter((unit) => unit.lastEnd >= windowStart && openSessions.has(unit.sessionId)).length;
   const units = candidates;
   const roundStartedAt = Date.now();
   const needsJudge = (unit) => {
@@ -661,7 +694,7 @@ export async function run({
 
   const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
 
-  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null });
+  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null, today: clockOutcome && clockOutcome.todayAfter ? { before: clockOutcome.todayBefore, after: clockOutcome.todayAfter } : null });
   let delivered = false;
   if (!dryRun) {
     writeDecisions(decisionsFile, pruneDecisions(cache, { now }));
@@ -680,10 +713,10 @@ export async function run({
       return acc;
     }, {});
     appendDigest(
-      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
+      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}${openSkipped ? ` · 等 open ${openSkipped}` : ""}`,
       { dir, now, tz: cfg.tz },
     );
-    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, openSkipped, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
     if (clockOutcome?.line) appendDigest(`  - clock：${clockOutcome.line}`, { dir, now, tz: cfg.tz });
   }
 
@@ -703,6 +736,16 @@ export function humanCoverage(periods, { ownIds, activityId }) {
     .filter((item) => item.activityId === activityId && !ownIds.has(item.id))
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
     .map((item) => ({ start: item.start, end: item.end }));
+}
+
+export async function readDayTotal(client, { now, tz }) {
+  if (!client) return null;
+  const res = await client.daily({ start: now - 36 * 3_600_000, end: now + 3_600_000, tz });
+  if (!res?.ok) return null;
+  const rows = Array.isArray(res.data) ? res.data : (res.data?.days ?? []);
+  const today = rows.find((row) => row.date === dayKey(now, tz));
+  if (!today) return { minutes: 0, segments: 0 };
+  return { minutes: Math.round((today.totalDuration ?? 0) / 60_000), segments: today.periodCount ?? 0 };
 }
 
 export async function syncClock({
@@ -756,6 +799,7 @@ export async function syncClock({
   }
 
   const api = client ?? createClockClient({ baseUrl: clockCfg.baseUrl, apiKey });
+  const todayBefore = await readDayTotal(api, { now, tz: clockCfg.tz });
   let activityId = clockCfg.activityId;
   if (!activityId) {
     const listed = await api.activities();
@@ -852,7 +896,8 @@ export async function syncClock({
 
   appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
   const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length}${plan.covered.length ? ` / 人工已记 ${plan.covered.length} 段（${formatDuration(plan.coveredMinutes)}）` : ""} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${formatDuration(summary.conflictMinutes)}）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
-  return { summary, line };
+  const todayAfter = await readDayTotal(api, { now, tz: clockCfg.tz });
+  return { summary, line, todayBefore, todayAfter };
 }
 
 async function fetchLivePeriods(api, { from, to }) {
