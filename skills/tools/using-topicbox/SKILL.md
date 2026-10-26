@@ -32,6 +32,7 @@ Write every topic document in Chinese — the `STATE.md` body and all artifacts.
 | Edit the STATE.md body — any change | read `references/state-md-writing-guide.md` first |
 | End a turn of topic work — milestone, decision, PR push, blocker, or any break | STATE.md body updated **and committed in the same turn** |
 | Continue an existing topic | `topicbox verify <topic>` passes |
+| Quote a spec as current behaviour | read the code first; on drift, report it and ask the user to freeze |
 | Create a plan | Determinism Gate passed + user accepted the spec |
 | Freeze a spec | explicit user instruction only — never run unprompted |
 | Create/replace a worktree | `topicbox worktree-check` passes |
@@ -49,6 +50,14 @@ User pressure waives none of these. Main worktree = read-only baseline (dirty tr
 **Existing written source** (GitHub issue, doc): one pointer artifact naming it — never duplicate its content.
 
 Spec editability follows plan status: `plan: open` → edit in place, follow-ups to the same spec; `plan: implemented` → frozen, follow-up is a new numbered spec.
+
+## Spec authority and drift
+
+A spec records what one stage decided. It is **not** a description of what the code does now. Authority runs **code > spec**: once the implementation lands, the spec's conclusions are history — they explain how the code got here, they do not describe its current behaviour.
+
+Read the code before quoting a spec as current behaviour. When the two disagree the spec has drifted, and its conclusion is no longer a correct conclusion — only the record of an investigation and its discussion trail. Say so in the reply, name the divergence in one line, and ask the user to freeze the spec. Freezing stays user-initiated: report, suggest, wait.
+
+Drift is expected, not failure. Most specs never get frozen because nobody checked; a spec that keeps being quoted as truth after the code moved on is how a topic starts lying to its next reader.
 
 ## Quick Reference
 
@@ -72,6 +81,8 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`. Specs/plans: `NN-<name>.{spec,
 | "Reading the skill body costs too much" | The read is seconds; skipping it is how the baseline agent pushed with no topic. Tested. |
 | "The change is small / low-risk" | Size does not decide location; the worktree rule is unconditional. |
 | "Spec is done — I'll run plan-status myself" | Freeze is user-initiated; suggest with the coverage table and wait. |
+| "The spec says X, so X is how it works" | Specs drift once implemented; the code is the only current truth. Read it, then flag the drift. |
+| "The spec is stale, I'll just freeze it" | Freezing is user-initiated. Report the drift and ask. |
 | "I'll just tweak the spec text, no re-confirm" | A material change re-opens the confirmation gate. |
 | "Skip verify, I'm in a hurry" | That is the failure the check exists for. |
 | "STATE.md can wait until the session ends" | The session may not end cleanly — a break or crash is exactly what STATE.md exists for; uncommitted progress is evaporated knowledge. Real user pain: agents stalled mid-topic left the next session blind. |
@@ -82,6 +93,7 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`. Specs/plans: `NN-<name>.{spec,
 - `verify` exits 1; STATE.md disagrees with the files (trust the files).
 - Code written before `guard` returns `ok`, or outside the topic worktree; worktree made without `worktree-check`.
 - `plan-status … implemented` without explicit user instruction; a second spec while the same task's spec is `plan: open`; editing an `implemented` spec.
+- Quoting a spec's conclusion as current behaviour without opening the code; noticing drift and staying silent about it.
 
 ## References
 
