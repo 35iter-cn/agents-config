@@ -21,8 +21,10 @@ function topicDir(topic) {
   return join(sessionsRoot(), topic);
 }
 
+const LOCAL_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
+
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return LOCAL_DAY.format(new Date());
 }
 
 function resolveRepo(dir = process.cwd()) {
