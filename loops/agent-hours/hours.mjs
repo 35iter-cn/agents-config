@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { createJev } from "../relay/jev.mjs";
 import { buildPlan, CLOCK_DEFAULTS, dayKey, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
 import { createClockClient, pickActivity } from "./clock-client.mjs";
 
@@ -20,9 +19,16 @@ const DECISIONS_FILE = join(CFG_DIR, "decisions.json");
 const REVIEW_DIR = join(CFG_DIR, "review");
 const DIGEST_DIR = join(CFG_DIR, "digest");
 const LOG_DIR = join(HOME, ".config/taskradar/logs/hours");
-const JEV_ENV = join(HOME, ".config/taskradar/jev.env");
+const RELAY_CONFIG_DIR = process.env.AGENT_RELAY_CONFIG_DIR ?? join(HOME, ".config/agent-relay");
+const JEV_ENV = existsSync(join(RELAY_CONFIG_DIR, "jev.env")) ? join(RELAY_CONFIG_DIR, "jev.env") : join(HOME, ".config/taskradar/jev.env");
 const CLOCK_ENV = join(HOME, ".config/agent-hours/clock.env");
-const RELAY_ENTRY = join(ROOT, "../relay/relay.mjs");
+const RELAY_HOME = process.env.AGENT_RELAY_HOME ?? join(HOME, "code/agent-relay");
+const RELAY_ENTRY = join(RELAY_HOME, "src/cli.mjs");
+
+async function loadJudge() {
+  const { createJev } = await import(join(RELAY_HOME, "src/judgment/jev.mjs"));
+  return createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
+}
 
 export const DEFAULTS = {
   tz: "Asia/Shanghai",
@@ -515,7 +521,7 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null, today 
 function notifyFeishu(text, { platform }) {
   const chunks = chunkMessage(text);
   const results = chunks.map((chunk) =>
-    spawnSync(BUN_BIN, [RELAY_ENTRY, "notify", platform, chunk], { encoding: "utf8", timeout: 30_000 }),
+    spawnSync(BUN_BIN, [RELAY_ENTRY, "notice", "emit", "--platform", platform, "--text", chunk], { encoding: "utf8", timeout: 30_000 }),
   );
   const failed = results.find((result) => result.status !== 0);
   return {
@@ -630,7 +636,7 @@ export async function run({
   const cfg = loadConfig(dir);
   const decisionsFile = join(dir, "decisions.json");
   const cache = readDecisions(decisionsFile);
-  const engine = judge ?? createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
+  const engine = judge ?? (await loadJudge());
 
   const windowStart = now - LEDGER_WINDOW_MS;
   const rows = readRecords(join(dir, "ledger"), { now });

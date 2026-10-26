@@ -7,7 +7,7 @@ if [[ -z "$platform" ]]; then
   exit 2
 fi
 
-state="$HOME/.config/taskradar/relay-$platform.json"
+state="${AGENT_RELAY_CONFIG_DIR:-$HOME/.config/agent-relay}/relay-$platform.json"
 wait_seconds="${RELAY_UPGRADE_WAIT:-0}"
 heartbeat_seconds="${RELAY_UPGRADE_HEARTBEAT:-300}"
 script_dir="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -22,7 +22,7 @@ notify() {
     echo "relay-upgrade: WARN bun not found, skipping notify" >&2
     return 0
   fi
-  if ! "$bun_bin" "$script_dir/../loops/relay/relay.mjs" notify "$platform" "$1"; then
+  if ! "$bun_bin" "${AGENT_RELAY_HOME:-$HOME/code/agent-relay}/src/cli.mjs" notice emit --platform "$platform" --text "$1"; then
     echo "relay-upgrade: WARN notify failed" >&2
   fi
 }
@@ -45,7 +45,7 @@ snapshot() {
   ' "$state"
 }
 
-if [[ -z "${RELAY_UPGRADE_DETACHED:-}" ]] && grep -q "relay@" /proc/self/cgroup 2>/dev/null; then
+if [[ -z "${RELAY_UPGRADE_DETACHED:-}" ]] && grep -Eq "agent-relay@|relay@" /proc/self/cgroup 2>/dev/null; then
   unit="relay-upgrade-$platform"
   self="$script_dir/$(basename "$0")"
   if systemctl --user is-active --quiet "$unit"; then
@@ -96,21 +96,21 @@ while true; do
   sleep 10
 done
 
-before_pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value || true)"
+before_pid="$(systemctl --user show "agent-relay@$platform.service" -p MainPID --value || true)"
 echo "relay-upgrade: 0 in-flight job(s), restarting $platform (old pid ${before_pid:-none})"
-systemctl --user restart "relay@$platform.service"
+systemctl --user restart "agent-relay@$platform.service"
 sleep 10
 
-pid="$(systemctl --user show "relay@$platform.service" -p MainPID --value || true)"
-entered="$(systemctl --user show "relay@$platform.service" -p ActiveEnterTimestamp --value || true)"
+pid="$(systemctl --user show "agent-relay@$platform.service" -p MainPID --value || true)"
+entered="$(systemctl --user show "agent-relay@$platform.service" -p ActiveEnterTimestamp --value || true)"
 
-if systemctl --user is-active --quiet "relay@$platform.service" && [[ -n "${pid:-}" && "$pid" != "0" && "$pid" != "${before_pid:-}" ]]; then
+if systemctl --user is-active --quiet "agent-relay@$platform.service" && [[ -n "${pid:-}" && "$pid" != "0" && "$pid" != "${before_pid:-}" ]]; then
   echo "relay-upgrade: OK $platform active (pid $pid, entered ${entered:-?})"
-  notify "🔄 relay-$platform 已重启，健康检查通过（pid ${before_pid:-none} → $pid，$(date '+%Y-%m-%d %H:%M')）"
+  notify "🔄 agent-relay-$platform 已重启，健康检查通过（pid ${before_pid:-none} → $pid，$(date '+%Y-%m-%d %H:%M')）"
   exit 0
 fi
 
 echo "relay-upgrade: FAILED $platform — is-active or MainPID unchanged (before=${before_pid:-none} now=${pid:-none}, entered ${entered:-?})" >&2
-journalctl --user -u "relay@$platform.service" -n 30 --no-pager >&2
-notify "🔴 relay-$platform 重启后未通过健康检查（服务未 active 或 MainPID 未变，旧进程还在），需要人工看一下（journalctl --user -u relay@$platform）"
+journalctl --user -u "agent-relay@$platform.service" -n 30 --no-pager >&2
+notify "🔴 agent-relay-$platform 重启后未通过健康检查（服务未 active 或 MainPID 未变，旧进程还在），需要人工看一下（journalctl --user -u agent-relay@$platform）"
 exit 1
