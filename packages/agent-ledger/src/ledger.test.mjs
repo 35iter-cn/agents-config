@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   appendLedger,
   assistantText,
+  buildOpenRecord,
   buildRecord,
   createRunTracker,
   detectSource,
@@ -259,4 +260,26 @@ test("readRecords skips unparsable lines and summarize groups by local day", () 
       ["2026-10-23", 1, 30],
     ],
   );
+});
+
+test("agent_start yields one open record whose id matches the eventual closed record", () => {
+  const clock = fixedClock();
+  const tracker = createRunTracker({ now: clock.now, env: () => ({ RELAY_PLATFORM: "feishu" }) });
+  tracker.begin("查一下工时");
+  const opened = tracker.start();
+  assert.deepEqual(Object.keys(opened), ["startedAtMs"]);
+  assert.equal(tracker.start(), null);
+  const open = buildOpenRecord({
+    sessionId: "fs-th-1",
+    sessionFile: "/s/1_fs-th-1.jsonl",
+    source: "relay",
+    startedAtMs: opened.startedAtMs,
+  });
+  assert.equal(open.kind, "open");
+  assert.equal(open.durationMs, undefined);
+  assert.equal(open.userText, undefined);
+  assert.equal(open.output, undefined);
+  clock.advance(90_000);
+  const closed = tracker.drain({ sessionId: "fs-th-1", sessionFile: "/s/1_fs-th-1.jsonl" });
+  assert.equal(open.id, closed.id);
 });

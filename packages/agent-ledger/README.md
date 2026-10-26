@@ -4,7 +4,18 @@ Pi 扩展：每轮对话结束（`agent_settled`）时往 `~/.config/agent-hours
 
 ## 账目字段
 
+账本每轮对话写**两行**：run 开始时一行 `kind: "open"`，结束时一行闭合记录（无 `kind`，即旧格式）。两行 `id` 完全相同，读侧靠它闭合。
+
 ```jsonc
+// 开始时追加
+{ "v": 1, "kind": "open",
+  "id": "<sessionId>:<startedAt>",
+  "sessionId": "fs-th-om_x100b...",
+  "sessionFile": "/home/…/2026-10-23T10-11-58_fs-th-….jsonl",
+  "source": "relay | automation | interactive",
+  "startedAt": "2026-10-23T10:12:03.441Z" }
+
+// 结束时追加（与 open 行同 id）
 { "v": 1,
   "id": "<sessionId>:<startedAt>",          // 幂等主键，同一 session 不会有两轮落在同一毫秒
   "sessionId": "fs-th-om_x100b...",
@@ -18,6 +29,8 @@ Pi 扩展：每轮对话结束（`agent_settled`）时往 `~/.config/agent-hours
 ```
 
 `source` 判定顺序：`AGENT_LEDGER_SOURCE` → `RELAY_PLATFORM` → `interactive`。不靠 session 文件名兜底：在终端 `pi -r` 恢复一段 feishu 会话时文件名仍带 `_fs-`，兜底会误标成 `relay`。
+
+open 行的作用：让判定侧能看见正在跑、尚未落盘的那一轮。`readRecords` 只返回闭合行，所以 `summary.mjs`、`runs` 计数与升级前一致；只看「哪些 session 有未闭合 run」的读侧才需要 open 行。open 行没有任何 payload，体积约为闭合行的十分之一，靠 3 天窗口自动裁剪。
 
 ## 安装
 

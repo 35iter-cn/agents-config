@@ -61,6 +61,19 @@ export function buildRecord({
   };
 }
 
+export function buildOpenRecord({ sessionId, sessionFile, source, startedAtMs }) {
+  const normalized = normalizeSessionId(sessionId);
+  return {
+    v: SCHEMA_VERSION,
+    kind: "open",
+    id: `${normalized}:${new Date(startedAtMs).toISOString()}`,
+    sessionId: normalized,
+    sessionFile: String(sessionFile ?? ""),
+    source,
+    startedAt: new Date(startedAtMs).toISOString(),
+  };
+}
+
 export function createRunTracker({ now = () => Date.now(), env = () => process.env } = {}) {
   let active = null;
 
@@ -87,7 +100,9 @@ export function createRunTracker({ now = () => Date.now(), env = () => process.e
 
     start() {
       const current = ensure();
-      if (current.startedAtMs === null) current.startedAtMs = now();
+      if (current.startedAtMs !== null) return null;
+      current.startedAtMs = now();
+      return { startedAtMs: current.startedAtMs };
     },
 
     takeOutput(message) {
