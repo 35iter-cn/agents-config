@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -16,6 +16,8 @@ import {
   planOperations,
   readDecisions,
   readLedger,
+  readOpenRuns,
+  readRecords,
   run,
   runHash,
   runState,
@@ -703,4 +705,82 @@ test("human coverage keeps only foreign periods of the same activity", () => {
   ];
   const covered = humanCoverage(periods, { ownIds: new Set(["own"]), activityId: "activity_work_001" });
   assert.deepEqual(covered, [{ start: 20 * MINUTE, end: 30 * MINUTE }]);
+});
+
+function openRec(startedAt, sessionId = "s1") {
+  return {
+    v: 1,
+    kind: "open",
+    id: `${sessionId}:${startedAt}`,
+    sessionId,
+    sessionFile: "/s/x.jsonl",
+    source: "interactive",
+    startedAt,
+  };
+}
+
+function addOpen(dir, record) {
+  appendFileSync(path.join(dir, "ledger", `${record.sessionId}.jsonl`), `${JSON.stringify(record)}\n`);
+}
+
+function readRoundEvents(dir, day = "2026-10-24") {
+  const file = path.join(dir, "logs", `${day}.jsonl`);
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.event === "round");
+}
+
+test("settle rides on gapMinutes: 14:59 waits, 15:00 releases", async () => {
+  const { dir } = sandbox();
+  const lastEnd = Date.parse("2026-10-24T01:15:00.000Z");
+  const early = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const waited = await run({ now: lastEnd + 15 * MINUTE - 1_000, dir, judge: early, notifyImpl: () => ({ ok: true }) });
+  assert.equal(waited.units, 0);
+  assert.equal(early.calls.length, 0);
+
+  const onTime = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const released = await run({ now: lastEnd + 15 * MINUTE, dir, judge: onTime, notifyImpl: () => ({ ok: true }) });
+  assert.equal(released.units, 1);
+  assert.equal(onTime.calls.length, 1);
+});
+
+test("a session with an unclosed open run is skipped and counted as openSkipped", async () => {
+  const { dir, now } = sandbox();
+  addOpen(dir, openRec("2026-10-24T01:58:00.000Z"));
+  const judge = fakeJudge([]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 0);
+  assert.equal(judge.calls.length, 0);
+  const rounds = readRoundEvents(dir);
+  assert.ok(rounds.at(-1).openSkipped >= 1);
+});
+
+test("an open run in one session does not block judgments in another", async () => {
+  const { dir, now } = sandbox();
+  addOpen(dir, openRec("2026-10-24T01:58:00.000Z", "s1"));
+  appendFileSync(
+    path.join(dir, "ledger", "s2.jsonl"),
+    `${JSON.stringify(rec("2026-10-24T01:00:00.000Z", 5, { sessionId: "s2" }))}\n`,
+  );
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 1);
+  assert.equal(outcome.fresh.length, 1);
+  assert.equal(outcome.fresh[0].unit.sessionId, "s2");
+  const rounds = readRoundEvents(dir);
+  assert.equal(rounds.at(-1).openSkipped, 1);
+});
+
+test("a stale open run older than four hours no longer blocks judgment", async () => {
+  const { dir, now } = sandbox();
+  const stale = new Date(now - 5 * 60 * MINUTE).toISOString();
+  addOpen(dir, openRec(stale));
+  const rows = readRecords(path.join(dir, "ledger"), { now });
+  assert.equal(rows.filter((row) => row.kind === "open").length, 1);
+  assert.equal(readOpenRuns(rows, { now }).size, 0);
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
+  assert.equal(outcome.units, 1);
 });

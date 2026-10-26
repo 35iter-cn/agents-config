@@ -27,7 +27,6 @@ const RELAY_ENTRY = join(ROOT, "../relay/relay.mjs");
 export const DEFAULTS = {
   tz: "Asia/Shanghai",
   gapMinutes: 15,
-  settleMinutes: 5,
   countMinP: 0.5,
   marginMin: 0.1,
   reviewLongRunHours: 4,
@@ -75,7 +74,7 @@ export function loadConfig(dir = CFG_DIR) {
   };
 }
 
-export function readLedger(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDGER_WINDOW_MS } = {}) {
+export function readRecords(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDGER_WINDOW_MS } = {}) {
   if (!existsSync(dir)) return [];
   const records = [];
   for (const name of readdirSync(dir).filter((entry) => entry.endsWith(".jsonl"))) {
@@ -93,6 +92,25 @@ export function readLedger(dir = LEDGER_DIR, { now = Date.now(), windowMs = LEDG
     }
   }
   return records;
+}
+
+export function readLedger(dir = LEDGER_DIR, options = {}) {
+  return readRecords(dir, options).filter((record) => !record.kind);
+}
+
+export const OPEN_STALE_MS = 4 * 60 * 60 * 1000;
+
+export function readOpenRuns(records, { now = Date.now() } = {}) {
+  const closed = new Set(records.filter((record) => record.kind !== "open").map((record) => record.id));
+  const sessions = new Set();
+  for (const record of records) {
+    if (record.kind !== "open") continue;
+    if (closed.has(record.id)) continue;
+    const startedAt = Date.parse(record.startedAt);
+    if (!Number.isFinite(startedAt) || now - startedAt > OPEN_STALE_MS) continue;
+    sessions.add(record.sessionId);
+  }
+  return sessions;
 }
 
 export function buildUnits(records, { gapMs = DEFAULTS.gapMinutes * 60_000 } = {}) {
@@ -586,9 +604,14 @@ export async function run({
   const engine = judge ?? createJev({ env: { ...process.env, ...readEnvFile(JEV_ENV) } });
 
   const windowStart = now - LEDGER_WINDOW_MS;
-  const candidates = buildUnits(readLedger(join(dir, "ledger"), { now }))
+  const rows = readRecords(join(dir, "ledger"), { now });
+  const closedRows = rows.filter((row) => !row.kind);
+  const openSessions = readOpenRuns(rows, { now });
+  const allUnits = buildUnits(closedRows);
+  const candidates = allUnits
     .filter((unit) => unit.lastEnd >= windowStart)
-    .filter((unit) => now - unit.lastEnd >= cfg.settleMinutes * 60_000);
+    .filter((unit) => now - unit.lastEnd >= cfg.gapMinutes * 60_000 && !openSessions.has(unit.sessionId));
+  const openSkipped = allUnits.filter((unit) => unit.lastEnd >= windowStart && openSessions.has(unit.sessionId)).length;
   const units = candidates;
   const roundStartedAt = Date.now();
   const needsJudge = (unit) => {
@@ -680,10 +703,10 @@ export async function run({
       return acc;
     }, {});
     appendDigest(
-      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}`,
+      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}${openSkipped ? ` · 等 open ${openSkipped}` : ""}`,
       { dir, now, tz: cfg.tz },
     );
-    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, openSkipped, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
     if (clockOutcome?.line) appendDigest(`  - clock：${clockOutcome.line}`, { dir, now, tz: cfg.tz });
   }
 
