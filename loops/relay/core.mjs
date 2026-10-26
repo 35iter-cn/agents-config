@@ -363,6 +363,15 @@ export function createCore({ adapter, paths, deps = {} }) {
     }
   }
 
+  function stallActionsText() {
+    try {
+      return renderPrompt(readFileSync(paths.stallActionsFile, "utf8").trim(), { platform: adapter.name });
+    } catch (error) {
+      log("warn", "stall-actions", String(error?.message ?? error));
+      return "";
+    }
+  }
+
   function regexVariant(root) {
     if (STALL_LINE.test(root)) return "stall";
     return CANDIDATE_LINE.test(root) ? "candidate_rules" : "task_skeleton";
@@ -381,6 +390,7 @@ export function createCore({ adapter, paths, deps = {} }) {
       reply_rules: adapter.replyRules ?? "",
       chunk_limit: adapter.chunkLimit,
       candidate_rules: rules ? `\n\n${rules}` : "",
+      stall_actions: stallActionsText(),
     });
   }
 

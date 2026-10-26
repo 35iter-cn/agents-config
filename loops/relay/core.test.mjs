@@ -38,9 +38,11 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   mkdirSync(sessionsDir, { recursive: true });
   for (const name of sessions) writeFileSync(join(sessionsDir, `2026-01-01T00-00-00_${name}.jsonl`), "{}\n");
   const promptFile = join(dir, "thread.md");
-  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} candidate={{candidate_rules}}");
+  writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} candidate={{candidate_rules}} actions={{stall_actions}}");
   const stallFile = join(dir, "stall.md");
-  writeFileSync(stallFile, "STALL-TEMPLATE user={{user_message}} root={{root_section}}");
+  writeFileSync(stallFile, "STALL-TEMPLATE user={{user_message}} root={{root_section}} actions={{stall_actions}}");
+  const stallActionsFile = join(dir, "stall-actions.md");
+  writeFileSync(stallActionsFile, "ACTIONS platform={{platform}} key=<key>");
   const candidateRulesFile = join(dir, "candidate-rules.md");
   if (candidateRules) writeFileSync(candidateRulesFile, candidateRules);
   const stateFile = join(dir, "relay-fake.json");
@@ -61,7 +63,7 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   const logs = [];
   const core = createCore({
     adapter,
-    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, stallFile, candidateRulesFile, cwd: dir, home: dir },
+    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, stallFile, stallActionsFile, candidateRulesFile, cwd: dir, home: dir },
     deps: { spawn: spawn ?? (() => fakeChild({ stdout: "ok" })), log: (level, ...parts) => logs.push([level, ...parts].join(" ")), ...deps },
   });
   return { core, adapter, replies, logs, dir, stateFile, sessionsDir };
@@ -852,6 +854,7 @@ test("TC-ST4 a stall notice opens its own conversation with the stall template",
   assert.match(prompts[0], /STALL-TEMPLATE/);
   assert.match(prompts[0], /杀掉/);
   assert.match(prompts[0], /任务疑似卡住/);
+  assert.match(prompts[0], /ACTIONS platform=fake key=<key>/);
 });
 
 test("TC-ST5 an ordinary first message still uses the thread template", async () => {
@@ -869,4 +872,5 @@ test("TC-ST5 an ordinary first message still uses the thread template", async ()
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.match(prompts[0], /conversation=th-abc/);
   assert.doesNotMatch(prompts[0], /STALL-TEMPLATE/);
+  assert.match(prompts[0], /ACTIONS platform=fake key=<key>/);
 });

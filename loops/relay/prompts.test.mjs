@@ -40,3 +40,20 @@ test("TC-P4 long text lands in a topic, not in the log directory", () => {
   assert.match(text, /using-topicbox/);
   assert.match(text, /topicbox artifact-create/);
 });
+
+test("TC-P5 stall actions are a fragment with no heading of their own", () => {
+  const text = read("stall-actions.md");
+  assert.doesNotMatch(text, /^#/m);
+  assert.match(text, /^- 「杀掉」/);
+});
+
+test("TC-P6 both templates pull the stall actions from that one fragment", () => {
+  const fragment = read("stall-actions.md");
+  assert.match(fragment, /stall \{\{platform\}\} cancel/);
+  assert.match(fragment, /stall \{\{platform\}\} resume/);
+  for (const name of ["thread.md", "stall.md"]) {
+    const text = read(name);
+    assert.equal(text.split("{{stall_actions}}").length - 1, 1, `${name} must carry the placeholder once`);
+    assert.doesNotMatch(text, /stall \{\{platform\}\} (cancel|resume)/, `${name} must not restate the commands`);
+  }
+});

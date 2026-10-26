@@ -30,6 +30,7 @@ export const paths = {
   promptFile: join(ROOT, "prompts/thread.md"),
   stallFile: join(ROOT, "prompts/stall.md"),
   candidateRulesFile: join(ROOT, "prompts/candidate-rules.md"),
+  stallActionsFile: join(ROOT, "prompts/stall-actions.md"),
 };
 
 export function usage() {
