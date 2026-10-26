@@ -11,6 +11,7 @@ import {
   oversizeDays,
   countedSegments,
   planReconcile,
+  stitchRuns,
   subtractCoverage,
   pruneMissing,
   pruneSynced,
@@ -385,4 +386,53 @@ test("TC-C14 a unit re-judged from count to skip still loses its segment", () =>
   const plan = buildPlan({ judged: [{ unit, result: { kind: "skip" } }], now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
   assert.deepEqual(plan.remove, ["old"]);
   assert.equal(plan.create.length, 0);
+});
+
+test("TC-C15 stitch absorbs a gap under the cap and keeps the tail untouched", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:10:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:13:00Z"), end: at("2026-10-24T10:20:00Z"), unitKeys: ["u1"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].start, first.start);
+  assert.equal(out[0].end, second.end);
+  assert.equal(out[0].end - out[0].start, 20 * MIN);
+  assert.deepEqual(out[0].unitKeys, ["u1"]);
+});
+
+test("TC-C16 stitch caps a long gap at five minutes and leaves the rest empty", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:10:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:22:00Z"), end: at("2026-10-24T10:30:00Z"), unitKeys: ["u1"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 2);
+  assert.equal(out[1].start, second.start - 5 * MIN);
+  assert.equal(out[1].end, second.end);
+  assert.equal(out[1].start - out[0].end, 7 * MIN);
+});
+
+test("TC-C17 parallel runs merge into one segment without overlap", () => {
+  const first = { start: at("2026-10-24T10:00:00Z"), end: at("2026-10-24T10:20:00Z"), unitKeys: ["u1"] };
+  const second = { start: at("2026-10-24T10:10:00Z"), end: at("2026-10-24T10:30:00Z"), unitKeys: ["u2"] };
+  const out = stitchRuns([first, second], 5 * MIN);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].start, first.start);
+  assert.equal(out[0].end, second.end);
+  assert.deepEqual(out[0].unitKeys, ["u1", "u2"]);
+});
+
+test("TC-C18 gapCapMinutes zero records only run time and gapMode merge restores the old binary switch", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const unit = {
+    key: "s1:2026-10-24T10:00:00.000Z",
+    runs: [
+      { startedAt: at("2026-10-24T10:00:00Z"), endedAt: at("2026-10-24T10:10:00Z") },
+      { startedAt: at("2026-10-24T10:13:00Z"), endedAt: at("2026-10-24T10:20:00Z") },
+    ],
+  };
+  const judged = [{ unit, result: { kind: "count" } }];
+  const zero = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ, gapCapMinutes: 0 }, synced: {} });
+  assert.equal(zero.targets.length, 2);
+  const merged = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ, gapMode: "merge" }, synced: {} });
+  assert.equal(merged.targets.length, 2);
+  assert.equal(merged.targets[0].end - merged.targets[0].start, 10 * MIN);
+  assert.equal(merged.targets[1].end - merged.targets[1].start, 7 * MIN);
 });
