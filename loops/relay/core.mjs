@@ -886,6 +886,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     recover,
     cancel,
     drainCommands,
+    checkStall,
     stats: () => ({ running: running.size, pending: state.inbox.length }),
     pruneLogs: () => pruneOldFiles(logDir, RETENTION_MS, now()),
     log,
