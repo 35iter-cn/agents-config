@@ -39,6 +39,8 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   for (const name of sessions) writeFileSync(join(sessionsDir, `2026-01-01T00-00-00_${name}.jsonl`), "{}\n");
   const promptFile = join(dir, "thread.md");
   writeFileSync(promptFile, "conversation={{conversation}} user={{user_message}} root={{root_section}} platform={{platform}} surface={{surface}} rules={{reply_rules}} chunk={{chunk_limit}} candidate={{candidate_rules}}");
+  const stallFile = join(dir, "stall.md");
+  writeFileSync(stallFile, "STALL-TEMPLATE user={{user_message}} root={{root_section}}");
   const candidateRulesFile = join(dir, "candidate-rules.md");
   if (candidateRules) writeFileSync(candidateRulesFile, candidateRules);
   const stateFile = join(dir, "relay-fake.json");
@@ -59,7 +61,7 @@ function harness({ spawn, replies = [], adapterOverrides = {}, state = emptyStat
   const logs = [];
   const core = createCore({
     adapter,
-    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, candidateRulesFile, cwd: dir, home: dir },
+    paths: { stateFile, logDir: join(dir, "logs"), sessionsDir, promptFile, stallFile, candidateRulesFile, cwd: dir, home: dir },
     deps: { spawn: spawn ?? (() => fakeChild({ stdout: "ok" })), log: (level, ...parts) => logs.push([level, ...parts].join(" ")), ...deps },
   });
   return { core, adapter, replies, logs, dir, stateFile, sessionsDir };
@@ -770,29 +772,57 @@ test("TC-ST1 stall notice names the session, key, pid and resume prompt", () => 
   assert.match(text, /上一轮似乎卡住了，继续，不要犯相同错误/);
 });
 
-test("TC-ST2 cancel command salvages the open run and answers in the thread", async () => {
-  const spawned = [];
-  const { core, replies, dir } = harness({ spawn: () => { const child = controlledChild(); spawned.push(child); return child; } });
+test("TC-ST2 a graceful terminate lets the plugin write the row and only posts the note", async () => {
+  let first = null;
+  const { core, replies, dir } = harness({
+    deps: { stallGraceMs: 5 },
+    spawn: () => {
+      const child = controlledChild();
+      child.kill = (signal) => {
+        if (signal === "SIGTERM") setTimeout(() => child.emit("close", null), 0);
+      };
+      first = first ?? child;
+      return child;
+    },
+  });
   await core.handle(inbound());
   const job = Object.values(core.state.jobs).find((item) => item.key === "th-abc");
   const ledger = join(dir, ".config/agent-hours/ledger");
   mkdirSync(ledger, { recursive: true });
   const sessionId = "fs-th-abc";
-  const open = { v: 1, kind: "open", id: `${sessionId}:${new Date(job.lease.startedAt).toISOString()}`, sessionId, sessionFile: "/tmp/x.jsonl", source: "relay", startedAt: new Date(job.lease.startedAt).toISOString() };
+  const startedAt = new Date(job.lease.startedAt).toISOString();
+  const open = { v: 1, kind: "open", id: `${sessionId}:${startedAt}`, sessionId, sessionFile: "/tmp/x.jsonl", source: "relay", startedAt };
   writeFileSync(join(ledger, `${sessionId}.jsonl`), `${JSON.stringify(open)}\n`);
   const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
   mkdirSync(cmdDir, { recursive: true });
   writeFileSync(join(cmdDir, "1-cancel.json"), JSON.stringify({ action: "cancel", key: "th-abc", at: new Date().toISOString() }));
   assert.equal(await core.drainCommands(), 1);
-  spawned[0].finish(null);
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 10));
   assert.match(replies.map((reply) => reply.text).join(""), /已终止/);
+  const rows = readFileSync(join(ledger, `${sessionId}.jsonl`), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(rows.filter((row) => row.salvaged).length, 0);
+  void first;
+});
+
+test("TC-ST2H a process that ignores SIGTERM is salvaged before SIGKILL", async () => {
+  const { core, dir } = harness({ deps: { stallGraceMs: 5 }, spawn: () => controlledChild() });
+  await core.handle(inbound());
+  const job = Object.values(core.state.jobs).find((item) => item.key === "th-abc");
+  const ledger = join(dir, ".config/agent-hours/ledger");
+  mkdirSync(ledger, { recursive: true });
+  const sessionId = "fs-th-abc";
+  const startedAt = new Date(job.lease.startedAt).toISOString();
+  writeFileSync(join(ledger, `${sessionId}.jsonl`), `${JSON.stringify({ v: 1, kind: "open", id: `${sessionId}:${startedAt}`, sessionId, sessionFile: "/tmp/x.jsonl", source: "relay", startedAt })}\n`);
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-cancel.json"), JSON.stringify({ action: "cancel", key: "th-abc", at: new Date().toISOString() }));
+  assert.equal(await core.drainCommands(), 1);
   const rows = readFileSync(join(ledger, `${sessionId}.jsonl`), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(rows.filter((row) => row.salvaged).length, 1);
 });
 
 test("TC-ST3 resume command restarts the session with the default prompt plus the extra text", async () => {
-  const { core, dir } = harness({ spawn: () => controlledChild() });
+  const { core, dir } = harness({ deps: { stallGraceMs: 5 }, spawn: () => controlledChild() });
   await core.handle(inbound());
   const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
   mkdirSync(cmdDir, { recursive: true });
@@ -803,4 +833,40 @@ test("TC-ST3 resume command restarts the session with the default prompt plus th
   assert.match(resumed.inbound.text, /上一轮似乎卡住了，继续，不要犯相同错误/);
   assert.match(resumed.inbound.text, /先换掉那条命令/);
   assert.equal(resumed.session, "fs-th-abc");
+});
+
+test("TC-ST4 a stall notice opens its own conversation with the stall template", async () => {
+  const prompts = [];
+  const { core } = harness({
+    spawn: () => fakeChild({ stdout: "ok" }),
+    adapterOverrides: {
+      buildWorker: ({ prompt }) => {
+        prompts.push(prompt);
+        return { bin: process.execPath, args: ["-e", "0"] };
+      },
+    },
+  });
+  const rootText = "⏸ 任务疑似卡住：12 分钟没有进展\n会话：fs-th-abc\nkey：th-abc";
+  await core.handle(inbound({ text: "杀掉", rootText, threadId: "t-1" }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.match(prompts[0], /STALL-TEMPLATE/);
+  assert.match(prompts[0], /杀掉/);
+  assert.match(prompts[0], /任务疑似卡住/);
+});
+
+test("TC-ST5 an ordinary first message still uses the thread template", async () => {
+  const prompts = [];
+  const { core } = harness({
+    spawn: () => fakeChild({ stdout: "ok" }),
+    adapterOverrides: {
+      buildWorker: ({ prompt }) => {
+        prompts.push(prompt);
+        return { bin: process.execPath, args: ["-e", "0"] };
+      },
+    },
+  });
+  await core.handle(inbound({ text: "看下这个 bug" }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.match(prompts[0], /conversation=th-abc/);
+  assert.doesNotMatch(prompts[0], /STALL-TEMPLATE/);
 });

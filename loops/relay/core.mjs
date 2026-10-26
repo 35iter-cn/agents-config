@@ -115,6 +115,7 @@ export function isRetained(nowMs, mtimeMs, retentionMs = RETENTION_MS) {
 }
 
 export const CANDIDATE_LINE = /^[ \t]*\[\d{8}-\d{4}-\d+\][ \t]+\S/m;
+export const STALL_LINE = /^[ \t]*⏸[ \t]*任务疑似卡住/m;
 
 export function createCore({ adapter, paths, deps = {} }) {
   const now = deps.now ?? (() => Date.now());
@@ -124,6 +125,7 @@ export function createCore({ adapter, paths, deps = {} }) {
   const log = deps.log ?? defaultLog;
   const jev = deps.jev ?? null;
   const usage = deps.usage ?? null;
+  const stallGraceMs = deps.stallGraceMs ?? 5_000;
   const loadedState = readJsonOr(paths.stateFile, null);
   const needsUpgrade = !loadedState?.meta?.schemaVersion;
   const state = upgradeState(loadedState ?? emptyState());
@@ -237,13 +239,18 @@ export function createCore({ adapter, paths, deps = {} }) {
       return false;
     }
     const { at } = lastActivity(job, job.session);
-    const record = salvage(job, at);
-    const minutes = record ? Math.round(record.durationMs / 60_000) : 0;
-    cancel(key, `已终止：这一轮卡住了。工时已按最后一次进展截止，计入 ${minutes} 分钟（到 ${localStamp(at)}）。`);
+    const startedAt = job.lease?.startedAt ?? Date.parse(job.createdAt);
+    const minutes = Math.max(0, Math.round((at - startedAt) / 60_000));
+    let salvaged = null;
+    const outcome = await terminate(key, `已终止：这一轮卡住了。工时按最后一次进展截止，计入 ${minutes} 分钟（到 ${localStamp(at)}）。`, {
+      onHardKill: () => {
+        salvaged = salvage(job, at);
+      },
+    });
     job.stallCancelled = true;
     job.updatedAt = isoNow();
     save();
-    appendLog({ event: "command", action, key, job: job.id, salvagedMs: record?.durationMs ?? null });
+    appendLog({ event: "command", action, key, job: job.id, outcome, salvagedMs: salvaged?.durationMs ?? null });
     if (action !== "resume") return true;
     const base = Object.values(state.jobs)
       .filter((item) => item.key === key && item.id !== job.id)
@@ -298,9 +305,9 @@ export function createCore({ adapter, paths, deps = {} }) {
     return handled;
   }
 
-  function promptTemplate() {
+  function promptTemplate(file = paths.promptFile) {
     try {
-      return readFileSync(paths.promptFile, "utf8");
+      return readFileSync(file, "utf8");
     } catch {
       return "{{user_message}}";
     }
@@ -331,6 +338,15 @@ export function createCore({ adapter, paths, deps = {} }) {
     return inbound;
   }
 
+  function templateFor(variant) {
+    if (variant !== "stall" || !paths.stallFile) return promptTemplate();
+    try {
+      return readFileSync(paths.stallFile, "utf8");
+    } catch {
+      return promptTemplate();
+    }
+  }
+
   function rootSectionText(root, message) {
     const value = String(root ?? "").trim();
     if (!value) return "";
@@ -348,13 +364,14 @@ export function createCore({ adapter, paths, deps = {} }) {
   }
 
   function regexVariant(root) {
+    if (STALL_LINE.test(root)) return "stall";
     return CANDIDATE_LINE.test(root) ? "candidate_rules" : "task_skeleton";
   }
 
   function renderPromptFor(inbound, entry, variant) {
     const root = entry.rootText || inbound.text;
     const rules = variant === "candidate_rules" ? candidateRulesText() : "";
-    return renderPrompt(promptTemplate(), {
+    return renderPrompt(templateFor(variant), {
       platform: adapter.name,
       surface: adapter.surface ?? "本会话",
       conversation: inbound.key,
@@ -375,8 +392,9 @@ export function createCore({ adapter, paths, deps = {} }) {
       state: root,
       instructions: "要给这条消息拼装 prompt 模板，应该选哪个变体？",
       criteria: {
+        stall: "在播报某个任务卡住了，等用户决定杀掉或继续",
         candidate_rules: "在播报新候选任务，带候选编号或任务链接",
-        task_skeleton: "用户在给指令、表态或提问，不是播报候选",
+        task_skeleton: "用户在给指令、表态或提问，既不是播报候选、也不是卡住通知",
       },
     }).then((verdict) => renderPromptFor(inbound, entry, verdict?.choice ?? regexVariant(root)));
   }
@@ -771,6 +789,50 @@ export function createCore({ adapter, paths, deps = {} }) {
 
     drainInbox();
     return "accepted";
+  }
+
+  function terminate(key, note, { graceMs = stallGraceMs, onHardKill } = {}) {
+    const child = children.get(key);
+    if (!child) return Promise.resolve("absent");
+    notes.set(key, note);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearInterval(watch);
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const watch = setInterval(() => {
+        if (!children.has(key)) finish("soft");
+      }, 250);
+      const timer = setTimeout(() => {
+        if (!children.has(key)) return finish("soft");
+        try {
+          onHardKill?.();
+        } catch (error) {
+          log("error", "salvage", String(error?.message ?? error));
+        }
+        try {
+          kill(-child.pid, "SIGKILL");
+        } catch {
+          try {
+            child.kill("SIGKILL");
+          } catch {}
+        }
+        finish("hard");
+      }, graceMs);
+      watch.unref?.();
+      timer.unref?.();
+      try {
+        kill(-child.pid, "SIGTERM");
+      } catch {
+        try {
+          child.kill("SIGTERM");
+        } catch {}
+      }
+    });
   }
 
   function cancel(key, note = "已按指令终止本轮") {

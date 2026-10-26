@@ -136,7 +136,7 @@ export function buildUnits(records, { gapMs = DEFAULTS.gapMinutes * 60_000 } = {
   const bySession = new Map();
   for (const record of records) {
     if (record.source === "automation") continue;
-    if (record.aborted) continue;
+    if (record.aborted && !record.stalled) continue;
     if (!String(record.userText ?? "").trim()) continue;
     const startedAt = Date.parse(record.startedAt);
     if (Number.isNaN(startedAt)) continue;

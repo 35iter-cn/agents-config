@@ -28,6 +28,7 @@ export const paths = {
   logDir: join(CFG_DIR, "logs"),
   sessionsDir: join(HOME, ".pi/agent/sessions", `--${join(HOME, "code").replace(/^\//, "").replace(/[/\\:]/g, "-")}--`),
   promptFile: join(ROOT, "prompts/thread.md"),
+  stallFile: join(ROOT, "prompts/stall.md"),
   candidateRulesFile: join(ROOT, "prompts/candidate-rules.md"),
 };
 

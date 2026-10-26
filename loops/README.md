@@ -37,6 +37,10 @@ relay.mjs stall feishu resume <key> "<补充要求>"  # 先终止入账，再用
 
 `relay` 每 15s 扫 `~/.config/taskradar/relay-<platform>.cmd/`，命令 10 分钟内有效。工时侧 `readLedger` 按 `id` 去重：salvaged 行先到、真正的闭合行后到，以真行为准。
 
+账本写入方只有一个：插件。`cancel`/`resume` 先发 SIGTERM 让进程自己收尾，插件在 `session_shutdown` 里按最后一次心跳裁时长并写 `stalled: true`；只有进程不响应、5 秒后被迫 SIGKILL 时，relay 才在杀之前调用 `packages/agent-ledger/src/salvage.mjs` 补同一行（同一个模块、同一个 id，属于兜底而非并行写入）。`hours.mjs` 计入 `stalled` 的 run，普通 `aborted`（用户 Esc）仍然不计。
+
+卡住通知的回复会开一条独立会话，走 `prompts/stall.md` 模板（`STALL_LINE` 命中即选这个变体），而不是普通的 `thread.md`。
+
 一个平台一个进程：`relay@feishu` / `relay@slack` / `relay@telegram`，由同一个 systemd 模板实例化。核里没有平台字面量，平台差异只在 `adapters/<platform>.mjs`。
 
 ## 安装

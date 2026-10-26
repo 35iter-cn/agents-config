@@ -883,3 +883,13 @@ test("TC-S1 a salvaged record wins once the real closing record arrives", () => 
   assert.deepEqual(dedupeRuns([salvaged]).map((record) => record.durationMs), [10 * MINUTE]);
   assert.equal(dedupeRuns([salvaged, real]).length, 1);
 });
+
+test("TC-S2 a stalled run counts, a plain aborted run does not", () => {
+  const base = { sessionId: "fs-th-demo", startedAt: "2026-10-26T07:10:00.000Z", durationMs: 10 * MINUTE, userText: "做事", output: "" };
+  const stalled = { ...base, id: "a", aborted: true, stalled: true };
+  const aborted = { ...base, id: "b", startedAt: "2026-10-26T08:10:00.000Z", aborted: true };
+  const units = buildUnits([stalled, aborted], { gapMs: 15 * MINUTE });
+  assert.equal(units.length, 1);
+  assert.equal(units[0].runs.length, 1);
+  assert.equal(units[0].runs[0].startedAt, Date.parse(stalled.startedAt));
+});

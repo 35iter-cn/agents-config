@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { appendLedger, buildOpenRecord, ledgerFilePath } from "./ledger.mjs";
 import { findOpenRun, buildSalvagedRecord, salvageStalledRun } from "./salvage.mjs";
-import { buildBeat, writeBeat, readBeat, clearBeat, beatIsStale, heartbeatFile } from "./heartbeat.mjs";
+import { buildBeat, writeBeat, readBeat, clearBeat, beatIsStale, heartbeatFile, trimToLastBeat } from "./heartbeat.mjs";
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agent-ledger-"));
@@ -71,4 +71,13 @@ test("beat staleness uses the ten minute window", () => {
   assert.equal(beatIsStale(beat, { now: 1_000_000 + 5 * 60_000 }), false);
   assert.equal(beatIsStale(beat, { now: 1_000_000 + 10 * 60_000 }), true);
   assert.equal(beatIsStale(null), true);
+});
+
+test("trimToLastBeat cuts the dead tail and leaves a countable record", () => {
+  const record = { startedAt: new Date(10 * 60_000).toISOString(), durationMs: 70 * 60_000, aborted: true };
+  const trimmed = trimToLastBeat(record, 20 * 60_000);
+  assert.equal(trimmed.durationMs, 10 * 60_000);
+  assert.equal(trimmed.stalled, true);
+  assert.equal(trimmed.aborted, true);
+  assert.equal(trimToLastBeat(record, Number.NaN), record);
 });

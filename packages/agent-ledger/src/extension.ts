@@ -1,11 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendLedger, buildOpenRecord, createRunTracker, defaultLedgerDir, detectSource } from "./ledger.mjs";
-import { startHeartbeat } from "./heartbeat.mjs";
+import { STALL_MS, startHeartbeat, trimToLastBeat } from "./heartbeat.mjs";
 
 export default function (pi: ExtensionAPI) {
   const tracker = createRunTracker();
   const ledgerDir = defaultLedgerDir();
-  let stopHeartbeat: (() => void) | null = null;
+  let heartbeat: ReturnType<typeof startHeartbeat> | null = null;
 
   const flush = (ctx: any, aborted: boolean) => {
     try {
@@ -14,12 +14,14 @@ export default function (pi: ExtensionAPI) {
         sessionFile: ctx.sessionManager.getSessionFile(),
         aborted,
       });
-      if (record) appendLedger(record, { dir: ledgerDir });
+      const lastBeatAt = heartbeat?.lastBeatAt() ?? null;
+      const trimmed = lastBeatAt && Date.now() - lastBeatAt >= STALL_MS ? trimToLastBeat(record, lastBeatAt) : record;
+      if (trimmed) appendLedger(trimmed, { dir: ledgerDir });
     } catch (error) {
       process.stderr.write(`[agent-ledger] ${(error as Error)?.message ?? error}\n`);
     }
-    stopHeartbeat?.();
-    stopHeartbeat = null;
+    heartbeat?.stop();
+    heartbeat = null;
   };
 
   pi.on("input", (event) => {
@@ -38,8 +40,8 @@ export default function (pi: ExtensionAPI) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       const source = detectSource({ env: process.env });
       appendLedger(buildOpenRecord({ sessionId, sessionFile, source, startedAtMs: track.startedAtMs }), { dir: ledgerDir });
-      stopHeartbeat?.();
-      stopHeartbeat = startHeartbeat({
+      heartbeat?.stop();
+      heartbeat = startHeartbeat({
         sessionId,
         sessionFile,
         source,
@@ -65,8 +67,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", (_event, ctx) => {
     if (tracker.isEmpty()) {
-      stopHeartbeat?.();
-      stopHeartbeat = null;
+      heartbeat?.stop();
+      heartbeat = null;
       return;
     }
     flush(ctx, false);

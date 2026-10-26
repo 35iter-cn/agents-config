@@ -66,18 +66,32 @@ export function beatIsStale(beat, { now = Date.now(), stallMs = STALL_MS } = {})
   return now - at >= stallMs;
 }
 
+export function trimToLastBeat(record, lastBeatAt) {
+  const endedAt = Number(lastBeatAt);
+  const startedAt = Date.parse(record?.startedAt ?? "");
+  if (!Number.isFinite(endedAt) || !Number.isFinite(startedAt)) return record;
+  return { ...record, durationMs: Math.max(0, endedAt - startedAt), stalled: true };
+}
+
 export function startHeartbeat({ sessionId, sessionFile, source, startedAtMs, snapshot, root, now = Date.now }) {
+  let lastBeatAt = startedAtMs;
   const tick = () => {
     try {
       const state = snapshot();
-      writeBeat(buildBeat({ sessionId, sessionFile, source, startedAtMs, userText: state.userText, output: state.output }, now()), { root });
+      lastBeatAt = now();
+      writeBeat(buildBeat({ sessionId, sessionFile, source, startedAtMs, userText: state.userText, output: state.output }, lastBeatAt), { root });
     } catch {}
   };
   tick();
   const timer = setInterval(tick, BEAT_INTERVAL_MS);
   timer.unref?.();
-  return () => {
-    clearInterval(timer);
-    clearBeat(sessionId, { root });
+  return {
+    stop() {
+      clearInterval(timer);
+      clearBeat(sessionId, { root });
+    },
+    lastBeatAt() {
+      return lastBeatAt;
+    },
   };
 }
