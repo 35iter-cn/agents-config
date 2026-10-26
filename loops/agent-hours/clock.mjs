@@ -188,14 +188,14 @@ export function buildPlan({ judged, now, cfg, synced, coverage = [] }) {
   const oversize = oversizeDays(targets, { tz: cfg.tz, warnHours: cfg.warnDailyHours });
   const blocked = new Set(oversize.map((item) => item.day));
   const usable = targets.filter((segment) => !blocked.has(dayKey(segment.start, cfg.tz)));
-  const { segments: open, covered } = subtractCoverage(usable, coverage);
   const from = now - cfg.backfillHours * HOUR_MS;
   const judgedKeys = new Set(judged.map((entry) => entry.unit.key));
-  const current = Object.values(synced ?? {})
-    .flat()
-    .filter((item) => item.end > from)
-    .filter((item) => (item.unitKeys ?? []).some((key) => judgedKeys.has(key)))
-    .map((item) => ({ id: item.id, start: item.start, end: item.end }));
+  const owned = (item) => (item.unitKeys ?? []).some((key) => judgedKeys.has(key));
+  const live = Object.values(synced ?? {}).flat().filter((item) => item.end > from);
+  const foreign = live.filter((item) => !owned(item)).map((item) => ({ start: item.start, end: item.end }));
+  const { segments: afterForeign } = subtractCoverage(usable, foreign);
+  const { segments: open, covered } = subtractCoverage(afterForeign, coverage);
+  const current = live.filter(owned).map((item) => ({ id: item.id, start: item.start, end: item.end }));
   return {
     targets: open,
     minutes: Math.round(usable.reduce((sum, segment) => sum + (segment.end - segment.start), 0) / MINUTE_MS),
