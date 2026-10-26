@@ -72,6 +72,26 @@ but if a company's mode has never been loaded, expect to land on `portal.` first
 Check the portal's account menu / page content. The target portal shows that user's data,
 not Hao's. Screenshots and further interaction continue in that tab.
 
+### 5. Before a screenshot counts as evidence
+
+**Contract:** every capture you keep shows no unexplained error UI — modal, toast or banner.
+An error on screen is data about the environment or the app; a capture carrying one is not
+evidence, it is an open question.
+
+When one appears, do not crop it, do not caption it away:
+
+1. **Name the failing request** instead of guessing. Wrap `fetch` via `--init-script` and
+   reload, or read `console` — e.g.
+   `FETCH_FAIL TypeError: Failed to fetch https://services.<stack>/hoa/owner-portal/hoa/me`.
+2. **Classify it**: a service missing from `md up --only`, wrong base URL / env, missing
+   seed data, or a real defect in what you are testing.
+3. **Handle it**: start the missing service (`md up --only …,hoa`), fix the addressing, or
+   file the defect with the request and response that prove it.
+4. **Retake the capture** and keep the image only once the page is clean.
+
+Done when: the final set of captures contains zero error UI, and every error you did see has
+a named cause in your report — fixed, or filed with evidence.
+
 ## Finding the right user
 
 - **Search** the tab's server-side search box (name / email / phone). It matches
@@ -95,6 +115,12 @@ not Hao's. Screenshots and further interaction continue in that tab.
 - **Do not test with a system token** (`user_type=MagicDoor`) against a business portal:
   the backend rejects it with 403. The shadow flow is role-correct by construction, which is
   exactly why it beats hand-minted tokens.
+- **A generic error dialog is a whole-app symptom, not your page's.** Owner portal maps any
+  transport-level fetch failure to `FailToFetchError` → one global "cannot connect" dialog
+  (`src/app.tsx` error map). On the local stack the usual cause is a service left out of
+  `md up --only`: without `hoa`, `/hoa/owner-portal/hoa/me` answers 404 with no CORS headers,
+  the browser reports `TypeError: Failed to fetch`, and every page shows the dialog
+  (verified 2026-10-26). Start the service and retake, per step 5.
 - **Local stack: a broken login is usually an addressing problem, not auth.** If the browser
   loads but sign-in fails, or the API 500s/401s, check the stack before the app — see the
   `magicdoor-local-debug` skill and the `md-cli-stack` knowledge set (proxy network
