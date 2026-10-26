@@ -18,6 +18,8 @@ import {
   readLedger,
   readOpenRuns,
   readRecords,
+  readDayTotal,
+  formatDelta,
   run,
   runHash,
   runState,
@@ -813,4 +815,60 @@ test("one unit is judged exactly once across the open to closed transition", asy
   assert.equal(again.calls.length, 0);
   const after = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
   assert.deepEqual(Object.values(after.units).map((entry) => entry.hash), Object.values(before.units).map((entry) => entry.hash));
+});
+
+test("readDayTotal reads today's total from the daily endpoint", async () => {
+  const now = Date.parse("2026-10-24T05:00:00.000Z");
+  const calls = [];
+  const client = {
+    async daily(args) {
+      calls.push(args);
+      return { ok: true, data: [{ date: "2026-10-24", totalDuration: 158 * MINUTE, periodCount: 8 }] };
+    },
+  };
+  const total = await readDayTotal(client, { now, tz: "Asia/Shanghai" });
+  assert.deepEqual(total, { minutes: 158, segments: 8 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].tz, "Asia/Shanghai");
+
+  const empty = { async daily() { return { ok: true, data: [{ date: "2026-10-23", totalDuration: 10 * MINUTE, periodCount: 1 }] }; } };
+  assert.deepEqual(await readDayTotal(empty, { now, tz: "Asia/Shanghai" }), { minutes: 0, segments: 0 });
+
+  const broken = { async daily() { return { ok: false, code: "server" }; } };
+  assert.equal(await readDayTotal(broken, { now, tz: "Asia/Shanghai" }), null);
+});
+
+test("the report leads with today's total and this round's delta", () => {
+  const now = Date.parse("2026-10-24T05:00:00.000Z");
+  const fresh = [{ unit: buildUnits([rec("2026-10-24T01:00:00.000Z", 5)])[0], result: { kind: "count" } }];
+  const report = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 2, patched: 5, deleted: 0 },
+    today: { before: { minutes: 122, segments: 6 }, after: { minutes: 158, segments: 8 } },
+  });
+  assert.match(report, /今日累计 2\.6 小时（8 段）/);
+  assert.match(report, /本轮 \+36 分钟/);
+  assert.doesNotMatch(report, /计入时长/);
+
+  const dropped = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 0, patched: 1, deleted: 0 },
+    today: { before: { minutes: 158, segments: 8 }, after: { minutes: 146, segments: 7 } },
+  });
+  assert.match(dropped, /本轮 −12 分钟/);
+
+  const flat = formatReport(fresh, {
+    tz: "Asia/Shanghai",
+    now,
+    clock: { minutes: 158, created: 0, patched: 0, deleted: 0 },
+    today: { before: { minutes: 158, segments: 8 }, after: { minutes: 158, segments: 8 } },
+  });
+  assert.match(flat, /本轮 ±0 分钟/);
+
+  const noClock = formatReport(fresh, { tz: "Asia/Shanghai", now });
+  assert.doesNotMatch(noClock, /今日累计/);
+  assert.match(noClock, /计入时长/);
+  assert.equal(formatDelta(-12), "−12 分钟");
 });

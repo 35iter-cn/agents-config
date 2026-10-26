@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createJev } from "../relay/jev.mjs";
-import { buildPlan, CLOCK_DEFAULTS, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
+import { buildPlan, CLOCK_DEFAULTS, dayKey, groupByDay, pruneMissing, pruneSynced } from "./clock.mjs";
 import { createClockClient, pickActivity } from "./clock-client.mjs";
 
 const HOME = process.env.HOME ?? homedir();
@@ -436,6 +436,12 @@ export function formatDuration(minutes) {
   return `${hours.toFixed(1).replace(/\.0$/, "")} 小时`;
 }
 
+export function formatDelta(minutes) {
+  const total = Math.round(Number(minutes) || 0);
+  if (total === 0) return "±0 分钟";
+  return total > 0 ? `+${formatDuration(total)}` : `−${formatDuration(-total)}`;
+}
+
 export function formatEntry(unit, result, { tz }) {
   const span = `${formatClock(unit.startedAt, tz)}–${formatClock(unit.lastEnd, tz)}`;
   const head = `${BADGE[result.kind]} ${span} · ${formatDuration((unit.lastEnd - unit.startedAt) / 60_000)} · ${unit.runs.length} 轮 · ${unit.sessionId.slice(0, 18)}`;
@@ -448,7 +454,7 @@ export function formatEntry(unit, result, { tz }) {
   return lines.join("\n");
 }
 
-export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {}) {
+export function formatReport(fresh, { tz, now = Date.now(), clock = null, today = null } = {}) {
   if (!fresh.length) return "";
   const counts = fresh.reduce((acc, item) => {
     acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
@@ -465,11 +471,15 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null } = {})
           : item.unit.runs;
         return sum + runs.reduce((inner, run) => inner + run.durationMs / 60_000, 0);
       }, 0);
-  const lines = [
-    `**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`,
-    `新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`,
-    `计入时长 ${formatDuration(countedMinutes)}`,
-  ];
+  const lines = [`**工时** ${formatDay(now, tz)} ${formatClock(now, tz)}`];
+  const after = today?.after ?? null;
+  const before = today?.before ?? null;
+  if (after) {
+    lines.push(`今日累计 ${formatDuration(after.minutes)}（${after.segments} 段）`);
+    if (before) lines.push(`本轮 ${formatDelta(after.minutes - before.minutes)}`);
+  }
+  lines.push(`新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`);
+  if (!after) lines.push(`计入时长 ${formatDuration(countedMinutes)}`);
   if (clock) {
     const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
     const bits = [`Clock 写 ${wrote} 段`];
@@ -684,7 +694,7 @@ export async function run({
 
   const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
 
-  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null });
+  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null, today: clockOutcome && clockOutcome.todayAfter ? { before: clockOutcome.todayBefore, after: clockOutcome.todayAfter } : null });
   let delivered = false;
   if (!dryRun) {
     writeDecisions(decisionsFile, pruneDecisions(cache, { now }));
@@ -726,6 +736,16 @@ export function humanCoverage(periods, { ownIds, activityId }) {
     .filter((item) => item.activityId === activityId && !ownIds.has(item.id))
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
     .map((item) => ({ start: item.start, end: item.end }));
+}
+
+export async function readDayTotal(client, { now, tz }) {
+  if (!client) return null;
+  const res = await client.daily({ start: now - 36 * 3_600_000, end: now + 3_600_000, tz });
+  if (!res?.ok) return null;
+  const rows = Array.isArray(res.data) ? res.data : (res.data?.days ?? []);
+  const today = rows.find((row) => row.date === dayKey(now, tz));
+  if (!today) return { minutes: 0, segments: 0 };
+  return { minutes: Math.round((today.totalDuration ?? 0) / 60_000), segments: today.periodCount ?? 0 };
 }
 
 export async function syncClock({
@@ -779,6 +799,7 @@ export async function syncClock({
   }
 
   const api = client ?? createClockClient({ baseUrl: clockCfg.baseUrl, apiKey });
+  const todayBefore = await readDayTotal(api, { now, tz: clockCfg.tz });
   let activityId = clockCfg.activityId;
   if (!activityId) {
     const listed = await api.activities();
@@ -875,7 +896,8 @@ export async function syncClock({
 
   appendEvent({ event: "clock_round", ...summary, created: created.length, patched: patched.length, deleted: deleted.length }, { dir: logDir, now, tz: cfg.tz });
   const line = `写 ${created.length + patched.length} 段 / 删 ${deleted.length}${plan.covered.length ? ` / 人工已记 ${plan.covered.length} 段（${formatDuration(plan.coveredMinutes)}）` : ""} / 冲突 ${summary.conflict}${summary.conflictMinutes ? `（${formatDuration(summary.conflictMinutes)}）` : ""}${summary.blocked.length ? ` / 超限跳过 ${summary.blocked.map((item) => item.day).join(",")}` : ""}`;
-  return { summary, line };
+  const todayAfter = await readDayTotal(api, { now, tz: clockCfg.tz });
+  return { summary, line, todayBefore, todayAfter };
 }
 
 async function fetchLivePeriods(api, { from, to }) {
