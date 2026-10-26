@@ -15,6 +15,12 @@
 - Main checkout means `git rev-parse --git-dir` equals `git rev-parse --git-common-dir`. Never run it in a linked worktree (`*.worktrees/`) or in a repo you are about to modify.
 - If `gco-latest` fails (dirty tree, network), report the reason in one line and continue on the existing checkout. Never `git stash`, `git reset`, or `git checkout -f` to clear the way.
 
+## Time Comparison
+
+- Before comparing or judging any two timestamps — API response, log line, database row, git commit, file name — convert both to the same zone first. Default to the local zone (`Asia/Taipei`, `+08:00`); keep a foreign zone only when the data itself is defined in it.
+- "Today" and "yesterday" are relative to that converted local time. Never read them off a log file name, a date inside a path, or a raw UTC date substring (`slice(0, 10)`).
+- When a claim rests on the comparison, name the converted local time in the answer.
+
 ## Iron Rules
 
 - No comments of any kind. Write self-explanatory code instead.
