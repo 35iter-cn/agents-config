@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createUsage } from "./usage.mjs";
 
-function harness({ judge, write } = {}) {
+function harness({ judge, write, now } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "relay-usage-"));
   const logs = [];
   const usage = createUsage({
     dir,
     judge: judge ?? { judgeChoice: async () => ({ choice: "magic_work", confidence: 0.93, fallback: null }) },
     log: (level, tag, text) => logs.push([level, tag, text].join(" ")),
-    now: () => Date.parse("2026-10-23T04:00:00.000Z"),
+    now: now ?? (() => Date.parse("2026-10-23T04:00:00.000Z")),
     write,
   });
   return { usage, dir, logs };
@@ -142,4 +142,12 @@ test("TC-U11 done runs record the judge verdict", async () => {
   const { seen, record } = await runWith({ text: "早上好" });
   assert.equal(seen.length, 1);
   assert.equal(record.magic, "magic_work");
+});
+
+test("TC-U12 log file is named by the Asia/Shanghai day, not the UTC day", async () => {
+  const { usage, dir } = harness({ now: () => Date.parse("2026-10-25T17:30:00.000Z") });
+  await usage.recordRun({ job, platform: "feishu", key: "k", session: "s", answer: "ok", status: "done", startedAt: Date.parse("2026-10-25T17:29:00.000Z") });
+  const lines = readFileSync(join(dir, "2026-10-26.jsonl"), "utf8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).ts, "2026-10-25T17:30:00.000Z");
 });

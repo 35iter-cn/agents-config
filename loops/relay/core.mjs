@@ -12,6 +12,9 @@ const RETENTION_MS = 72 * 3_600_000;
 const SEEN_RETENTION_MS = 72 * 3_600_000;
 const MAX_SEEN = 5000;
 
+const LOCAL_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+const localDay = (ms) => LOCAL_DAY.format(new Date(ms));
+
 export function defaultLog(level, ...parts) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, msg: parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p))).join(" ") });
   process.stderr.write(`${line}\n`);
@@ -121,7 +124,8 @@ export function createCore({ adapter, paths, deps = {} }) {
 
   function appendLog(record) {
     try {
-      appendFileSync(join(logDir, `${isoNow().slice(0, 10)}.jsonl`), `${JSON.stringify({ ts: isoNow(), ...record })}\n`);
+      const ts = isoNow();
+      appendFileSync(join(logDir, `${localDay(now())}.jsonl`), `${JSON.stringify({ ts, ...record })}\n`);
     } catch {}
   }
 

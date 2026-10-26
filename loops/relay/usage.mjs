@@ -5,6 +5,9 @@ const ANSWER_HEAD_CHARS = 200;
 const MAGIC_ANSWER_CHARS = 400;
 const MAGIC_CONTEXT_CHARS = 1_500;
 
+const LOCAL_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+const localDay = (ms) => LOCAL_DAY.format(new Date(ms));
+
 const MAGIC_ASSETS = `- 代码仓库：backend、company-portal、owner-portal、tenant-portal、magic-manager、frontend-common-module、agents-config（内部 agent 配置与工具）
 - 用户口语简称：op repo / op env（owner-portal 那套）、MD STACK / md（本地全套环境）
 - 内部系统：relay 与 intake loop（飞书 / Slack / Telegram 桥）、Frontend Tasks 看板、MagicDoor 工时表、Jev 判断层、topicbox
@@ -81,7 +84,7 @@ export function createUsage(deps = {}) {
       };
       if (status === "done") record.answerHead = output.slice(0, ANSWER_HEAD_CHARS);
       mkdirSync(dir, { recursive: true });
-      write(join(dir, `${record.ts.slice(0, 10)}.jsonl`), `${JSON.stringify(record)}\n`);
+      write(join(dir, `${localDay(endedAt)}.jsonl`), `${JSON.stringify(record)}\n`);
       return record;
     } catch (error) {
       log("warn", "usage", String(error?.message ?? error));
