@@ -436,3 +436,24 @@ test("TC-C18 gapCapMinutes zero records only run time and gapMode merge restores
   assert.equal(merged.targets[0].end - merged.targets[0].start, 10 * MIN);
   assert.equal(merged.targets[1].end - merged.targets[1].start, 7 * MIN);
 });
+
+test("TC-C19 segments owned by other units occupy their interval instead of being re-created", () => {
+  const now = at("2026-10-24T12:00:00Z");
+  const unit = { key: "s1:2026-10-24T09:00:00.000Z", runs: [{ startedAt: now - 3 * HOUR, endedAt: now - 3 * HOUR + 40 * MIN }] };
+  const judged = [{ unit, result: { kind: "count" } }];
+  const synced = {
+    "2026-10-24": [
+      { id: "foreign", start: now - 3 * HOUR, end: now - 3 * HOUR + 25 * MIN, unitKeys: ["s9:gone"] },
+      { id: "own", start: now - 3 * HOUR + 28 * MIN, end: now - 3 * HOUR + 40 * MIN, unitKeys: [unit.key] },
+    ],
+  };
+  const plan = buildPlan({ judged, now, cfg: { ...CLOCK_DEFAULTS, tz: TZ }, synced });
+  for (const segment of plan.targets) {
+    const clash = synced["2026-10-24"].filter((item) => item.id === "foreign" && item.start < segment.end && item.end > segment.start);
+    assert.equal(clash.length, 0);
+  }
+  assert.equal(plan.create.length, 0);
+  assert.deepEqual(plan.patch.map((item) => item.id), ["own"]);
+  assert.equal(plan.patch[0].start, now - 3 * HOUR + 25 * MIN);
+  assert.deepEqual(plan.remove, []);
+});
