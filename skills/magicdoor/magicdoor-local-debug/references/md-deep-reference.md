@@ -64,14 +64,32 @@ keeping its databases, `md nuke <name>` destroys one.
   from the checkout carrying that migration. Still broken → `md reset --data`.
 - Stack disagrees with reality: `md prune --apply`.
 - Login fails with no obvious error: `mkcert -install`, then reload.
-- Hosted service unreachable from the stack (502, stub logs socat
-  "Connection refused" to `172.x.0.1`) while `curl localhost:<port>` works:
-  the `Stack` profile binds `http://localhost:<port>` (loopback only) but the
-  stub connects via `host.docker.internal`. Set
-  `ASPNETCORE_URLS=http://*:<port>` inside the profile's
-  `environmentVariables` (a profile value overrides the same variable on the
-  command line). `md status` shows "listening" either way; check `ss -tln`
-  for `*:port` vs `127.0.0.1:port`.
+- Hosted service unreachable from the stack: the `Stack` profile binds
+  `http://localhost:<port>` (loopback only). The stub connects via
+  `host.docker.internal`, so anything that calls the service from inside the
+  stack fails — sometimes as a 502 or a socat "Connection refused" in the
+  stub log, sometimes as `HttpIOException: The response ended prematurely` in
+  the caller, which then cascades into a 422 on a completely unrelated
+  endpoint (a login page that drops back to `/login` is a typical disguise).
+  Check first, right after `md host`:
+
+  ```bash
+  ss -tlnp | grep :<port>     # want *:<port>; 127.0.0.1:<port> is the bug
+  ```
+
+  Fix by starting the service on all interfaces:
+
+  ```bash
+  dotnet run --project Apps/<Service>/<Service>.App --launch-profile Stack \
+      --urls http://0.0.0.0:<port>
+  ```
+
+  If `--urls` does not take (a profile value overrides the same variable on
+  the command line), set `ASPNETCORE_URLS=http://*:<port>` inside the
+  profile's `environmentVariables` instead. `md status` reports "listening"
+  either way — only `ss -tln` distinguishes them.
+  Finish with `md unhost <service>`; leaving it hosted keeps breaking every
+  in-stack S2S call to that service.
 - Two hosted services started from the CLI at once collide in the shared
   `.artifacts/bin` output (MSB3248). Start them sequentially.
 - Swagger is group-split: `GET /openapi/<Group>.json` (Maintenance:

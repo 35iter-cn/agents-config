@@ -173,6 +173,13 @@ per service), so the default is to keep them:
   already targets the stack and its localhost port is whitelisted.
 - **Editing `~/.magicdoor/src`** (the managed CLI checkout — replaced on
   update). Clone and point `MD_CLI_SOURCE` at the clone instead.
+- **Hosting a backend service on loopback** — after
+  `md host <service> --stack hao-local-debug`, the process you start must
+  listen on `*:<port>`, never `127.0.0.1:<port>`: every S2S call from another
+  container dies, and the symptom shows up somewhere unrelated (a login that
+  falls back to `/login`, a 422 from a third service). Check
+  `ss -tlnp | grep :<port>` before believing anything else; details and the
+  fix in `references/md-deep-reference.md`.
 
 ## References
 
