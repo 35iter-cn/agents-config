@@ -784,3 +784,33 @@ test("a stale open run older than four hours no longer blocks judgment", async (
   const outcome = await run({ now, dir, judge, notifyImpl: () => ({ ok: true }) });
   assert.equal(outcome.units, 1);
 });
+
+test("one unit is judged exactly once across the open to closed transition", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "agent-hours-open-"));
+  mkdirSync(path.join(dir, "ledger"), { recursive: true });
+  const startedAt = "2026-10-24T01:58:00.000Z";
+  const ledgerFile = path.join(dir, "ledger", "s1.jsonl");
+  writeFileSync(ledgerFile, `${JSON.stringify(openRec(startedAt))}\n`);
+
+  const whileRunning = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const skipped = await run({ now: Date.parse("2026-10-24T02:00:00.000Z"), dir, judge: whileRunning, notifyImpl: () => ({ ok: true }) });
+  assert.equal(skipped.units, 0);
+  assert.equal(whileRunning.calls.length, 0);
+
+  appendFileSync(ledgerFile, `${JSON.stringify(rec(startedAt, 5))}\n`);
+  const settled = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const first = await run({ now: Date.parse("2026-10-24T02:18:00.000Z"), dir, judge: settled, notifyImpl: () => ({ ok: true }) });
+  assert.equal(first.units, 1);
+  assert.equal(settled.calls.length, 1);
+  const unitEvents = readEvents(dir).filter((event) => event.event === "unit");
+  assert.equal(unitEvents.length, 1);
+  assert.equal(unitEvents[0].span[1], "2026-10-24T02:03:00.000Z");
+
+  const before = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  const again = fakeJudge([]);
+  const second = await run({ now: Date.parse("2026-10-24T02:30:00.000Z"), dir, judge: again, notifyImpl: () => ({ ok: true }) });
+  assert.equal(second.fresh.length, 0);
+  assert.equal(again.calls.length, 0);
+  const after = JSON.parse(readFileSync(path.join(dir, "decisions.json"), "utf8"));
+  assert.deepEqual(Object.values(after.units).map((entry) => entry.hash), Object.values(before.units).map((entry) => entry.hash));
+});
