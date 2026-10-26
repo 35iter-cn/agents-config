@@ -18,6 +18,7 @@ import {
   readLedger,
   readOpenRuns,
   readRecords,
+  dedupeRuns,
   readDayTotal,
   formatDelta,
   run,
@@ -871,4 +872,14 @@ test("the report leads with today's total and this round's delta", () => {
   assert.doesNotMatch(noClock, /今日累计/);
   assert.match(noClock, /计入时长/);
   assert.equal(formatDelta(-12), "−12 分钟");
+});
+
+test("TC-S1 a salvaged record wins once the real closing record arrives", () => {
+  const sameId = "fs-th-demo:2026-10-26T07:10:00.000Z";
+  const salvaged = { id: sameId, sessionId: "fs-th-demo", startedAt: "2026-10-26T07:10:00.000Z", durationMs: 10 * MINUTE, userText: "做事", aborted: false, salvaged: true };
+  const real = { ...salvaged, durationMs: 70 * MINUTE, salvaged: undefined };
+  assert.deepEqual(dedupeRuns([salvaged, real]).map((record) => record.durationMs), [70 * MINUTE]);
+  assert.deepEqual(dedupeRuns([real, salvaged]).map((record) => record.durationMs), [70 * MINUTE]);
+  assert.deepEqual(dedupeRuns([salvaged]).map((record) => record.durationMs), [10 * MINUTE]);
+  assert.equal(dedupeRuns([salvaged, real]).length, 1);
 });

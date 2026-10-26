@@ -1,9 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendLedger, buildOpenRecord, createRunTracker, defaultLedgerDir, detectSource } from "./ledger.mjs";
+import { startHeartbeat } from "./heartbeat.mjs";
 
 export default function (pi: ExtensionAPI) {
   const tracker = createRunTracker();
   const ledgerDir = defaultLedgerDir();
+  let stopHeartbeat: (() => void) | null = null;
 
   const flush = (ctx: any, aborted: boolean) => {
     try {
@@ -16,6 +18,8 @@ export default function (pi: ExtensionAPI) {
     } catch (error) {
       process.stderr.write(`[agent-ledger] ${(error as Error)?.message ?? error}\n`);
     }
+    stopHeartbeat?.();
+    stopHeartbeat = null;
   };
 
   pi.on("input", (event) => {
@@ -30,15 +34,18 @@ export default function (pi: ExtensionAPI) {
     try {
       const track = tracker.start();
       if (!track) return;
-      appendLedger(
-        buildOpenRecord({
-          sessionId: ctx.sessionManager.getSessionId(),
-          sessionFile: ctx.sessionManager.getSessionFile(),
-          source: detectSource(),
-          startedAtMs: track.startedAtMs,
-        }),
-        { dir: ledgerDir },
-      );
+      const sessionId = ctx.sessionManager.getSessionId();
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      const source = detectSource({ env: process.env });
+      appendLedger(buildOpenRecord({ sessionId, sessionFile, source, startedAtMs: track.startedAtMs }), { dir: ledgerDir });
+      stopHeartbeat?.();
+      stopHeartbeat = startHeartbeat({
+        sessionId,
+        sessionFile,
+        source,
+        startedAtMs: track.startedAtMs,
+        snapshot: () => tracker.snapshot() ?? { userText: "", output: "" },
+      });
     } catch {
       return;
     }
@@ -57,7 +64,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
-    if (tracker.isEmpty()) return;
+    if (tracker.isEmpty()) {
+      stopHeartbeat?.();
+      stopHeartbeat = null;
+      return;
+    }
     flush(ctx, false);
   });
 }

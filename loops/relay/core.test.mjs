@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
-import { createCore, emptyState, renderPrompt, writeJsonAtomic, pruneOldFiles, readJsonOr } from "./core.mjs";
+import { createCore, emptyState, renderPrompt, stallNotice, writeJsonAtomic, pruneOldFiles, readJsonOr } from "./core.mjs";
 import { hashOf } from "./jobs.mjs";
 
 function controlledChild() {
@@ -754,4 +754,53 @@ test("TC-41 no attachments keeps the argv shape unchanged", async () => {
   const args = captured[0];
   assert.equal(args.filter((arg) => arg.startsWith("@")).length, 0);
   assert.equal(args[args.length - 2], "--");
+});
+
+test("TC-ST1 stall notice names the session, key, pid and resume prompt", () => {
+  const text = stallNotice({
+    job: { key: "th-abc", lease: { pid: 4242 } },
+    session: "fs-th-abc",
+    silenceMs: 12 * 60_000,
+    local: "2026-10-26 15:20:12",
+  });
+  assert.match(text, /12 分钟没有进展/);
+  assert.match(text, /fs-th-abc/);
+  assert.match(text, /key：th-abc/);
+  assert.match(text, /pid：4242/);
+  assert.match(text, /上一轮似乎卡住了，继续，不要犯相同错误/);
+});
+
+test("TC-ST2 cancel command salvages the open run and answers in the thread", async () => {
+  const spawned = [];
+  const { core, replies, dir } = harness({ spawn: () => { const child = controlledChild(); spawned.push(child); return child; } });
+  await core.handle(inbound());
+  const job = Object.values(core.state.jobs).find((item) => item.key === "th-abc");
+  const ledger = join(dir, ".config/agent-hours/ledger");
+  mkdirSync(ledger, { recursive: true });
+  const sessionId = "fs-th-abc";
+  const open = { v: 1, kind: "open", id: `${sessionId}:${new Date(job.lease.startedAt).toISOString()}`, sessionId, sessionFile: "/tmp/x.jsonl", source: "relay", startedAt: new Date(job.lease.startedAt).toISOString() };
+  writeFileSync(join(ledger, `${sessionId}.jsonl`), `${JSON.stringify(open)}\n`);
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-cancel.json"), JSON.stringify({ action: "cancel", key: "th-abc", at: new Date().toISOString() }));
+  assert.equal(await core.drainCommands(), 1);
+  spawned[0].finish(null);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.match(replies.map((reply) => reply.text).join(""), /已终止/);
+  const rows = readFileSync(join(ledger, `${sessionId}.jsonl`), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(rows.filter((row) => row.salvaged).length, 1);
+});
+
+test("TC-ST3 resume command restarts the session with the default prompt plus the extra text", async () => {
+  const { core, dir } = harness({ spawn: () => controlledChild() });
+  await core.handle(inbound());
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-resume.json"), JSON.stringify({ action: "resume", key: "th-abc", text: "先换掉那条命令", at: new Date().toISOString() }));
+  assert.equal(await core.drainCommands(), 1);
+  const resumed = Object.values(core.state.jobs).find((job) => job.auto === "stall-resume");
+  assert.ok(resumed, "a resumed job is queued");
+  assert.match(resumed.inbound.text, /上一轮似乎卡住了，继续，不要犯相同错误/);
+  assert.match(resumed.inbound.text, /先换掉那条命令/);
+  assert.equal(resumed.session, "fs-th-abc");
 });

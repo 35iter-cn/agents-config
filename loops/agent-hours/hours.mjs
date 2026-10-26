@@ -95,7 +95,26 @@ export function readRecords(dir = LEDGER_DIR, { now = Date.now(), windowMs = LED
 }
 
 export function readLedger(dir = LEDGER_DIR, options = {}) {
-  return readRecords(dir, options).filter((record) => !record.kind);
+  return dedupeRuns(readRecords(dir, options).filter((record) => !record.kind));
+}
+
+export function dedupeRuns(records) {
+  const byId = new Map();
+  for (const record of records) {
+    const key = record.id ?? `${record.sessionId}:${record.startedAt}`;
+    const current = byId.get(key);
+    if (!current) {
+      byId.set(key, record);
+      continue;
+    }
+    byId.set(key, preferRun(current, record));
+  }
+  return [...byId.values()];
+}
+
+function preferRun(a, b) {
+  if (Boolean(a.salvaged) !== Boolean(b.salvaged)) return a.salvaged ? b : a;
+  return (Number(b.durationMs) || 0) > (Number(a.durationMs) || 0) ? b : a;
 }
 
 export const OPEN_STALE_MS = 4 * 60 * 60 * 1000;

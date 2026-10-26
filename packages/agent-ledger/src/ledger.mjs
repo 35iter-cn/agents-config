@@ -134,6 +134,15 @@ export function createRunTracker({ now = () => Date.now(), env = () => process.e
     isEmpty() {
       return !active || active.startedAtMs === null;
     },
+
+    snapshot() {
+      if (!active || active.startedAtMs === null) return null;
+      return {
+        startedAtMs: active.startedAtMs,
+        userText: active.texts.join("\n---\n"),
+        output: active.output,
+      };
+    },
   };
 }
 

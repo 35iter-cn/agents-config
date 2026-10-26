@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCore, defaultLog } from "./core.mjs";
+import { commandDirFor, createCore, defaultLog } from "./core.mjs";
 import { createJev } from "./jev.mjs";
 import { createUsage } from "./usage.mjs";
 import { defineAdapter, isPlatform, PLATFORMS } from "./platform.mjs";
@@ -32,7 +32,9 @@ export const paths = {
 };
 
 export function usage() {
-  process.stderr.write("usage: relay.mjs <feishu|slack|telegram> | relay.mjs notify <feishu|telegram> <text>\n");
+  process.stderr.write(
+    "usage: relay.mjs <feishu|slack|telegram> | relay.mjs notify <feishu|telegram> <text> | relay.mjs stall <platform> <cancel|resume> <key> [text]\n",
+  );
   process.exit(2);
 }
 
@@ -56,6 +58,21 @@ async function main() {
     await adapter.notify(text);
     return;
   }
+  if (mode === "stall") {
+    const [platform, action, key, ...words] = rest;
+    if (!isPlatform(platform)) usage();
+    if (action !== "cancel" && action !== "resume") usage();
+    if (!key) usage();
+    const dir = commandDirFor(paths.configDir, platform);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${Date.now()}-${process.pid}.json`);
+    const command = { action, key, text: words.join(" ").trim(), at: new Date().toISOString() };
+    writeFileSync(file, `${JSON.stringify(command)}\n`, { encoding: "utf8", mode: 0o600 });
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && existsSync(file)) await new Promise((resolve) => setTimeout(resolve, 500));
+    process.stdout.write(existsSync(file) ? "pending\n" : "delivered\n");
+    return;
+  }
   if (!isPlatform(mode)) usage();
 
   const adapter = await loadAdapter(mode);
@@ -68,6 +85,11 @@ async function main() {
   const core = createCore({ adapter, paths: platformPaths, deps: { jev, usage: usageRecorder } });
   core.pruneLogs();
   setInterval(() => core.pruneLogs(), 86_400_000).unref();
+  core.drainCommands().catch((error) => defaultLog("error", "command", String(error?.stack ?? error)));
+  setInterval(
+    () => core.drainCommands().catch((error) => defaultLog("error", "command", String(error?.stack ?? error))),
+    15_000,
+  ).unref();
   await adapter.start({
     onMessage: (inbound) => core.handle(inbound),
     onReady: () => {

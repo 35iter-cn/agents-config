@@ -13,7 +13,7 @@ loops/
 │   ├── prompts/scan.md      每轮固定 prompt
 │   └── systemd/intake.{service,timer}
 └── relay/                   常驻型（三平台共用一个核）
-    ├── relay.mjs            唯一入口：relay.mjs <feishu|slack|telegram> | notify <platform> <text>
+    ├── relay.mjs            唯一入口：relay.mjs <platform> | notify <platform> <text> | stall <platform> <cancel|resume> <key> [text]
     ├── core.mjs             会话生命周期：白名单、去重、队列、worker、超时、分块、状态、日志
     ├── chunk.mjs            分块纯函数
     ├── platform.mjs         适配器契约（见 core 的 adapter 形状）
@@ -25,6 +25,17 @@ loops/
 ```
 
 `agent-hours/` 是工时链路的判定段（spec 06）：每 30 分钟读一次 Pi 插件写的账本，按 session 划单元、交 Jev 判 `count / skip / review`，有新增就推一条飞书。状态在 `~/.config/agent-hours/`（`decisions.json` 缓存、`review/` 队列、`digest/` 每日一行），Clock 写入尚未接。
+
+## 卡住的任务
+
+`agent-ledger` 在每轮进行中把心跳写到 `~/.config/agent-hours/heartbeat/<sessionId>.json`（30s 覆写，settle 时删除；大小恒定，不追加账本）。`relay` 每 60s 查一次在跑 job 的心跳，连续 10 分钟没更新就发一条飞书卡片（与 intake 候选通知同形状，@ 本人，独立在新 thread）。回复该卡片会起一条新会话，root 就是通知正文（含 session / key / pid）；在新会话里执行：
+
+```bash
+relay.mjs stall feishu cancel <key>              # 终止，并按最后一次心跳落一条闭合账目（salvaged）
+relay.mjs stall feishu resume <key> "<补充要求>"  # 先终止入账，再用默认提示词 + 补充重启原 session
+```
+
+`relay` 每 15s 扫 `~/.config/taskradar/relay-<platform>.cmd/`，命令 10 分钟内有效。工时侧 `readLedger` 按 `id` 去重：salvaged 行先到、真正的闭合行后到，以真行为准。
 
 一个平台一个进程：`relay@feishu` / `relay@slack` / `relay@telegram`，由同一个 systemd 模板实例化。核里没有平台字面量，平台差异只在 `adapters/<platform>.mjs`。
 

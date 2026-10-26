@@ -4,9 +4,14 @@ import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { chunkText } from "./chunk.mjs";
 import { createJob, ctxOf, hashOf, isFinished, nextAction, planParts, readProcStartTicks } from "./jobs.mjs";
+import { readBeat } from "../../packages/agent-ledger/src/heartbeat.mjs";
+import { salvageStalledRun } from "../../packages/agent-ledger/src/salvage.mjs";
 
 const HEARTBEAT_MS = 15_000;
 const LEASE_TTL_MS = 45_000;
+const STALL_MS = 10 * 60_000;
+const STALL_CHECK_MS = 60_000;
+const RESUME_PROMPT = "上一轮似乎卡住了，继续，不要犯相同错误";
 
 const RETENTION_MS = 72 * 3_600_000;
 const SEEN_RETENTION_MS = 72 * 3_600_000;
@@ -86,6 +91,25 @@ export function sessionIdFor(prefix, key) {
   return `${prefix}${key}`;
 }
 
+export function commandDirFor(configDir, platform) {
+  return join(configDir, `relay-${platform}.cmd`);
+}
+
+export function stallNotice({ job, session, silenceMs, local, platform = "feishu" }) {
+  const minutes = Math.max(1, Math.round(silenceMs / 60_000));
+  return [
+    `⏸ 任务疑似卡住：${minutes} 分钟没有进展`,
+    `会话：${session}`,
+    `key：${job.key}`,
+    `pid：${job.lease?.pid ?? "-"}`,
+    `最后进展：${local}`,
+    "",
+    "回复本消息会新开一个会话处理它：说「杀掉」只终止并按已用时间入账；说「继续 <补充要求>」则先终止入账，再用这条会话重启。",
+    `执行命令：relay.mjs stall ${platform} cancel|resume ${job.key}`,
+    `重启默认提示词：「${RESUME_PROMPT}」`,
+  ].join("\n");
+}
+
 export function isRetained(nowMs, mtimeMs, retentionMs = RETENTION_MS) {
   return nowMs - mtimeMs <= retentionMs;
 }
@@ -109,6 +133,10 @@ export function createCore({ adapter, paths, deps = {} }) {
   const running = new Set();
   const logDir = join(paths.logDir, adapter.name);
   mkdirSync(logDir, { recursive: true });
+  const agentHoursDir = process.env.AGENT_HOURS_DIR || join(paths.home, ".config", "agent-hours");
+  const ledgerDir = join(agentHoursDir, "ledger");
+  const commandDir = commandDirFor(paths.configDir ?? join(paths.home, ".config", "taskradar"), adapter.name);
+  mkdirSync(commandDir, { recursive: true });
 
   const isoNow = () => new Date(now()).toISOString();
 
@@ -135,6 +163,139 @@ export function createCore({ adapter, paths, deps = {} }) {
     } catch {
       return false;
     }
+  }
+
+  function sessionFileFor(session) {
+    try {
+      const name = readdirSync(paths.sessionsDir).find((file) => file.endsWith(`_${session}.jsonl`));
+      return name ? join(paths.sessionsDir, name) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function localStamp(ms) {
+    return new Date(ms).toLocaleString("sv-SE", { timeZone: "Asia/Shanghai" });
+  }
+
+  function lastActivity(job, session) {
+    const beat = readBeat(session, { root: agentHoursDir });
+    const beatAt = Date.parse(beat?.at ?? "");
+    if (Number.isFinite(beatAt)) return { at: beatAt, beat };
+    const file = sessionFileFor(session);
+    if (file) {
+      try {
+        return { at: statSync(file).mtimeMs, beat: null };
+      } catch {}
+    }
+    return { at: job.lease?.startedAt ?? Date.parse(job.createdAt), beat: null };
+  }
+
+  async function checkStall(job) {
+    if (job.status !== "running" || job.stallNotifiedAt) return;
+    const { at, beat } = lastActivity(job, job.session);
+    const silenceMs = now() - at;
+    if (!Number.isFinite(silenceMs) || silenceMs < STALL_MS) return;
+    job.stallNotifiedAt = isoNow();
+    job.stallSilenceMs = silenceMs;
+    job.lastActivityAt = new Date(at).toISOString();
+    if (beat?.at) job.stallBeatAt = beat.at;
+    save();
+    appendLog({ event: "stall", job: job.id, key: job.key, session: job.session, silenceMs, pid: job.lease?.pid ?? null });
+    const text = stallNotice({ job, session: job.session, silenceMs, local: localStamp(at), platform: adapter.name });
+    try {
+      if (typeof adapter.notify === "function") await adapter.notify(text);
+      else await adapter.reply(ctxOf(job), text);
+    } catch (error) {
+      log("error", "stall-notify", String(error?.message ?? error));
+    }
+  }
+
+  function salvage(job, at) {
+    const { beat } = lastActivity(job, job.session);
+    try {
+      return salvageStalledRun({
+        sessionId: job.session,
+        endedAtMs: at,
+        userText: beat?.userText ?? job.inbound?.text ?? "",
+        output: beat?.output ?? "",
+        dir: ledgerDir,
+      });
+    } catch (error) {
+      log("error", "salvage", String(error?.message ?? error));
+      return null;
+    }
+  }
+
+  async function applyCommand({ action, key, text } = {}) {
+    if (!action || !key) return false;
+    const activeId = state.convs[key]?.activeJob;
+    const job = activeId ? state.jobs[activeId] : null;
+    const live = job && children.has(key) ? job : null;
+    if (!live) {
+      appendLog({ event: "command", action, key, job: null, note: "not-running" });
+      return false;
+    }
+    const { at } = lastActivity(job, job.session);
+    const record = salvage(job, at);
+    const minutes = record ? Math.round(record.durationMs / 60_000) : 0;
+    cancel(key, `已终止：这一轮卡住了。工时已按最后一次进展截止，计入 ${minutes} 分钟（到 ${localStamp(at)}）。`);
+    job.stallCancelled = true;
+    job.updatedAt = isoNow();
+    save();
+    appendLog({ event: "command", action, key, job: job.id, salvagedMs: record?.durationMs ?? null });
+    if (action !== "resume") return true;
+    const base = Object.values(state.jobs)
+      .filter((item) => item.key === key && item.id !== job.id)
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] ?? job;
+    const prompt = [RESUME_PROMPT, String(text ?? "").trim()].filter(Boolean).join("\n\n");
+    const inbound = {
+      ...base.inbound,
+      key,
+      session: base.session,
+      dedupeId: `stall-resume-${now()}`,
+      text: prompt,
+      rootText: base.inbound?.rootText ?? prompt,
+    };
+    const next = createJob(state, inbound, isoNow);
+    next.auto = "stall-resume";
+    state.jobs[next.id] = next;
+    state.inbox.push(next.id);
+    state.seen[inbound.dedupeId] = next.id;
+    save();
+    appendLog({ event: "resume", job: next.id, from: job.id, key });
+    drainInbox();
+    return true;
+  }
+
+  async function drainCommands() {
+    let names = [];
+    try {
+      names = readdirSync(commandDir).filter((name) => name.endsWith(".json")).sort();
+    } catch {
+      return 0;
+    }
+    let handled = 0;
+    for (const name of names) {
+      const file = join(commandDir, name);
+      let command = null;
+      try {
+        command = JSON.parse(readFileSync(file, "utf8"));
+      } catch {}
+      try {
+        unlinkSync(file);
+      } catch {}
+      if (!command) continue;
+      const writtenAt = Date.parse(command.at ?? "");
+      if (!Number.isFinite(writtenAt) || now() - writtenAt > 10 * 60_000) continue;
+      try {
+        await applyCommand(command);
+        handled += 1;
+      } catch (error) {
+        log("error", "command", String(error?.message ?? error));
+      }
+    }
+    return handled;
   }
 
   function promptTemplate() {
@@ -258,6 +419,10 @@ export function createCore({ adapter, paths, deps = {} }) {
         save();
       }, HEARTBEAT_MS);
       heartbeat.unref?.();
+      const stallTimer = setInterval(() => {
+        checkStall(job).catch((error) => log("warn", "stall", String(error?.message ?? error)));
+      }, STALL_CHECK_MS);
+      stallTimer.unref?.();
       const timer = setTimeout(() => {
         killed = true;
         try {
@@ -277,6 +442,7 @@ export function createCore({ adapter, paths, deps = {} }) {
       child.on("close", async (code) => {
         clearTimeout(timer);
         clearInterval(heartbeat);
+        clearInterval(stallTimer);
         children.delete(inbound.key);
         appendLog({ event: "done", job: job.id, key: inbound.key, session: entry.session, exit: code, killed, elapsedMs: now() - started });
         const body = stdout.trim();
@@ -627,6 +793,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     handle,
     recover,
     cancel,
+    drainCommands,
     stats: () => ({ running: running.size, pending: state.inbox.length }),
     pruneLogs: () => pruneOldFiles(logDir, RETENTION_MS, now()),
     log,
