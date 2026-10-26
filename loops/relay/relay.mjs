@@ -33,9 +33,11 @@ export const paths = {
   stallActionsFile: join(ROOT, "prompts/stall-actions.md"),
 };
 
+export const STALL_ACTIONS = new Set(["cancel", "restart"]);
+
 export function usage() {
   process.stderr.write(
-    "usage: relay.mjs <feishu|slack|telegram> | relay.mjs notify <feishu|telegram> <text> | relay.mjs stall <platform> <cancel|resume> <key> [text]\n",
+    "usage: relay.mjs <feishu|slack|telegram> | relay.mjs notify <feishu|telegram> <text> | relay.mjs stall <platform> <cancel|restart> <key> [text]\n",
   );
   process.exit(2);
 }
@@ -63,12 +65,13 @@ async function main() {
   if (mode === "stall") {
     const [platform, action, key, ...words] = rest;
     if (!isPlatform(platform)) usage();
-    if (action !== "cancel" && action !== "resume") usage();
+    const wire = STALL_ACTIONS.has(action) ? action : null;
+    if (!wire) usage();
     if (!key) usage();
     const dir = commandDirFor(paths.configDir, platform);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${Date.now()}-${process.pid}.json`);
-    const command = { action, key, text: words.join(" ").trim(), at: new Date().toISOString() };
+    const command = { action: wire, key, text: words.join(" ").trim(), at: new Date().toISOString() };
     writeFileSync(file, `${JSON.stringify(command)}\n`, { encoding: "utf8", mode: 0o600 });
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline && existsSync(file)) await new Promise((resolve) => setTimeout(resolve, 500));

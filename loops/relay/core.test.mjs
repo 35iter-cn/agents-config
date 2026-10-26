@@ -760,7 +760,7 @@ test("TC-41 no attachments keeps the argv shape unchanged", async () => {
   assert.equal(args[args.length - 2], "--");
 });
 
-test("TC-ST1 stall notice names the session, key, pid and resume prompt", () => {
+test("TC-ST1 stall notice names the session, key, pid and restart prompt", () => {
   const text = stallNotice({
     job: { key: "th-abc", lease: { pid: 4242 } },
     session: "fs-th-abc",
@@ -772,6 +772,8 @@ test("TC-ST1 stall notice names the session, key, pid and resume prompt", () => 
   assert.match(text, /key：th-abc/);
   assert.match(text, /pid：4242/);
   assert.match(text, /上一轮似乎卡住了，继续，不要犯相同错误/);
+  assert.match(text, /cancel\|restart/);
+  assert.doesNotMatch(text, /cancel\|resume/);
 });
 
 test("TC-ST2 a graceful terminate lets the plugin write the row and only posts the note", async () => {
@@ -823,18 +825,28 @@ test("TC-ST2H a process that ignores SIGTERM is salvaged before SIGKILL", async 
   assert.equal(rows.filter((row) => row.salvaged).length, 1);
 });
 
-test("TC-ST3 resume command restarts the session with the default prompt plus the extra text", async () => {
+test("TC-ST3 restart command kills the stuck run and dispatches the session again with the default prompt plus the extra text", async () => {
   const { core, dir } = harness({ deps: { stallGraceMs: 5 }, spawn: () => controlledChild() });
   await core.handle(inbound());
   const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
   mkdirSync(cmdDir, { recursive: true });
-  writeFileSync(join(cmdDir, "1-resume.json"), JSON.stringify({ action: "resume", key: "th-abc", text: "先换掉那条命令", at: new Date().toISOString() }));
+  writeFileSync(join(cmdDir, "1-restart.json"), JSON.stringify({ action: "restart", key: "th-abc", text: "先换掉那条命令", at: new Date().toISOString() }));
   assert.equal(await core.drainCommands(), 1);
-  const resumed = Object.values(core.state.jobs).find((job) => job.auto === "stall-resume");
-  assert.ok(resumed, "a resumed job is queued");
-  assert.match(resumed.inbound.text, /上一轮似乎卡住了，继续，不要犯相同错误/);
-  assert.match(resumed.inbound.text, /先换掉那条命令/);
-  assert.equal(resumed.session, "fs-th-abc");
+  const restarted = Object.values(core.state.jobs).find((job) => job.auto === "stall-restart");
+  assert.ok(restarted, "a restarted job is queued");
+  assert.match(restarted.inbound.text, /上一轮似乎卡住了，继续，不要犯相同错误/);
+  assert.match(restarted.inbound.text, /先换掉那条命令/);
+  assert.equal(restarted.session, "fs-th-abc");
+});
+
+test("TC-ST3R a resume command is no longer an action the relay understands", async () => {
+  const { core, dir } = harness({ deps: { stallGraceMs: 5 }, spawn: () => controlledChild() });
+  await core.handle(inbound());
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-resume.json"), JSON.stringify({ action: "resume", key: "th-abc", at: new Date().toISOString() }));
+  assert.equal(await core.drainCommands(), 1);
+  assert.equal(Object.values(core.state.jobs).filter((job) => job.auto === "stall-restart").length, 0);
 });
 
 test("TC-ST4 a stall notice opens its own conversation with the stall template", async () => {

@@ -11,7 +11,7 @@ const HEARTBEAT_MS = 15_000;
 const LEASE_TTL_MS = 45_000;
 const STALL_MS = 10 * 60_000;
 const STALL_CHECK_MS = 60_000;
-const RESUME_PROMPT = "上一轮似乎卡住了，继续，不要犯相同错误";
+const RESTART_PROMPT = "上一轮似乎卡住了，继续，不要犯相同错误";
 
 const RETENTION_MS = 72 * 3_600_000;
 const SEEN_RETENTION_MS = 72 * 3_600_000;
@@ -105,8 +105,8 @@ export function stallNotice({ job, session, silenceMs, local, platform = "feishu
     `最后进展：${local}`,
     "",
     "回复本消息会新开一个会话处理它：说「杀掉」只终止并按已用时间入账；说「继续 <补充要求>」则先终止入账，再用这条会话重启。",
-    `执行命令：relay.mjs stall ${platform} cancel|resume ${job.key}`,
-    `重启默认提示词：「${RESUME_PROMPT}」`,
+    `执行命令：relay.mjs stall ${platform} cancel|restart ${job.key}`,
+    `重启默认提示词：「${RESTART_PROMPT}」`,
   ].join("\n");
 }
 
@@ -251,26 +251,26 @@ export function createCore({ adapter, paths, deps = {} }) {
     job.updatedAt = isoNow();
     save();
     appendLog({ event: "command", action, key, job: job.id, outcome, salvagedMs: salvaged?.durationMs ?? null });
-    if (action !== "resume") return true;
+    if (action !== "restart") return true;
     const base = Object.values(state.jobs)
       .filter((item) => item.key === key && item.id !== job.id)
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] ?? job;
-    const prompt = [RESUME_PROMPT, String(text ?? "").trim()].filter(Boolean).join("\n\n");
+    const prompt = [RESTART_PROMPT, String(text ?? "").trim()].filter(Boolean).join("\n\n");
     const inbound = {
       ...base.inbound,
       key,
       session: base.session,
-      dedupeId: `stall-resume-${now()}`,
+      dedupeId: `stall-restart-${now()}`,
       text: prompt,
       rootText: base.inbound?.rootText ?? prompt,
     };
     const next = createJob(state, inbound, isoNow);
-    next.auto = "stall-resume";
+    next.auto = "stall-restart";
     state.jobs[next.id] = next;
     state.inbox.push(next.id);
     state.seen[inbound.dedupeId] = next.id;
     save();
-    appendLog({ event: "resume", job: next.id, from: job.id, key });
+    appendLog({ event: "restart", job: next.id, from: job.id, key });
     drainInbox();
     return true;
   }

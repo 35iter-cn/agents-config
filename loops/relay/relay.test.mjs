@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readEnv } from "./relay.mjs";
+import { readEnv, STALL_ACTIONS } from "./relay.mjs";
 
 test("readEnv parses KEY=value lines and ignores comments", () => {
   const dir = mkdtempSync(join(tmpdir(), "relay-env-"));
@@ -14,4 +14,9 @@ test("readEnv parses KEY=value lines and ignores comments", () => {
 
 test("readEnv returns an empty object for a missing file", () => {
   assert.deepEqual(readEnv("/nonexistent/feishu.env"), {});
+});
+
+test("the stall command accepts only cancel and restart", () => {
+  assert.deepEqual([...STALL_ACTIONS], ["cancel", "restart"]);
+  assert.equal(STALL_ACTIONS.has("resume"), false);
 });

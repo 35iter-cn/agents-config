@@ -13,14 +13,14 @@ loops/
 │   ├── prompts/scan.md      每轮固定 prompt
 │   └── systemd/intake.{service,timer}
 └── relay/                   常驻型（三平台共用一个核）
-    ├── relay.mjs            唯一入口：relay.mjs <platform> | notify <platform> <text> | stall <platform> <cancel|resume> <key> [text]
+    ├── relay.mjs            唯一入口：relay.mjs <platform> | notify <platform> <text> | stall <platform> <cancel|restart> <key> [text]
     ├── core.mjs             会话生命周期：白名单、去重、队列、worker、超时、分块、状态、日志
     ├── chunk.mjs            分块纯函数
     ├── platform.mjs         适配器契约（见 core 的 adapter 形状）
     ├── adapters/<platform>.mjs
     ├── prompts/thread.md    会话首轮模板（占位符由 core 渲染）
     ├── prompts/stall.md     卡住通知会话的模板
-    ├── prompts/stall-actions.md  cancel / resume 能力描述，两个模板共用
+    ├── prompts/stall-actions.md  cancel / restart 能力描述，两个模板共用
     ├── migrate-state.mjs    旧 looper 状态 → relay-<platform>.json
     ├── systemd/relay@.service
     └── *.test.mjs           与源码同目录的用例（`node --test`）
@@ -34,16 +34,18 @@ loops/
 
 ```bash
 relay.mjs stall feishu cancel <key>              # 终止，并按最后一次心跳落一条闭合账目（salvaged）
-relay.mjs stall feishu resume <key> "<补充要求>"  # 先终止入账，再用默认提示词 + 补充重启原 session
+relay.mjs stall feishu restart <key> "<补充要求>"  # 先终止入账，再用默认提示词 + 补充重启原 session
 ```
+
+`restart` 自带终止步骤，不是「只恢复」；名字直接从动词本身读。
 
 `relay` 每 15s 扫 `~/.config/taskradar/relay-<platform>.cmd/`，命令 10 分钟内有效。工时侧 `readLedger` 按 `id` 去重：salvaged 行先到、真正的闭合行后到，以真行为准。
 
-账本写入方只有一个：插件。`cancel`/`resume` 先发 SIGTERM 让进程自己收尾，插件在 `session_shutdown` 里按最后一次心跳裁时长并写 `stalled: true`；只有进程不响应、5 秒后被迫 SIGKILL 时，relay 才在杀之前调用 `packages/agent-ledger/src/salvage.mjs` 补同一行（同一个模块、同一个 id，属于兜底而非并行写入）。`hours.mjs` 计入 `stalled` 的 run，普通 `aborted`（用户 Esc）仍然不计。
+账本写入方只有一个：插件。`cancel`/`restart` 先发 SIGTERM 让进程自己收尾，插件在 `session_shutdown` 里按最后一次心跳裁时长并写 `stalled: true`；只有进程不响应、5 秒后被迫 SIGKILL 时，relay 才在杀之前调用 `packages/agent-ledger/src/salvage.mjs` 补同一行（同一个模块、同一个 id，属于兜底而非并行写入）。`hours.mjs` 计入 `stalled` 的 run，普通 `aborted`（用户 Esc）仍然不计。
 
 卡住通知的回复会开一条独立会话，走 `prompts/stall.md` 模板（`STALL_LINE` 命中即选这个变体），而不是普通的 `thread.md`。
 
-cancel / resume 的能力描述只写一份，在 `prompts/stall-actions.md`；`thread.md`（默认每个会话都带）和 `stall.md` 都用 `{{stall_actions}}` 引用它，改一处两边同时生效。
+cancel / restart 的能力描述只写一份，在 `prompts/stall-actions.md`；`thread.md`（默认每个会话都带）和 `stall.md` 都用 `{{stall_actions}}` 引用它，改一处两边同时生效。
 
 一个平台一个进程：`relay@feishu` / `relay@slack` / `relay@telegram`，由同一个 systemd 模板实例化。核里没有平台字面量，平台差异只在 `adapters/<platform>.mjs`。
 
