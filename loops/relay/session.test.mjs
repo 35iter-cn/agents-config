@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { assertHead, declaredTimeoutMs, readSessionSignal, TAIL_BYTES, TAIL_MAX_BYTES, TOOL_GRACE_MS } from "./session.mjs";
 
@@ -166,4 +167,12 @@ test("TC-S10 helper values", () => {
   assert.equal(TAIL_BYTES, 256 * 1024);
   assert.equal(TAIL_MAX_BYTES, 2 * 1024 * 1024);
   assert.equal(TOOL_GRACE_MS, 60_000);
+});
+
+test("TC-S11 real pi entries stay parseable", () => {
+  const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "pi-bash-turn.jsonl");
+  const signal = readSessionSignal(file);
+  assert.equal(signal.ok, true);
+  assert.equal(signal.open, null);
+  assert.equal(signal.lastEntryAt, 1793023042408);
 });
