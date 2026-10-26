@@ -4,12 +4,14 @@ import { spawn as spawnProcess } from "node:child_process";
 import { join } from "node:path";
 import { chunkText } from "./chunk.mjs";
 import { createJob, ctxOf, hashOf, isFinished, nextAction, planParts, readProcStartTicks } from "./jobs.mjs";
+import { declaredTimeoutMs, readSessionSignal, TOOL_GRACE_MS } from "./session.mjs";
 import { readBeat } from "../../packages/agent-ledger/src/heartbeat.mjs";
 import { salvageStalledRun } from "../../packages/agent-ledger/src/salvage.mjs";
 
 const HEARTBEAT_MS = 15_000;
 const LEASE_TTL_MS = 45_000;
-const STALL_MS = 10 * 60_000;
+const STALL_MS = Number(process.env.RELAY_STALL_MS ?? 10 * 60_000);
+const TOOL_STALL_MS = Number(process.env.RELAY_TOOL_STALL_MS ?? 10 * 60_000);
 const STALL_CHECK_MS = 60_000;
 const RESTART_PROMPT = "上一轮似乎卡住了，继续，不要犯相同错误";
 
@@ -95,10 +97,11 @@ export function commandDirFor(configDir, platform) {
   return join(configDir, `relay-${platform}.cmd`);
 }
 
-export function stallNotice({ job, session, silenceMs, local, platform = "feishu" }) {
+export function stallNotice({ job, session, silenceMs, local, platform = "feishu", reason = "silent", tool = null }) {
   const minutes = Math.max(1, Math.round(silenceMs / 60_000));
+  const head = reason === "tool" && tool ? [`⏸ 任务疑似卡住：工具 ${tool.name} 已运行 ${minutes} 分钟没有返回`, `工具：${tool.name} · ${tool.head}`] : [`⏸ 任务疑似卡住：${minutes} 分钟没有进展`];
   return [
-    `⏸ 任务疑似卡住：${minutes} 分钟没有进展`,
+    ...head,
     `会话：${session}`,
     `key：${job.key}`,
     `pid：${job.lease?.pid ?? "-"}`,
@@ -180,7 +183,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     return new Date(ms).toLocaleString("sv-SE", { timeZone: "Asia/Shanghai" });
   }
 
-  function lastActivity(job, session) {
+  function legacyActivity(job, session) {
     const beat = readBeat(session, { root: agentHoursDir });
     const beatAt = Date.parse(beat?.at ?? "");
     if (Number.isFinite(beatAt)) return { at: beatAt, beat };
@@ -193,18 +196,34 @@ export function createCore({ adapter, paths, deps = {} }) {
     return { at: job.lease?.startedAt ?? Date.parse(job.createdAt), beat: null };
   }
 
+  function progress(job, session) {
+    const signal = readSessionSignal(sessionFileFor(session));
+    if (signal.ok) {
+      if (signal.open && Number.isFinite(signal.open.startedAt)) return { kind: "tool", at: signal.open.startedAt, tool: signal.open };
+      if (Number.isFinite(signal.lastEntryAt)) return { kind: "entry", at: signal.lastEntryAt, tool: null };
+    }
+    return { kind: "fallback", at: legacyActivity(job, session).at, tool: null };
+  }
+
   async function checkStall(job) {
     if (job.status !== "running" || job.stallNotifiedAt) return;
-    const { at, beat } = lastActivity(job, job.session);
+    const { kind, at, tool } = progress(job, job.session);
     const silenceMs = now() - at;
-    if (!Number.isFinite(silenceMs) || silenceMs < STALL_MS) return;
+    if (!Number.isFinite(silenceMs)) return;
+    const declared = declaredTimeoutMs(tool);
+    if (declared !== null && silenceMs < declared + TOOL_GRACE_MS) return;
+    if (silenceMs < (kind === "tool" ? TOOL_STALL_MS : STALL_MS)) return;
     job.stallNotifiedAt = isoNow();
     job.stallSilenceMs = silenceMs;
+    job.stallReason = kind === "tool" ? "tool" : kind === "entry" ? "silent" : "fallback";
+    job.stallTool = tool?.name ?? null;
+    job.stallRunningMs = kind === "tool" ? silenceMs : null;
     job.lastActivityAt = new Date(at).toISOString();
+    const beat = readBeat(job.session, { root: agentHoursDir });
     if (beat?.at) job.stallBeatAt = beat.at;
     save();
-    appendLog({ event: "stall", job: job.id, key: job.key, session: job.session, silenceMs, pid: job.lease?.pid ?? null });
-    const text = stallNotice({ job, session: job.session, silenceMs, local: localStamp(at), platform: adapter.name });
+    appendLog({ event: "stall", job: job.id, key: job.key, session: job.session, silenceMs, reason: job.stallReason, tool: job.stallTool, callIds: tool?.callIds ?? [], runningMs: job.stallRunningMs, pid: job.lease?.pid ?? null });
+    const text = stallNotice({ job, session: job.session, silenceMs, local: localStamp(at), platform: adapter.name, reason: job.stallReason, tool });
     try {
       if (typeof adapter.notify === "function") await adapter.notify(text);
       else await adapter.reply(ctxOf(job), text);
@@ -214,7 +233,7 @@ export function createCore({ adapter, paths, deps = {} }) {
   }
 
   function salvage(job, at) {
-    const { beat } = lastActivity(job, job.session);
+    const { beat } = legacyActivity(job, job.session);
     try {
       return salvageStalledRun({
         sessionId: job.session,
@@ -238,7 +257,8 @@ export function createCore({ adapter, paths, deps = {} }) {
       appendLog({ event: "command", action, key, job: null, note: "not-running" });
       return false;
     }
-    const { at } = lastActivity(job, job.session);
+    const notifiedAt = Date.parse(job.stallNotifiedAt ?? "");
+    const at = Number.isFinite(notifiedAt) ? notifiedAt : now();
     const startedAt = job.lease?.startedAt ?? Date.parse(job.createdAt);
     const minutes = Math.max(0, Math.round((at - startedAt) / 60_000));
     let salvaged = null;
@@ -866,6 +886,7 @@ export function createCore({ adapter, paths, deps = {} }) {
     recover,
     cancel,
     drainCommands,
+    checkStall,
     stats: () => ({ running: running.size, pending: state.inbox.length }),
     pruneLogs: () => pruneOldFiles(logDir, RETENTION_MS, now()),
     log,

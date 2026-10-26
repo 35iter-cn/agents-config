@@ -30,7 +30,13 @@ loops/
 
 ## 卡住的任务
 
-`agent-ledger` 在每轮进行中把心跳写到 `~/.config/agent-hours/heartbeat/<sessionId>.json`（30s 覆写，settle 时删除；大小恒定，不追加账本）。`relay` 每 60s 查一次在跑 job 的心跳，连续 10 分钟没更新就发一条飞书卡片（与 intake 候选通知同形状，@ 本人，独立在新 thread）。回复该卡片会起一条新会话，root 就是通知正文（含 session / key / pid）；在新会话里执行：
+判据是 worker 自己的 session jsonl（`~/.pi/agent/sessions/--<cwd>--/<ts>_<session>.jsonl`）。`relay` 每 60s 对每个在跑 job 尾读一次（默认 256KB，窗口里找不到 assistant entry 才翻倍，上限 2MB，从不整份读），三种形态：
+
+- 最后一条 `role=assistant` 的 entry 带未闭合 `toolCall`（其后没有对应的 `toolResult`）→ 以该 entry 的 `timestamp` 为该工具起点，超过 `RELAY_TOOL_STALL_MS`（默认 10 分钟）通知；bash 自带 `arguments.timeout` 时等到 `timeout + 60s` 才通知，避免把显式长命令当卡住。
+- 没有未闭合工具 → 以最后一条 `type=message` entry 的时刻算静默，超过 `RELAY_STALL_MS`（默认 10 分钟）通知。`custom` / `custom_message` 这类扩展 entry 不算进展：它们常在工具返回后才补写，算进来会掩盖真实静默。
+- session 文件读不到 → 退回旧链：`agent-ledger` 心跳 `at` → session 文件 mtime → job 租约起点。
+
+通知只发一次、不自动终止。`agent-ledger` 的心跳（`~/.config/agent-hours/heartbeat/<sessionId>.json`，30s 覆写、settle 时删除）只作兜底：它由定时器无条件推进，工具卡住时永远新鲜，不能当判据。回复该卡片会起一条新会话，root 就是通知正文（含 session / key / pid）；在新会话里执行：
 
 ```bash
 relay.mjs stall feishu cancel <key>              # 终止，并按最后一次心跳落一条闭合账目（salvaged）
@@ -38,6 +44,8 @@ relay.mjs stall feishu restart <key> "<补充要求>"  # 先终止入账，再�
 ```
 
 `restart` 自带终止步骤，不是「只恢复」；名字直接从动词本身读。
+
+终止时的入账裁点：该 job 通知过就裁到 `stallNotifiedAt`，从没通知过才用 `now()`；回复正文里的分钟数与 `salvageStalledRun` 的 `endedAtMs` 同源，卡死空转的那段不计入工时。
 
 `relay` 每 15s 扫 `~/.config/taskradar/relay-<platform>.cmd/`，命令 10 分钟内有效。工时侧 `readLedger` 按 `id` 去重：salvaged 行先到、真正的闭合行后到，以真行为准。
 

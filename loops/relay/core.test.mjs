@@ -886,3 +886,149 @@ test("TC-ST5 an ordinary first message still uses the thread template", async ()
   assert.doesNotMatch(prompts[0], /STALL-TEMPLATE/);
   assert.match(prompts[0], /ACTIONS platform=fake key=<key>/);
 });
+
+const isoAt = (ms) => new Date(ms).toISOString();
+
+function sessionAssistant(at, calls) {
+  return {
+    type: "message",
+    id: `a-${at}`,
+    parentId: null,
+    timestamp: isoAt(at),
+    message: {
+      role: "assistant",
+      content: calls.map((call) => ({ type: "toolCall", id: call.id, name: call.name ?? "bash", arguments: call.arguments ?? { command: "ls" } })),
+      provider: "fake",
+      model: "fake",
+      usage: { input: 1, output: 1 },
+      stopReason: "toolUse",
+      timestamp: at,
+    },
+  };
+}
+
+function sessionToolResult(at, callId, text = "ok") {
+  return {
+    type: "message",
+    id: `t-${callId}-${at}`,
+    parentId: null,
+    timestamp: isoAt(at),
+    message: { role: "toolResult", toolCallId: callId, toolName: "bash", content: [{ type: "text", text }], isError: false, timestamp: at },
+  };
+}
+
+function writeSession(sessionsDir, session, entries) {
+  writeFileSync(join(sessionsDir, `2026-01-01T00-00-00_${session}.jsonl`), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+}
+
+async function runningJob(harnessArgs = {}) {
+  const clock = { now: Date.parse("2026-10-26T13:00:00.000Z") };
+  const built = harness({
+    sessions: ["fs-th-abc"],
+    deps: { now: () => clock.now, stallGraceMs: 5 },
+    spawn: () => controlledChild(),
+    ...harnessArgs,
+  });
+  await built.core.handle(inbound());
+  const job = Object.values(built.core.state.jobs).find((item) => item.key === "th-abc");
+  return { ...built, clock, job };
+}
+
+test("TC-ST6 an unclosed tool call over the threshold notifies once with the tool evidence", async () => {
+  const { core, replies, sessionsDir, clock, job } = await runningJob();
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(clock.now - 12 * 60_000, [{ id: "c1", arguments: { command: "dotnet build\n--no-restore" } }])]);
+  await core.checkStall(job);
+  const text = replies.map((reply) => reply.text).join("\n");
+  assert.match(text, /工具 bash 已运行 12 分钟没有返回/);
+  assert.match(text, /工具：bash · dotnet build/);
+  assert.equal(job.stallReason, "tool");
+  assert.equal(job.stallTool, "bash");
+  assert.equal(job.stallRunningMs, 12 * 60_000);
+});
+
+test("TC-ST7 a declared bash timeout defers the notice until timeout plus grace", async () => {
+  const { core, replies, sessionsDir, clock, job } = await runningJob();
+  const startedAt = clock.now - 12 * 60_000;
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(startedAt, [{ id: "c1", arguments: { command: "md up", timeout: 900 } }])]);
+  await core.checkStall(job);
+  assert.equal(replies.length, 0);
+  clock.now = startedAt + 959_000;
+  await core.checkStall(job);
+  assert.equal(replies.length, 0);
+  clock.now = startedAt + 960_000;
+  await core.checkStall(job);
+  assert.equal(replies.length, 1);
+});
+
+test("TC-ST8 a silent session notifies even when the heartbeat is fresh", async () => {
+  const { core, replies, dir, sessionsDir, clock, job } = await runningJob();
+  const finishedAt = clock.now - 11 * 60_000;
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(finishedAt - 1000, [{ id: "c1" }]), sessionToolResult(finishedAt, "c1")]);
+  const beatDir = join(dir, ".config/agent-hours/heartbeat");
+  mkdirSync(beatDir, { recursive: true });
+  writeFileSync(join(beatDir, "fs-th-abc.json"), JSON.stringify({ at: isoAt(clock.now), userText: "hi", output: "" }));
+  await core.checkStall(job);
+  assert.equal(replies.length, 1);
+  assert.equal(job.stallReason, "silent");
+  assert.match(replies[0].text, /11 分钟没有进展/);
+  assert.doesNotMatch(replies[0].text, /工具：/);
+});
+
+test("TC-ST9 a missing session file falls back to the lease start", async () => {
+  const { core, replies, clock, job } = await runningJob({ sessions: [] });
+  clock.now = job.lease.startedAt + 11 * 60_000;
+  await core.checkStall(job);
+  assert.equal(replies.length, 1);
+  assert.equal(job.stallReason, "fallback");
+});
+
+test("TC-ST10 a job that already notified is not notified again", async () => {
+  const { core, replies, sessionsDir, clock, job } = await runningJob();
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(clock.now - 20 * 60_000, [{ id: "c1" }])]);
+  await core.checkStall(job);
+  await core.checkStall(job);
+  clock.now += 30 * 60_000;
+  await core.checkStall(job);
+  assert.equal(replies.length, 1);
+});
+
+test("TC-ST11 parallel calls report only the unclosed ones", async () => {
+  const { core, replies, sessionsDir, clock, job } = await runningJob();
+  const startedAt = clock.now - 15 * 60_000;
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(startedAt, [{ id: "c1" }, { id: "c2" }, { id: "c3" }]), sessionToolResult(startedAt + 1000, "c2")]);
+  await core.checkStall(job);
+  assert.equal(replies.length, 1);
+  assert.deepEqual(job.stallTool, "bash");
+  assert.equal(job.stallReason, "tool");
+});
+
+test("TC-ST12 cancelling a notified job books the run up to the notice time", async () => {
+  const { core, dir, sessionsDir, clock, job } = await runningJob();
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(clock.now - 30 * 60_000, [{ id: "c1" }])]);
+  await core.checkStall(job);
+  const notifiedAt = Date.parse(job.stallNotifiedAt);
+  const ledger = join(dir, ".config/agent-hours/ledger");
+  mkdirSync(ledger, { recursive: true });
+  writeFileSync(join(ledger, "fs-th-abc.jsonl"), `${JSON.stringify({ v: 1, kind: "open", id: `fs-th-abc:${isoAt(job.lease.startedAt)}`, sessionId: "fs-th-abc", sessionFile: "/tmp/x.jsonl", source: "relay", startedAt: isoAt(job.lease.startedAt) })}\n`);
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-cancel.json"), JSON.stringify({ action: "cancel", key: "th-abc", at: isoAt(clock.now) }));
+  await core.drainCommands();
+  const rows = readFileSync(join(ledger, "fs-th-abc.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const closed = rows.find((row) => row.salvaged);
+  assert.equal(closed.durationMs, notifiedAt - job.lease.startedAt);
+});
+
+test("TC-ST13 a restarted job starts with empty stall fields", async () => {
+  const { core, dir, sessionsDir, clock, job } = await runningJob();
+  writeSession(sessionsDir, "fs-th-abc", [sessionAssistant(clock.now - 30 * 60_000, [{ id: "c1" }])]);
+  await core.checkStall(job);
+  const cmdDir = join(dir, ".config/taskradar/relay-fake.cmd");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "1-restart.json"), JSON.stringify({ action: "restart", key: "th-abc", at: isoAt(clock.now) }));
+  await core.drainCommands();
+  const restarted = Object.values(core.state.jobs).find((item) => item.auto === "stall-restart");
+  assert.equal(restarted.stallNotifiedAt, undefined);
+  assert.equal(restarted.stallReason, undefined);
+  assert.equal(restarted.stallRunningMs, undefined);
+});
