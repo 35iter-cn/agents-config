@@ -12,7 +12,7 @@ loops/
 │   ├── intake.sh            flock + cd ~/code + pi --mode json --print
 │   ├── prompts/scan.md      每轮固定 prompt
 │   └── systemd/intake.{service,timer}
-└── agent-hours/             定时型：读 Pi 插件写的账本，按 session 判 count/skip，写 Clock 并推送
+└── （agent-hours 已迁出至 `~/code/agent-hours`，见 github.com/35iter-cn/agent-hours）
     ├── hours.mjs
     └── systemd/agent-hours.{service,timer}
 ```
@@ -68,3 +68,4 @@ usage 记录里的 `magic` 恒为 `unconfigured`，不影响 relay 与工时判�
 ```bash
 bun loops/agent-hours/hours.test.mjs
 ```
+
