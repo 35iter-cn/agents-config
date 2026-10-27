@@ -42,6 +42,8 @@ One step that handles PR state check to body creation:
 1. **Check PR** — `gh pr view`. No PR / CLOSED → create; OPEN → update.
 2. **Analyze** — `git diff origin/$LMB..HEAD`. Single full diff, same for create and update. Used to generate summary and file list.
 3. **Body** — Always generate a complete PR body. Probe template: `.github/pull_request_template.md` → `docs/PR_TEMPLATE.md` → `.github/PULL_REQUEST_TEMPLATE.md`. Append: summary + file changes + where-to-test + edge cases.
+
+   **Conformance section** — when the work came from a topicbox spec, the body carries a `## Conformance` section: one line per `C-N` id from the spec's `§3.5`, stating satisfied or the trade-off taken, with the file that proves it. A missing section means the spec's conventions were never checked against the diff — fix it before pushing, do not write the section from memory afterwards. Work with no spec (chore, one-off) has no section; do not invent one.
 4. **Push** — `gh pr create` (new) or `gh pr edit --body` (replace entirely). Pass `--attach` for each screenshot of this task in this same command (see Attach screenshots).
 5. **Link backend dependency (frontend PRs)** — If context (diff, issue, conversation) suggests this frontend PR depends on a backend change (new fields/endpoints, companion backend PR), do BOTH:
    - **Body**: add the backend PR link in clickable Markdown — `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)` — in a visible spot (Related Links / dependency note). Never bare text (`backend PR #NNN`), never backticked code style (`` `https://…` ``), never a relative path (`backend/pull/NNN`).
@@ -103,6 +105,7 @@ flowchart TD
 - Replacing the body later with a plain `--body-file` and dropping the previously embedded images.
 - Frontend PR depends on a backend change but ships without the `waiting for backend` label.
 - Writing the backend PR link as bare text (`backend PR #NNN`), backticked code (`` `https://…` ``), or a relative path — none are clickable; always `[backend PR #NNN](https://github.com/MagicDoorInc/backend/pull/NNN)`.
+- A spec-driven PR whose body has no `## Conformance` section — the reviewer becomes the first person to check the project's conventions.
 
 ## Red Flags
 
@@ -111,3 +114,4 @@ flowchart TD
 - Force-push without checking PR state.
 - Rebasing without fetching origin HEAD first.
 - Frontend PR touching a not-yet-deployed backend field/endpoint with no backend PR link in the body and no `waiting for backend` label.
+- Reporting a review as "done" after fixing the code, without classifying the comments or feeding the unwritten ones back into the repo's convention file.

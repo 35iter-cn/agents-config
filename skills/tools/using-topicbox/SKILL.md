@@ -34,6 +34,7 @@ Write every topic document in Chinese — the `STATE.md` body and all artifacts.
 | Continue an existing topic | `topicbox verify <topic>` passes |
 | Quote a spec as current behaviour | read the code first; on drift, report it and ask the user to freeze |
 | Create a plan | Determinism Gate passed + user accepted the spec |
+| Handle review comments on a PR | classify them first — `references/review-feedback.md` |
 | Freeze a spec | explicit user instruction only — never run unprompted |
 | Create/replace a worktree | `topicbox worktree-check` passes |
 | Locate a topic | `topicbox find` — never recursive grep |
@@ -45,6 +46,7 @@ User pressure waives none of these. Main worktree = read-only baseline (dirty tr
 **New topic:** `topicbox init "<hint>"` → `artifact-create <topic> spec <name>` → `gco-latest` repos you read → `references/spec-writing-guide.md`, Determinism Gate → **stop and confirm**; never auto-create the plan in the same pass.
 **Continue:** `find` → `resolve` + read `STATE.md` → `verify` → `gco-latest` → update artifacts and STATE.md in the same turn.
 **Spec → plan:** `artifact-create <topic> plan <spec-id>` after the user accepts the spec; then `references/implementation-flow-guide.md`.
+**Review comments:** classify and feed back via `references/review-feedback.md` before editing code.
 **Code:** only in the topic worktree (`references/worktrees.md`).
 **Non-code work** (guide/investigation/research): `init` + `D-NN` research/notes artifacts; no spec unless the work grows one.
 **Existing written source** (GitHub issue, doc): one pointer artifact naming it — never duplicate its content.

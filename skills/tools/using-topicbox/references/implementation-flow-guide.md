@@ -18,6 +18,7 @@ Do not start execution while any precondition is missing.
 Run this against the plan before the first task. Fix inline if any check fails.
 
 - [ ] Every requirement in the spec maps to a task (by `AC-N` id)
+- [ ] Every task carries the `Conformance:` ids it must honour, and each id exists in the spec's `§3.5`
 - [ ] No TBD, TODO, or vague steps
 - [ ] Names and types are consistent across tasks
 - [ ] Each task is verifiable and self-contained
@@ -49,11 +50,12 @@ If a verification command fails, fix within the task's scope or stop and report.
   - No API / signature changes
   - No state, concurrency, permissions, or error-handling changes
   - One clear verification command covers the change
-- **Whole-diff review** for everything else, or whenever unsure: re-read the full task diff against the spec, then let the GitHub PR reviewer do the human review at handoff (see `pr-handoff`).
+- **Whole-diff review** for everything else, or whenever unsure: re-read the full task diff against the spec, then let the GitHub PR reviewer do the human review at handoff (see `pr-handoff`). A whole-diff review covers two tracks: the `AC` ids the task claims, and the `Conformance` ids it lists — for each `C-N`, record satisfied or violated with the place in the diff, because a violated convention is a defect even when every AC passes.
 
 ### Self-review checklist
 
 - [ ] The diff fully covers the task
+- [ ] Every `Conformance` id checked against the diff, with the verdict recorded
 - [ ] No changes outside the plan
 - [ ] No TBD/TODO comments, hard-coded values, or magic numbers
 - [ ] Verification tests behavior, not just existence

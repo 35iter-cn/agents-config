@@ -43,6 +43,9 @@ Code snippets or pseudocode showing the core logic.
 ### 3.4 Boundary conditions
 Table listing every state combination and its handling.
 
+### 3.5 Conformance
+Table of the written conventions this change must satisfy — see `Conformance` below.
+
 ## 4. Acceptance criteria
 Numbered stable IDs — `AC-1`, `AC-2`, … — checkable items, grouped by scenario tests / regression / manual verification. Plan tasks reference these ids and `verify` cross-checks the references, so numbering is what makes coverage mechanically checkable. Mandatory for new specs; legacy specs are not backfilled (add numbering opportunistically on the next material revision).
 
@@ -84,6 +87,29 @@ When a decision depends on behaviour you have not verified, add a numbered secti
 3. The probe runs before the first edit; its observation goes into the plan and the PR description.
 
 An Assumption check does not violate the Determinism Gate: the **decision** is settled, only the observation is pending. A section that says "we will find out and then decide" does.
+
+## Conformance
+
+The project a spec is written for has its own written rules — layering, naming, test shape, error handling. They are not visible in the acceptance criteria: an `AC-N` says what the app does, never how the code must be arranged. This section is the second track, and it is what the implementation is checked against before a reviewer sees it.
+
+```markdown
+### 3.5 Conformance
+
+| Id | Convention (file:section) | How this spec satisfies it |
+|---|---|---|
+| C-1 | `.knowledge/docs/development-guidelines.md` §Presentation layer rules 1–3 | Copy and grouping are derived in the presenter; the screen renders `Presentable*` only |
+| C-2 | `AGENTS.md` §Tests | Every use case or presentation added here gets its own test file |
+```
+
+Rules:
+
+1. **Cite a written file, never a memory.** Same source rule as `Claims and sources`: an issue, a chat message or a reviewer's habit is not a convention. Point at `file:section` inside the repo.
+2. **Only what this diff touches.** Not a transcription of the convention file — the rules this change can plausibly break.
+3. **Every row must be decidable.** A row is valid only if someone can look at the diff and answer satisfied / not satisfied with a location. "Code quality is good" is not a row.
+4. **Ids are stable.** `C-1 … C-n` are what plan tasks reference; never renumber them once tasks exist. Drop a row only when its rule no longer applies, and say why.
+5. **No written convention is a finding, not a blank.** When the repo has none, write one line — `No written convention found in this repo; scope limited to AC-N` — so the absence is visible instead of looking forgotten.
+
+A convention the reviewer enforces but the repo has not written down is either cited (the file exists and was missed) or fed back into the repo's own convention file; see `review-feedback.md`.
 
 ## Diagram Rules
 
@@ -184,7 +210,12 @@ Fix: any non-trivial flow must have a diagram.
 Symptom: checkboxes, completion percentages, or "done" markers in the spec.
 Fix: the spec is the definition of done; progress lives only in the plan (see `plan-editing-guide.md`).
 
-### 7. Borrowed conclusion
+### 7. Conformance as a transcription
+
+Symptom: `§3.5` pastes dozens of rules from the convention file, none of which the change can break, and no row says how the spec satisfies it.
+Fix: keep only the rules this diff touches, one row each, with the concrete place that satisfies it. The convention file stays the source; the spec carries the projection.
+
+### 8. Borrowed conclusion
 
 Symptom: the spec asserts "the house rule says X" or "the cache caches nulls" because the issue said so.
 Fix: check the code and the written conventions first; a claim that cannot be settled becomes an Assumption check with both dispositions, or moves to Out of scope (see `Claims and sources`).
@@ -257,5 +288,7 @@ After writing the spec, verify:
 - [ ] Out of scope is explicit?
 - [ ] Every code claim checked against repo at the named commit, not against the issue text?
 - [ ] Every rule or convention claim cites a written convention file, or is demoted to a preference?
+- [ ] `§3.5 Conformance` exists, and every `C-N` cites a `file:section` inside this repo?
+- [ ] Every `C-N` is decidable — a specific structural check proves satisfied or violated?
 - [ ] Unverifiable behaviour is an Assumption check with both dispositions, not a "verify later" line?
 - [ ] Consistency pass run over the whole file after the final edit (numbers, cross-references, ids, names)?
