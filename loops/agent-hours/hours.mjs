@@ -480,7 +480,7 @@ export function formatEntry(unit, result, { tz }) {
 }
 
 export function formatReport(fresh, { tz, now = Date.now(), clock = null, today = null } = {}) {
-  if (!fresh.length) return "";
+  if (!fresh.length && !clock) return "";
   const counts = fresh.reduce((acc, item) => {
     acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
     return acc;
@@ -503,17 +503,22 @@ export function formatReport(fresh, { tz, now = Date.now(), clock = null, today 
     lines.push(`今日累计 ${formatDuration(after.minutes)}（${after.segments} 段）`);
     if (before) lines.push(`本轮 ${formatDelta(after.minutes - before.minutes)}`);
   }
-  lines.push(`新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`);
-  if (!after) lines.push(`计入时长 ${formatDuration(countedMinutes)}`);
+  if (fresh.length) {
+    lines.push(`新增 ${fresh.length} 单元 · 计入 ${counts.count ?? 0} · 不计 ${counts.skip ?? 0}${counts.review ? ` · 待确认 ${counts.review}` : ""}${splitCount ? ` · 拆分 ${splitCount}` : ""}`);
+  } else {
+    lines.push("本轮无新增单元");
+  }
+  if (!after && fresh.length) lines.push(`计入时长 ${formatDuration(countedMinutes)}`);
   if (clock) {
-    const wrote = (clock.created ?? 0) + (clock.patched ?? 0);
-    const bits = [`Clock 写 ${wrote} 段`];
+    const bits = [];
+    if (clock.created) bits.push(`新增 ${clock.created} 段`);
+    if (clock.patched) bits.push(`改 ${clock.patched} 段`);
     if (clock.deleted) bits.push(`删 ${clock.deleted} 段`);
     if (clock.covered) bits.push(`人工已记 ${formatDuration(clock.coveredMinutes)}`);
     if (clock.conflict) bits.push(`冲突 ${formatDuration(clock.conflictMinutes)}`);
     if (clock.failed) bits.push(`失败 ${clock.failed}`);
     if (clock.blocked?.length) bits.push(`超限跳过 ${clock.blocked.length} 天`);
-    lines.push(bits.join(" · "));
+    if (bits.length) lines.push(`Clock ${bits.join(" · ")}`);
   }
   return lines.join("\n");
 }
@@ -719,11 +724,14 @@ export async function run({
 
   const clockOutcome = await syncClock({ judged, now, cfg, dir, logDir, dryRun, planOnly: dryRunClock, client: clockClient, log });
 
-  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockOutcome?.summary ?? null, today: clockOutcome && clockOutcome.todayAfter ? { before: clockOutcome.todayBefore, after: clockOutcome.todayAfter } : null });
+  const clockSummary = clockOutcome?.summary ?? null;
+  const clockChanged = Boolean(clockSummary && (clockSummary.created ?? 0) + (clockSummary.patched ?? 0) + (clockSummary.deleted ?? 0) > 0);
+  const report = formatReport(fresh, { tz: cfg.tz, now, clock: clockSummary, today: clockOutcome && clockOutcome.todayAfter ? { before: clockOutcome.todayBefore, after: clockOutcome.todayAfter } : null });
+  const worthNotifying = clockSummary ? clockChanged : fresh.length > 0;
   let delivered = false;
   if (!dryRun) {
     writeDecisions(decisionsFile, pruneDecisions(cache, { now }));
-    if (report && notify && cfg.notify.enabled) {
+    if (report && notify && cfg.notify.enabled && worthNotifying) {
       const sent = notifyImpl(report, { platform: cfg.notify.platform });
       delivered = sent.ok;
       appendEvent({ event: "notify", platform: cfg.notify.platform, ok: sent.ok, chars: report.length, units: fresh.length, ...(sent.ok ? {} : { output: String(sent.output ?? "") }) }, { dir: logDir, now, tz: cfg.tz });
@@ -737,15 +745,16 @@ export async function run({
       acc[item.result.kind] = (acc[item.result.kind] ?? 0) + 1;
       return acc;
     }, {});
+    const notifyLabel = report ? (delivered ? "已发" : clockChanged ? "未发" : "未发（clock 无变更）") : "无新增";
     appendDigest(
-      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${report ? (delivered ? "已发" : "未发") : "无新增"}${openSkipped ? ` · 等 open ${openSkipped}` : ""}`,
+      `- ${formatClock(now, cfg.tz)} 单元 ${candidates.length} / 新增 ${fresh.length}（计入 ${counts.count ?? 0}、不计 ${counts.skip ?? 0}、待确认 ${counts.review ?? 0}）· 飞书 ${notifyLabel}${openSkipped ? ` · 等 open ${openSkipped}` : ""}`,
       { dir, now, tz: cfg.tz },
     );
-    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, openSkipped, calls: calls.n, counts, delivered, notified: Boolean(report) }, { dir: logDir, now, tz: cfg.tz });
+    appendEvent({ event: "round", units: candidates.length, processed: units.length - leftover, leftover, openSkipped, calls: calls.n, counts, delivered, notified: Boolean(report) && worthNotifying }, { dir: logDir, now, tz: cfg.tz });
     if (clockOutcome?.line) appendDigest(`  - clock：${clockOutcome.line}`, { dir, now, tz: cfg.tz });
   }
 
-  return { units: candidates.length, fresh, report, delivered, cache, clock: clockOutcome?.summary ?? null };
+  return { units: candidates.length, fresh, report, delivered, cache, clock: clockSummary };
 }
 
 export function planOperations(plan, { budget = Infinity } = {}) {
@@ -811,13 +820,13 @@ export async function syncClock({
     }
     for (const segment of plan.create) log(`[clock] plan ${iso(segment.start)} → ${iso(segment.end)} (${minute(segment)}min)`);
     return {
-      summary: { targets: plan.targets.length, minutes: plan.minutes, create: plan.create.length, patch: plan.patch.length, remove: plan.remove.length, blocked: plan.blocked, dropped: plan.dropped },
+      summary: { targets: plan.targets.length, minutes: plan.minutes, create: plan.create.length, patch: plan.patch.length, remove: plan.remove.length, created: plan.create.length, patched: plan.patch.length, deleted: plan.remove.length, blocked: plan.blocked, dropped: plan.dropped },
       line: `计划 ${plan.targets.length} 段 / ${formatDuration(plan.minutes)}（新建 ${plan.create.length}、改 ${plan.patch.length}、删 ${plan.remove.length}）`,
     };
   }
 
   const apiKey = readEnvFile(CLOCK_ENV).CLOCK_API_KEY ?? "";
-  if (!apiKey) {
+  if (!apiKey && !client) {
     appendEvent({ event: "clock", action: "error", code: "no-key" }, { dir: logDir, now, tz: cfg.tz });
     log("[error] clock: CLOCK_API_KEY 缺失");
     return { summary: null, line: "未配置 CLOCK_API_KEY" };
@@ -904,6 +913,10 @@ export async function syncClock({
     summary.failed += 1;
     appendEvent({ event: "clock", action: "create-failed", code: result.code, status: result.status, start: iso(segment.start) }, { dir: logDir, now, tz: cfg.tz });
   }
+
+  summary.created = created.length;
+  summary.patched = patched.length;
+  summary.deleted = deleted.length;
 
   if (created.length || patched.length || deleted.length) {
     const byId = new Map(Object.values(synced).flat().map((item) => [item.id, { ...item }]));

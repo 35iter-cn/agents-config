@@ -1,9 +1,8 @@
 [Unit]
-Description=schedule the agent-hours summary at 09:00 and 21:00
+Description=schedule the agent-hours sync every hour
 
 [Timer]
-OnCalendar=*-*-* 09:00:00
-OnCalendar=*-*-* 21:00:00
+OnCalendar=*-*-* *:00:00
 Persistent=true
 AccuracySec=1min
 

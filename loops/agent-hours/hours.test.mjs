@@ -209,6 +209,93 @@ test("a run judges, notifies once and records the notified hash", async () => {
   assert.equal(judge.calls.length, 1);
 });
 
+function fakeClock({ totals = [] } = {}) {
+  const state = { periods: [], listed: [], patches: [], removed: [] };
+  const client = {
+    async daily() {
+      return { ok: true, data: totals };
+    },
+    async list({ start, end }) {
+      const rows = [...state.listed, ...state.periods]
+        .filter((item) => item.end > start && item.start < end)
+        .map((item) => ({ id: item.id, activityId: "a1", start: new Date(item.start).toISOString(), end: new Date(item.end).toISOString() }));
+      return { ok: true, data: { periods: rows, hasMore: false } };
+    },
+    async activities() {
+      return { ok: true, data: [{ id: "a1", name: "clock" }] };
+    },
+    async create({ start, end }) {
+      const id = `p${state.periods.length + 1}`;
+      state.periods.push({ id, start, end });
+      return { ok: true, data: { id } };
+    },
+    async patch(id, { start, end }) {
+      state.patches.push({ id, start, end });
+      return { ok: true, data: { id } };
+    },
+    async remove(id) {
+      state.removed.push(id);
+      state.periods = state.periods.filter((item) => item.id !== id);
+      return { ok: true };
+    },
+  };
+  return { client, state };
+}
+
+function clockSandbox(clock = { enabled: true, activityId: "a1", activityName: "clock" }) {
+  const box = sandbox();
+  writeFileSync(path.join(box.dir, "config.json"), JSON.stringify({ clock }));
+  return box;
+}
+
+const TODAY_TOTAL = [{ date: "2026-10-24", totalDuration: 15 * MINUTE, periodCount: 1 }];
+
+test("a clock write notifies once and a quiet round stays silent", async () => {
+  const { dir, now } = clockSandbox();
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const { client, state } = fakeClock({ totals: TODAY_TOTAL });
+  const sent = [];
+  const notifyImpl = (text) => (sent.push(text), { ok: true });
+
+  const first = await run({ now, dir, judge, clockClient: client, notifyImpl });
+  assert.equal(state.periods.length, 1);
+  assert.equal(first.clock.created, 1);
+  assert.equal(first.delivered, true);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Clock 新增 1 段/);
+
+  const quiet = await run({ now: now + 30 * MINUTE, dir, judge, clockClient: client, notifyImpl });
+  assert.equal(quiet.fresh.length, 0);
+  assert.equal(quiet.clock.created, 0);
+  assert.equal(quiet.delivered, false);
+  assert.equal(sent.length, 1);
+  assert.match(readFileSync(path.join(dir, "digest", "2026-10-24.md"), "utf8"), /未发（clock 无变更）/);
+});
+
+test("new units without any clock change stay silent", async () => {
+  const { dir, now } = clockSandbox({ enabled: true, activityId: "a1", activityName: "clock", minSegmentMinutes: 60 });
+  const judge = fakeJudge([{ choice: "count", confidence: 0.9, probabilities: { count: 0.9, skip: 0.1 }, fallback: null }]);
+  const { client, state } = fakeClock({ totals: TODAY_TOTAL });
+  const sent = [];
+  const outcome = await run({ now, dir, judge, clockClient: client, notifyImpl: (text) => (sent.push(text), { ok: true }) });
+  assert.equal(outcome.fresh.length, 1);
+  assert.equal(state.periods.length, 0);
+  assert.equal(outcome.clock.created, 0);
+  assert.equal(outcome.delivered, false);
+  assert.equal(sent.length, 0);
+});
+
+test("a clock-only round still produces a report", () => {
+  const report = formatReport([], {
+    tz: DEFAULTS.tz,
+    now: Date.parse("2026-10-24T13:00:00.000Z"),
+    clock: { created: 0, patched: 2, deleted: 1, conflict: 0, conflictMinutes: 0, failed: 0, blocked: [] },
+  });
+  assert.match(report, /本轮无新增单元/);
+  assert.match(report, /Clock 改 2 段 · 删 1 段/);
+  assert.equal(formatReport([], { tz: DEFAULTS.tz }), "");
+});
+
 test("review units are queued and a failed notify leaves them un-notified", async () => {
   const { dir, now } = sandbox();
   const judge = fakeJudge([{ choice: null, confidence: null, probabilities: null, fallback: "http_429" }]);
@@ -436,7 +523,7 @@ test("a report without review units omits the review count and adds the clock su
   assert.equal(lines.length, 4);
   assert.match(lines[0], /2026-10-24 21:00/);
   assert.doesNotMatch(lines[1], /待确认/);
-  assert.equal(lines[3], "Clock 写 3 段 · 冲突 29 分钟");
+  assert.equal(lines[3], "Clock 新增 1 段 · 改 2 段 · 冲突 29 分钟");
 });
 
 test("a manual override wins over both the cached verdict and a fresh judge call", async () => {

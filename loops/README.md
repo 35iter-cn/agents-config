@@ -47,6 +47,13 @@ systemctl --user daemon-reload && systemctl --user enable --now intake.timer age
 `~/.config/agent-relay/usage-prompt.json` 提供（`{ instructions, criteria }`）；没有这个文件时
 usage 记录里的 `magic` 恒为 `unconfigured`，不影响 relay 与工时判定本身。
 
+## 调度与通知（agent-hours）
+
+- 每小时整点跑一轮：判定新单元、按 48 小时窗口对齐 Clock 段。
+- 飞书只在 **Clock 真的被改动**时发（本轮新增 / 改 / 删任一段非零）；没改动就静默，只写 digest 与事件流。
+- Clock 未启用或同步失败时退回「有新单元就发」，避免整条链路被静默吃掉。
+- 没发出去的新单元不会标记为已通知，会攒在下一次真正发通知的那轮里一起汇报。
+
 ## 日志
 
 - intake 轮次日志：`~/.config/taskradar/logs/intake/`，每轮自清，保留 72h
