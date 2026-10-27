@@ -26,8 +26,9 @@ loops/
   `~/code/agent-relay/src/judgment/jev.mjs` 动态加载（`AGENT_RELAY_HOME` 可覆盖路径）。
 - **状态、凭据、日志**：`~/.config/agent-relay/`（`0700`/`0600`），由 agent-relay 仓管理；
   intake 自己的四游标 `state.json` 仍在 `~/.config/taskradar/`，relay 不碰它。
-- **升级**：`scripts/relay-upgrade.sh <platform>` 等 `queued|running|answered` 归零后重启
-  `agent-relay@<platform>`，探活要求 MainPID 变化，结束后推一条通知。
+- **升级**：`agent-relay-upgrade <platform>`（脚本在 agent-relay 仓 `scripts/relay-upgrade.sh`）
+  等 `queued|running|answered` 归零后重启 `agent-relay@<platform>`，探活要求 MainPID 变化，
+  结束后推一条通知。
 
 ## 安装
 
