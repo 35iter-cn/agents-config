@@ -14,7 +14,7 @@ loops/
 │   └── systemd/intake.{service,timer}
 └── （agent-hours 已迁出至 `~/code/agent-hours`，见 github.com/35iter-cn/agent-hours）
     ├── hours.mjs
-    └── systemd/agent-hours.{service,timer}
+    └── （agent-hours 的 unit 现在在 ~/code/agent-hours/systemd/）
 ```
 
 ## 与 agent-relay 的接口
@@ -36,19 +36,19 @@ loops/
 # 定时型
 ln -sf "$(pwd)/loops/intake/systemd/intake.service" ~/.config/systemd/user/
 ln -sf "$(pwd)/loops/intake/systemd/intake.timer"   ~/.config/systemd/user/
-ln -sf "$(pwd)/loops/agent-hours/systemd/agent-hours.service" ~/.config/systemd/user/
-ln -sf "$(pwd)/loops/agent-hours/systemd/agent-hours.timer"   ~/.config/systemd/user/
+ln -sf ~/code/agent-hours/systemd/agent-hours.service ~/.config/systemd/user/
+ln -sf ~/code/agent-hours/systemd/agent-hours.timer   ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now intake.timer agent-hours.timer
 ```
 
-## 使用判定（agent-hours）
+## 使用判定（agent-hours，源码在 ~/code/agent-hours）
 
 归属判定只依赖 Jev，不走正则。prompt 分三段：`【话题起始消息】` / `【本轮用户消息】` /
 `【agent 本轮回答（仅供参考，不是用户请求）】`（回答截 400 字）。criteria 与 instructions 由
 `~/.config/agent-relay/usage-prompt.json` 提供（`{ instructions, criteria }`）；没有这个文件时
 usage 记录里的 `magic` 恒为 `unconfigured`，不影响 relay 与工时判定本身。
 
-## 调度与通知（agent-hours）
+## 调度与通知（agent-hours，源码在 ~/code/agent-hours）
 
 - 每小时整点跑一轮：判定新单元、按 48 小时窗口对齐 Clock 段。
 - 飞书只在 **Clock 真的被改动**时发（本轮新增 / 改 / 删任一段非零）；没改动就静默，只写 digest 与事件流。
@@ -66,6 +66,6 @@ usage 记录里的 `magic` 恒为 `unconfigured`，不影响 relay 与工时判�
 ## 测试
 
 ```bash
-bun loops/agent-hours/hours.test.mjs
+bun --cwd ~/code/agent-hours test
 ```
 
