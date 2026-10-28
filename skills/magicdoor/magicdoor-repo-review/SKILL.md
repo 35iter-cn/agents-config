@@ -21,7 +21,7 @@ merge or a re-review request.
 | Source | Where it lives | Role |
 |---|---|---|
 | The repo's own conventions | `backend`: `AGENTS.md` + `.ai-knowledge/INDEX.md` and the guides it routes to. Frontend repos: `AGENTS.md` (or `CLAUDE.md`) + `.knowledge/docs/`. | Written law. Always wins over experience. |
-| Recorded review experience | `~/code/AI-taught-me` — `magicdoor/*`, `code-review/*`; for backend start with `magicdoor/backend-code-review-playbook/`. | Fills the gaps the written docs leave, and records what reviewers actually flag. |
+| Recorded review experience | `~/code/AI-taught-me/code-review/` — one directory, one topic per report, frontend and backend side by side. For backend start with `backend-code-review-playbook/`; otherwise `ls` the directory and pick the entry whose subject matches this PR. | Fills the gaps the written docs leave, and records what reviewers actually flag. |
 
 Do not add a third source. Stack Overflow, a blog, a memory of another repo, or
 your own taste is not a rule. The code is **evidence of what is**, never evidence
@@ -48,9 +48,10 @@ is a convention-versus-debt question, not a review finding.
 1. **Locate the repo and its law.** `git rev-parse --show-toplevel`, then read the
    convention entry file(s) for that repo. Read the sections the diff touches, not
    the whole tree.
-2. **Pull the experience.** `ls ~/code/AI-taught-me/magicdoor ~/code/AI-taught-me/code-review`,
-   then read the entries for this repo and domain (`cheat-sheet.md` first, `report.md`
-   when a rule needs its why). Load the `ai-taught-me` skill for its query workflow.
+2. **Pull the experience.** `ls ~/code/AI-taught-me/code-review` — one directory, one topic per report, no
+   backend/frontend nesting. Read the entries whose subject matches this PR
+   (`cheat-sheet.md` first, `report.md` when a rule needs its why). Load the
+   `ai-taught-me` skill for its query workflow.
 3. **Build a checklist before reading the diff.** One line per rule, tagged
    `conv` (repo doc, with `file:section`) or `kb` (experience, with the entry path).
    A rule that cannot name its source does not enter the checklist.
@@ -75,7 +76,7 @@ is a convention-versus-debt question, not a review finding.
 - A new assertion must guard a real behaviour or an external contract. If you
   cannot state it in one sentence without the words "calls", "returns" or "does
   not call", it is an implementation echo — delete it. See
-  `magicdoor/backend-code-review-playbook` §11 for the full retention rule.
+  `backend-code-review-playbook` §11 in that directory for the full retention rule.
 - Comments explain only a non-obvious *why*. A summary that restates the member
   name gets deleted.
 - A growing diff of new tests is a finding, not thoroughness.
