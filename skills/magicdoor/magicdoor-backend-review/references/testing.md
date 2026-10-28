@@ -4,6 +4,36 @@ Reviewers on this repo read tests as noise unless they lock a contract. Two
 questions decide every test: *what breaks if this assertion is wrong?* and *would
 this test fail if the implementation were subtly incorrect?*
 
+## The standing team rule
+
+Lei set this in a DM on 2026-10-20 and it is the standard every backend PR is
+measured against:
+
+> Keep only what protects a real business behaviour or an important contract for
+the long run, what gives meaningful regression cover — and do not over-constrain
+reasonable evolution. Red tests written during TDD are fine, they can be useful,
+but clean them up before the merge; whatever remains is a standing cost to CI and
+to every later change.
+
+He said the same thing twice in the same conversation: *"be restrained about
+adding tests — the suite is visibly bloating"*, and *"running tests keeps getting
+more expensive"*. Treat a growing diff of new tests as a review finding, not as
+thoroughness.
+
+The operational test for each new test: **name the real behaviour or external
+contract it guards, in one sentence, without using the words "calls", "returns"
+or "does not call".** If you cannot, it is an echo of the implementation — delete
+it, even if it is green and even if it was useful while writing the code.
+
+Worked case (backend#1247, 9 tests trimmed to 6): kept *already-active is a no-op*,
+*reactivation announces itself with the right ids*, *missing property is 404*,
+plus the external use case's three branches (delegates, 404 + no delegation across
+companies, 404 + no delegation when missing). Dropped *"sets Active and returns
+the updated entity"* (restates the change), *"dispatches only the reactivated
+event"* (locks the absence of an event and the call counts) and *"does not refetch
+when the entity is passed"* (locks internal call shape). The external happy path
+stays on purpose: without it an inverted guard passes every remaining test.
+
 ## Keep / delete
 
 | Test | Verdict |
