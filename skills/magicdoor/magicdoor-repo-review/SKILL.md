@@ -21,11 +21,13 @@ merge or a re-review request.
 | Source | Where it lives | Role |
 |---|---|---|
 | The repo's own conventions | `backend`: `AGENTS.md` + `.ai-knowledge/INDEX.md` and the guides it routes to. Frontend repos: `AGENTS.md` (or `CLAUDE.md`) + `.knowledge/docs/`. | Written law. Always wins over experience. |
-| Recorded review experience | `~/code/AI-taught-me/code-review/` — one directory, one topic per report, frontend and backend side by side. For backend start with `backend-code-review-playbook/`; otherwise `ls` the directory and pick the entry whose subject matches this PR. | Fills the gaps the written docs leave, and records what reviewers actually flag. |
+| Recorded review experience | `~/code/AI-taught-me/code-review/` — one directory, one topic per review round, frontend and backend side by side. `ls` it and read the entries whose subject matches this PR: `cheat-sheet.md` first, `report.md` when a finding needs its why. These are records of what was found and how it was fixed, never a rulebook. | Shows how earlier rounds read the same conventions, and fills gaps the written docs leave. |
 
-Do not add a third source. Stack Overflow, a blog, a memory of another repo, or
-your own taste is not a rule. The code is **evidence of what is**, never evidence
-of what should be — cite it to prove a claim, not to invent a rule.
+Do not add a third source, and do not write a third one. No distilled rulebook, no
+"playbook" of general principles — a rule belongs either in the repo's own docs
+(source 1, where the project can own it) or in a round record (source 2, as what
+happened). A free-floating rule list drifts away from both and manufactures the
+conflicts this skill is supposed to surface.
 
 When both sources are silent on a real problem in the diff, say so in the report
 and let the user decide; do not quietly promote your preference to a rule.
@@ -69,14 +71,14 @@ is a convention-versus-debt question, not a review finding.
      `pnpm swagger`-style regeneration only if the API types moved.
 7. **Report** in the chat, not in the PR: findings table (finding / source
    `conv:file:section` or `kb:entry` / attribution / disposition), the conflicts
-   section, and what was deliberately left out with the reason.
+   section, and what was deliberately left out with the reason. When the round
+taught something reusable, write it back as a round record in `code-review/` —
+what was found, what was decided, why — never as a rules chapter.
 
 ## Judgement rules that survive every repo
 
-- A new assertion must guard a real behaviour or an external contract. If you
-  cannot state it in one sentence without the words "calls", "returns" or "does
-  not call", it is an implementation echo — delete it. See
-  `backend-code-review-playbook` §11 in that directory for the full retention rule.
+- A new assertion must guard a real behaviour or an external contract (this is
+  the team's standing rule, applied per round, see `reactivate-property-review`).
 - Comments explain only a non-obvious *why*. A summary that restates the member
   name gets deleted.
 - A growing diff of new tests is a finding, not thoroughness.
