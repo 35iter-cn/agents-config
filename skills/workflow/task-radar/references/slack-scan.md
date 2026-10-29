@@ -23,7 +23,7 @@ sends messages.
    `search_query`.
 2. Thread context: `conversations_replies(channel_id, ts)`; for a top-level
    message also pull `conversations_history` (a few days' window).
-3. Resolve participants against `using-slack/references/identity.md`; note every
+3. Resolve participants against the `magicdoor-people` skill's People table; note every
    @-mention and who was addressed first. `@`-addressing a different owner
    counts as claimed evidence for Q1.
 4. If the message links a GitHub issue, use the issue itself as the primary

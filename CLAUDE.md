@@ -41,7 +41,7 @@ SKILL.md must include frontmatter with `name` and `description`, and a clear wor
 - **`skills/magicdoor/`** — MagicDoor-specific: backend API, portal login, Rush, solid-use-case, work summary, timesheet
 - **`skills/workflow/`** — Spec shipping, PR handoff, grilling, handoff, ai-taught-me
 - **`skills/tools/`** — shared-chrome, frontend-design, update-claude, react-native-android-e2e (emulator build/install/Metro + response injection)
-- **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills.
+- **`skills/private/`** — Personal / sensitive skills. **Gitignored** (`skills/private/` in `.gitignore`). Never commit this directory. Sync locally with `scripts/sync-skills.mjs` like other skills. Holds `magicdoor-people` (the identity directory: name ↔ nickname ↔ Slack ID/DM ↔ GitHub handle ↔ role/language) and `using-slack`, which reads its People table instead of keeping a copy.
 - **`skills/vendor/`** — Third-party skills copied in (not authored here). `skills/vendor/lark/` holds the official lark-cli skills (lark-shared, lark-doc, lark-wiki, lark-markdown, lark-drive) fetched from `https://open.feishu.cn/.well-known/skills/index.json`. Upstream updates: re-fetch, verify sha256 folder hash, diff, then re-sync. sync-skills supports the extra `vendor/lark/` level and registers the skills by their own names.
 
 Each skill directory contains `SKILL.md` with full documentation.
