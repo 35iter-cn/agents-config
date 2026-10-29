@@ -50,12 +50,12 @@ If a verification command fails, fix within the task's scope or stop and report.
   - No API / signature changes
   - No state, concurrency, permissions, or error-handling changes
   - One clear verification command covers the change
-- **Whole-diff review** for everything else, or whenever unsure: re-read the full task diff against the spec, then let the GitHub PR reviewer do the human review at handoff (see `pr-handoff`). A whole-diff review covers two tracks: the `AC` ids the task claims, and the `Conformance` ids it lists — for each `C-N`, record satisfied or violated with the place in the diff, because a violated convention is a defect even when every AC passes.
+- **Whole-diff review** for everything else, or whenever unsure: re-read the full task diff against the spec, then let the GitHub PR reviewer do the human review at handoff (see `pr-handoff`). A whole-diff review covers two tracks: the `AC` ids the task claims, and the `Conformance` ids it lists — for each `C-N`, confirm the disposition the spec recorded actually landed: `Fixed here` exists at the place the spec named, `Accepted here` still costs what the spec said it costs, `Out of scope` was not quietly fixed in passing. A violation the spec never recorded is a scoping failure: stop, amend `§3.5` with the clause and its disposition, then continue — a violated convention is a defect even when every AC passes.
 
 ### Self-review checklist
 
 - [ ] The diff fully covers the task
-- [ ] Every `Conformance` id checked against the diff, with the verdict recorded
+- [ ] Every `Conformance` id checked against the diff, its disposition confirmed, and any unrecorded violation written back into `§3.5`
 - [ ] No changes outside the plan
 - [ ] No TBD/TODO comments, hard-coded values, or magic numbers
 - [ ] Verification tests behavior, not just existence

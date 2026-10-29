@@ -8,7 +8,7 @@ Read this when a PR you handed off comes back — comments, `CHANGES_REQUESTED`,
 
 A review comment is the most expensive signal a project produces: someone read the code against the project's own standards and wrote down where it diverged. Fixing only the code spends that signal once. Classifying it feeds it back, so the same class of comment cannot reach a reviewer twice.
 
-The failure this prevents: a repo has written conventions, a spec never cited them, the reviewer catches fifty violations, the code gets fixed, and the next feature repeats the same fifty because nothing in the workflow recorded that the conventions exist and were skipped.
+The failure this prevents: a repo has written conventions, a spec never cited them, the reviewer catches fifty violations, the code gets fixed, and the next feature repeats the same fifty because nothing in the workflow recorded that the conventions exist and were skipped. The same loop runs the other way when a spec *does* cite them but certifies compliance instead of auditing for violations — the audit reads clean, and the violations it was supposed to catch arrive as review comments.
 
 ## Classify every comment
 
@@ -16,7 +16,7 @@ Each comment lands in exactly one of three buckets. Judge it by searching the re
 
 | Bucket | Test | Action |
 |---|---|---|
-| **A. Written but not honoured** | The rule is in the repo's convention file(s), and the diff violates it | Fix the code, then check the spec's `§3.5 Conformance`: if the rule was listed, the failure is execution (the review gate skipped a `C-N`); if it was not listed, the failure is scoping (the clause was never cited) — say which one in the topic artifact |
+| **A. Written but not honoured** | The rule is in the repo's convention file(s), and the diff violates it | Fix the code, then check the spec's `§3.5`: clause missing from the scan → **scoping** (the convention file was never read); clause present as `No violation` → **misjudgement** (the audit looked at the wrong layer or the wrong diff line); clause present with a disposition → **execution** (`Accepted here` was signed off, or `Fixed here` never landed). Say which one in the topic artifact |
 | **B. Enforced but unwritten** | The reviewer requires it, and no convention file states it | Feed it back into the repo's convention file (or `docs/`), then reference it from the next spec's `§3.5`. This is the only bucket that makes the workflow better than it was |
 | **C. In conflict** | The reviewer requires something the repo's written convention forbids, or two conventions disagree | Record the conflict in one line with both citations, ask the user to decide. Do not silently follow the reviewer, and do not silently follow the file |
 

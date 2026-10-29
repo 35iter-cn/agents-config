@@ -43,8 +43,8 @@ Code snippets or pseudocode showing the core logic.
 ### 3.4 Boundary conditions
 Table listing every state combination and its handling.
 
-### 3.5 Conformance
-Table of the written conventions this change must satisfy — see `Conformance` below.
+### 3.5 Conformance audit
+What this change violates in the written conventions, with a disposition per violation — see `Conformance` below.
 
 ## 4. Acceptance criteria
 Numbered stable IDs — `AC-1`, `AC-2`, … — checkable items, grouped by scenario tests / regression / manual verification. Plan tasks reference these ids and `verify` cross-checks the references, so numbering is what makes coverage mechanically checkable. Mandatory for new specs; legacy specs are not backfilled (add numbering opportunistically on the next material revision).
@@ -90,24 +90,32 @@ An Assumption check does not violate the Determinism Gate: the **decision** is s
 
 ## Conformance
 
-The project a spec is written for has its own written rules — layering, naming, test shape, error handling. They are not visible in the acceptance criteria: an `AC-N` says what the app does, never how the code must be arranged. This section is the second track, and it is what the implementation is checked against before a reviewer sees it.
+The project a spec is written for has its own written rules — layering, naming, test shape, error handling. They are not visible in the acceptance criteria: an `AC-N` says what the app does, never how the code must be arranged. This section is the second track: an audit of the code this spec will change against those rules.
+
+Write it backwards. "How this spec satisfies C-N" is self-certification: an implementation that honours 80% of the rules still fills every row with a confident sentence, and that missing 20% is exactly what the section exists to surface. So the rows record violations and dispositions, and the share that holds gets `No violation` and nothing else.
 
 ```markdown
-### 3.5 Conformance
+### 3.5 Conformance audit
 
-| Id | Convention (file:section) | How this spec satisfies it |
+Scanned: `backend/.ai-knowledge/api-and-controller-conventions.md` (API-1 … API-12), `backend/.ai-knowledge/testing-conventions.md` (TEST-1 … TEST-7), `owner-portal/.knowledge/docs/development-guidelines.md` (Part 2 rules 1 … 16).
+
+| Id | Convention (file:section) | Violation and disposition |
 |---|---|---|
-| C-1 | `.knowledge/docs/development-guidelines.md` §Presentation layer rules 1–3 | Copy and grouping are derived in the presenter; the screen renders `Presentable*` only |
-| C-2 | `AGENTS.md` §Tests | Every use case or presentation added here gets its own test file |
+| C-1 | `.ai-knowledge/api-and-controller-conventions.md` `API-11` | **Violated — pre-existing, this diff adds a fifth site.** Hoa's four list endpoints default to `pageSize ?? 20`; the new one would too. Disposition: `Fixed here` only for the new endpoint (default 50); the four existing ones stay, because changing them is a behaviour change |
+| C-2 | `.knowledge/docs/development-guidelines.md` §Presentation layer rules 1–3 | No violation |
+| C-3 | `AGENTS.md` §Tests | No violation |
 ```
 
 Rules:
 
 1. **Cite a written file, never a memory.** Same source rule as `Claims and sources`: an issue, a chat message or a reviewer's habit is not a convention. Point at `file:section` inside the repo.
-2. **Only what this diff touches.** Not a transcription of the convention file — the rules this change can plausibly break.
-3. **Every row must be decidable.** A row is valid only if someone can look at the diff and answer satisfied / not satisfied with a location. "Code quality is good" is not a row.
-4. **Ids are stable.** `C-1 … C-n` are what plan tasks reference; never renumber them once tasks exist. Drop a row only when its rule no longer applies, and say why.
-5. **No written convention is a finding, not a blank.** When the repo has none, write one line — `No written convention found in this repo; scope limited to AC-N` — so the absence is visible instead of looking forgotten.
+2. **Locate conventions by layer, not by memory.** For every layer this diff touches — controller, DTO, use case, gateway, presenter, screen, type, test — find the file and section that governs it, and walk every clause there. That is what makes the audit cover the diff instead of the parts you happened to remember.
+3. **Name the scan.** One line above the table: which convention files and which clause ranges were walked. Without it, `No violation` and "never looked at it" are indistinguishable, and the audit stops being falsifiable.
+4. **Violations are the body; compliance is one row.** A clause that holds gets `No violation` — not a sentence proving that it holds. Anything longer is self-certification creeping back in.
+5. **Every violation carries exactly one disposition.** `Fixed here` (the design changed — say where in §3.1), `Accepted here` (the diff follows the offending pattern anyway — say why and what it costs), `Out of scope` (pre-existing elsewhere — name the other sites and where it is tracked). A violation without a disposition is an open question: Determinism Gate violation.
+6. **Record the change the rules forbid.** A convention sometimes requires leaving code alone — an `[Obsolete]` forwarding alias, a default existing clients depend on. Write that row as the tempting change you are *not* making and the clause that forbids it, so a later cleanup cannot read as an improvement.
+7. **Ids are stable.** `C-1 … C-n` are what plan tasks reference; never renumber them once tasks exist. Every clause walked keeps its id even when it reads `No violation` — delete the id and the plan's `Conformance:` field has nothing to point at. Drop a row only when the layer it governs is no longer touched, and say why.
+8. **No written convention is a finding, not a blank.** When the repo has none for a layer this diff touches, write one line — `No written convention found in this repo for <layer>; scope limited to AC-N` — so the absence is visible instead of looking forgotten.
 
 A convention the reviewer enforces but the repo has not written down is either cited (the file exists and was missed) or fed back into the repo's own convention file; see `review-feedback.md`.
 
@@ -210,10 +218,10 @@ Fix: any non-trivial flow must have a diagram.
 Symptom: checkboxes, completion percentages, or "done" markers in the spec.
 Fix: the spec is the definition of done; progress lives only in the plan (see `plan-editing-guide.md`).
 
-### 7. Conformance as a transcription
+### 7. Conformance as self-certification
 
-Symptom: `§3.5` pastes dozens of rules from the convention file, none of which the change can break, and no row says how the spec satisfies it.
-Fix: keep only the rules this diff touches, one row each, with the concrete place that satisfies it. The convention file stays the source; the spec carries the projection.
+Symptom: `§3.5` is a table headed "How this spec satisfies it", every row a sentence proving compliance, and the clauses that do not hold are softened ("mostly follows", "except the legacy part") or left out entirely. The spec reads clean and the violations reach the reviewer.
+Fix: audit backwards — name the convention files and clause ranges walked, list each violation with `file:line` evidence and one of the three dispositions, and write `No violation` for the rest (see `Conformance`).
 
 ### 8. Borrowed conclusion
 
@@ -288,7 +296,9 @@ After writing the spec, verify:
 - [ ] Out of scope is explicit?
 - [ ] Every code claim checked against repo at the named commit, not against the issue text?
 - [ ] Every rule or convention claim cites a written convention file, or is demoted to a preference?
-- [ ] `§3.5 Conformance` exists, and every `C-N` cites a `file:section` inside this repo?
-- [ ] Every `C-N` is decidable — a specific structural check proves satisfied or violated?
+- [ ] `§3.5` opens with the scan — which convention files and clause ranges were walked?
+- [ ] Every `C-N` cites a `file:section` inside this repo, and every layer the diff touches has its clauses walked?
+- [ ] Every row that is not `No violation` carries `file:line` evidence and one of `Fixed here` / `Accepted here` / `Out of scope`?
+- [ ] No row explains how the spec satisfies a clause — compliance is `No violation`, never a proof sentence?
 - [ ] Unverifiable behaviour is an Assumption check with both dispositions, not a "verify later" line?
 - [ ] Consistency pass run over the whole file after the final edit (numbers, cross-references, ids, names)?

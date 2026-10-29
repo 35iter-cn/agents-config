@@ -16,7 +16,7 @@ Free-form body: steps, notes, expected output.
 
 - `Status`: `open | in_progress | complete`. `verify` checks the value set and that every `AC:` id exists in the paired spec.
 - `AC`: acceptance criteria ids this task fulfills. Omit only for pure chore tasks — say so in the body.
-- `Conformance`: `C-N` ids from the paired spec's `§3.5 Conformance` that this task has to honour. Omit only for pure chore tasks, and say so in the body. A task that touches a presenter, a use case, a gateway, a screen, a type or a test almost never qualifies as a chore.
+- `Conformance`: `C-N` ids from the paired spec's `§3.5` that this task has to honour — every row marked `Fixed here` whose fix lands in this task must be listed, and a `No violation` row is listed when this task is where the compliance actually lives. Omit only for pure chore tasks, and say so in the body. A task that touches a presenter, a use case, a gateway, a screen, a type or a test almost never qualifies as a chore.
 - `Verify`: exact command plus expected output. A task without a runnable check is unfinished.
 - Legacy plans are not backfilled; apply the template when a plan is materially revised.
 
@@ -36,7 +36,7 @@ Once `Status: complete` (verified + committed), the task's status, verification 
 
 - [ ] Every task uses the template (Status / AC / Conformance / Verify)?
 - [ ] Every `AC:` id exists in the paired spec?
-- [ ] Every `Conformance:` id exists in the paired spec's `§3.5`, and the task body names the place in the diff that satisfies it?
+- [ ] Every `Conformance:` id exists in the paired spec's `§3.5`, and the task body names the place in the diff where its fix or its compliance lands?
 - [ ] No completed task was edited or deleted?
 - [ ] Direction changes recorded as new tasks with supersede markers?
 - [ ] One commit per task?
