@@ -3,7 +3,7 @@ set -euo pipefail
 
 ORG="MagicDoorInc"
 BACKEND="$ORG/backend"
-STATE_FILE="${TASKRADAR_STATE:-$HOME/.config/taskradar/state.json}"
+STATE_FILE="${AGENT_INTAKE_STATE:-$HOME/.config/agent-intake/state.json}"
 
 command -v gh >/dev/null || { echo "gh missing" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq missing" >&2; exit 1; }
@@ -125,7 +125,7 @@ if [ "${1:-}" = "-" ]; then
 fi
 
 out="${1:-}"
-[ -n "$out" ] || out="${TMPDIR:-/tmp}/taskradar-intake/scan.json"
+[ -n "$out" ] || out="${TMPDIR:-/tmp}/agent-intake/scan.json"
 mkdir -p "$(dirname "$out")"
 printf '%s\n' "$json" >"$out"
 printf '%s\n' "$out"

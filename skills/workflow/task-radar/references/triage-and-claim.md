@@ -79,7 +79,7 @@ assigns / 上板 / creates issues.
 
 ## State protocol
 
-Read-write `~/.config/taskradar/state.json` only. Schema keys used here:
+Read-write `~/.config/agent-intake/state.json` only. Schema keys used here:
 `backendKnownCandidates` (source URLs already enqueued), `pending` (loop queue
 with 72h expiry), `watermarks` in `channels`. Writes are tmp + `mv` atomic
 replace; on write failure log `[error]` and do NOT advance watermarks.

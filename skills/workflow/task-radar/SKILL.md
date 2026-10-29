@@ -14,13 +14,13 @@ description: >-
 
 Manage the MagicDoor task intake lifecycle with ONE skill: scan three sources
 read-only, triage candidates, claim after human approval, reconcile board state.
-A companion loop (`loops/intake`) is a pure trigger: it calls scan on a timer and
-runs the DM go/skip protocol; manual invocations decide on the spot and never go
-through pending/DM.
+A timer-driven loop (its own repository, `agent-intake`) is a pure trigger: it
+calls scan every 30 minutes and runs the DM go/skip protocol; manual invocations
+decide on the spot and never go through pending/DM.
 
-State lives ONLY at `~/.config/taskradar/state.json` (watermarks, known board
+State lives ONLY at `~/.config/agent-intake/state.json` (watermarks, known board
 issues, `backendKnownCandidates`, pending queue) — shared atomic read-write with
-the loop; never write state under `loops/intake/`.
+the loop; the loop owns no state of its own.
 
 The board (MagicDoorInc projectV2 #1 "Frontend Tasks") is the single source of
 task state; issues and pull requests are artifacts attached to board tasks.
