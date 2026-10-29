@@ -98,7 +98,7 @@ through one read-only script — never hand-roll these calls:
 skills/workflow/task-radar/scripts/scan-github.sh
 ```
 
-Writes `$TMPDIR/taskradar-intake/scan.json` (created if missing, overwritten
+Writes `$TMPDIR/agent-intake/scan.json` (created if missing, overwritten
 each run) and prints that path — pass `-` to get the JSON on stdout instead, or
 a path to choose the file. If editing its queries: `gh api graphql --input -` body
 must nest cursor variables under `"variables"`; top-level keys are silently

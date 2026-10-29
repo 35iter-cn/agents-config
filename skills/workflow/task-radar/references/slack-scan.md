@@ -1,6 +1,6 @@
 # Task Radar — Slack source (watermark scan)
 
-Source 3 of `scan`. The canonical repo loop (`loops/intake/prompts/scan.md`)
+Source 3 of `scan`. The timer-driven loop (`agent-intake`, its own repository)
 owns the watermark; the skill follows the same protocol when invoked manually.
 Slack writes are forbidden everywhere except the claim path defined in
 `references/triage-and-claim.md` (claim notification reply) — scanning never
@@ -8,7 +8,7 @@ sends messages.
 
 ## Watermark incremental read
 
-- Read `~/.config/taskradar/state.json` → `channels` map (channel → watermark ts)
+- Read `~/.config/agent-intake/state.json` → `channels` map (channel → watermark ts)
   and `lastBoardScan` for cadence context.
 - `conversations_history` per tracked channel (currently `#frontend`), 2–4 day
   lookback window: the result includes the watermark's own message, so判定 sweep
