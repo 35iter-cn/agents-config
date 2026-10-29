@@ -2,192 +2,200 @@
 name: magicdoor-local-debug
 description: >
   Use whenever MagicDoor work needs a local development or verification
-  environment — frontend-only changes included: "本地起一套", "本地联调",
-  起一个模块的验证环境, md up 失败, run the stack locally, test a module
-  against local containers, 本地库 schema 落后要 migrate. ALL local dev goes
-  through the one persistent `hao-local-debug` stack; an npm-script dev server
-  against the cloud backend is not a starting point.
+  environment — frontend changes, backend branch code, and data/schema alike:
+  "本地起一套", "本地联调", 起一个模块的验证环境, md up 失败, run the stack
+  locally, test a module against local containers, 本地验证后端分支代码,
+  backend branch code on the stack, md host, 本地库 schema 落后要 migrate.
+  ALL local dev goes through the one persistent `hao-local-debug` stack; an
+  npm-script dev server against the cloud backend is not a starting point.
 ---
 
 # MagicDoor Local Debug — one persistent md stack
 
-Local MagicDoor development runs on one thing: a local `md` stack — a complete
-copy of the system with its own databases, Kafka topics and hostnames.
-Frontend work is no exception: linking your checkout to the stack replaces the
-frontend container with your own dev server (`md link`), pointed at the stack
-automatically.
+A stack is a complete copy of MagicDoor on this machine: every service, its own
+databases, Kafka topics and hostnames. Development on it means one thing —
+**take over the piece you changed** and leave every other container serving its
+published image.
+
+## Decide first: what are you taking over?
+
+| Your diff touches | What serves it today | Take it over with |
+|---|---|---|
+| `Apps/<Service>/` — backend code | a container running a **master** image | `md host <service>`, your own process answers |
+| a frontend's `src/` | a container | `md link` from that checkout |
+| `Data/*.EntityFramework` — a migration | container Postgres | `md migrate --stack hao-local-debug` |
+| nothing — you are verifying shipped behaviour | containers | nothing |
+
+The predicate is the **diff**, not the symptom. `md` only ever runs registry
+images of **master**, so a branch's backend code is in none of them: an endpoint
+that 404s while your branch adds it is the stack behaving correctly. The answer
+is `md host <service>` (step 2), never a self-built image — md has no notion of
+one, and a `compose.override.yml` that swaps an image is not carried by `md up`.
 
 ## The stack is `hao-local-debug`, and it stays
 
-Every `md` command carries `--stack hao-local-debug`:
+Every `md` command carries `--stack hao-local-debug`. Without it the name is
+derived from the git branch and then bound to whichever checkout you stand in, so
+a worktree or an unfamiliar checkout silently gets a **second** stack: 23 images
+pulled across the border and 14 databases restored from staging. That is the
+slowest thing in this workflow, and the flag is what avoids it.
 
-```bash
-md up --stack hao-local-debug --only <services>
-md down --stack hao-local-debug
-md migrate --stack hao-local-debug
-```
-
-Without the flag, a stack's name is derived from the branch and then bound to
-whichever checkout you stand in — so a worktree, or a checkout you have never
-used for `md`, silently gets a **second** stack: 23 images pulled across the
-border again and 14 databases restored from staging again. That is the slowest
-thing in this workflow, and the flag is what avoids it.
-
-The stack is long-lived. Containers, databases, hostnames, certificates and
-Kafka topics survive between sessions:
-
-- **`md down` ends a session** — containers stop, databases and hostnames stay
-  untouched, and the next `md up` brings the same stack back with its data.
-- **`md nuke` is not a routine step.** The two things it buys — a fresh
-  data baseline and freed OAuth redirect ports — are covered by
-  `md reset --data` and by using exactly one stack. Reserve it for the one
-  case in "Data and schema" below.
-- **Do not run `docker image prune` on the service images.** They are the local
-  cache that makes every later `md up` instant.
+The stack is long-lived — containers, databases, hostnames, certificates and Kafka
+topics all survive between sessions. **`md down` ends a session**: containers and
+linked dev servers stop, data and pinned digests stay, the next `md up` is ready
+in seconds. **`md nuke` is not routine** — `md reset --data` refreshes the data
+and the single-stack convention keeps the OAuth redirect ports free; reserve nuke
+for the one destructive-migration case below. **Do not `docker image prune` the
+service images**: they are the cache that makes every later `md up` instant.
 
 ## The workflow — four steps
 
-1. **UP** — the same full service list, every time:
+### 1. UP — the same full list, every time
 
-   ```bash
-   md up --stack hao-local-debug --only auth,files,portal,business,salesworkflows,subscriptions,communications,maintenance,leasing,settings,companies,accounting,payments,websockets<+,module services if any>
-   ```
+```bash
+md doctor      # Docker memory, registry login, hosts file, DB credentials
+md up --stack hao-local-debug --only auth,files,portal,business,salesworkflows,subscriptions,communications,maintenance,leasing,settings,companies,accounting,payments,websockets
+```
 
-   Backend baseline is a fixed set of **14 services**, observed across a
-   full tenant-portal E2E round (2026-10-10): `auth, files, portal` (login
-   entry + its API) plus `business, salesworkflows, subscriptions,
-   communications, maintenance, leasing, settings, companies, accounting,
-   payments, websockets` (the dependency chain a real shadow-login round
-   exercised). Start all 14 in one shot — do not discover them page by
-   page. Module-specific extras go after. The only services that stay out:
-   `ai, audits, documenttemplates, education, frauddetection, hoa,
-   productexperiences, tenantinsurance, webhooks` — add via the grow loop
-   when a page actually answers 502. All five frontend containers always
-   start (accepted behavior of `--only`).
-2. **LINK** — run `md link` from **two kinds of checkouts**:
+Those 14 are the baseline **every** module starts from: the login entry plus its
+API, then the dependency chain a real shadow-login round exercises. Nine
+services stay out until evidence: `ai, audits, documenttemplates, education,
+frauddetection, hoa, productexperiences, tenantinsurance, webhooks`.
 
-   ```bash
-   cd <portal checkout> && md link
-   ```
+**`--only` is a full list, never a delta.** compose runs with
+`--remove-orphans`, so a re-run naming one service tears the other 15 down. To
+add one, append it to the full list and re-run:
 
-   - **`internal-portal` always** (login entry point): its container is a
-     static SPA baked for the deployed test env — its Sign In button jumps
-     straight to real Google OAuth and the stack's email form never appears.
-     **The sign-in page always shows a "Sign In with Google" button, linked
-     or not** (`SignIn.tsx` has no email form; internal-portal went static
-     nginx in 2026-09-13 #157). The check is the **click** (verified
-     2026-10-11): clicking it redirects to the auth host — on a stack the
-     linked app hits the local auth, which has no `GOOGLE_OAUTH_CLIENT_ID`
-     and so renders the "Local stack sign-in" email form at
-     `auth.hao-local-debug.md.test/internal/local-login`; a jump to real
-     `accounts.google.com` means internal is still containerized — go back
-     and link it. A Google button on the sign-in page is therefore normal,
-     not a linked-state symptom.
-   - **the portal you are working on**: its container is replaced by your dev
-     server (`.env.local` written against `*.md.test`); `md unlink` hands it
-     back.
-3. **VERIFY** — register the target company host **first** (`md add-website
-   <company>` — the shadow-login landing
-   `<company>.with.hao-local-debug.md.test` is not in /etc/hosts before this, and
-   the shadow token expires in **1 minute**, so a DNS probe failure wastes
-   the token too), then open `https://internal.hao-local-debug.md.test` and sign in
-   through
-   the "Local stack sign-in" **email form** (it must be there — see above):
-   use
-   **`hao-ruan@magicdoor.com`** — that address exists in the stack database;
-   any other address creates a brand-new full-permission employee and
-   pollutes the stack. Pick the company → find the user row → **Shadow
-   Login**. Full role-session procedure: `magicdoor-e2e` skill.
-4. **DOWN** — when the verification is done:
+```bash
+md up --stack hao-local-debug --only auth,files,portal,business,salesworkflows,subscriptions,communications,maintenance,leasing,settings,companies,accounting,payments,websockets,hoa
+```
 
-   ```bash
-   md down --stack hao-local-debug
-   ```
+Grow on **evidence only** — a page answers 502 or a fetch fails, and the portal's
+route table (`appProxy.ts` / `viteProxy.ts`) names the service. Never discover
+names by guessing, and never shrink the list in place.
 
-   Containers stop, linked frontend dev servers stop, the proxy detaches.
-   The databases, hostnames and pinned images stay exactly as they were.
-   Next session starts at step 1 and is ready in seconds.
+### 2. TAKE OVER — one axis per change
+
+**Frontend → `md link`**
+
+```bash
+cd <portal checkout> && md link   # container → your dev server, .env.local written against the stack
+md status                          # confirm it shows as linked
+md unlink                          # hand it back when done
+```
+
+`internal-portal` is linked **always**, backend-only rounds included: its
+container is a static SPA baked with deployed config (since 2026-09-13, #157), so
+its sign-in leaves the stack and the local email form never appears. Linking
+changes where the **click** goes. Link the portal you are changing as well.
+
+**Backend service → `md host`**
+
+```bash
+md host hoa --stack hao-local-debug   # container → socat stub, plus a `Stack` launch profile
+md status                             # prints the assigned host port for the hosted service
+dotnet run --project Apps/Hoa/Hoa.App --launch-profile Stack --urls http://0.0.0.0:<port>
+ss -tlnp | grep :<port>               # must be *:<port>, never 127.0.0.1:<port>
+md unhost hoa                         # when done
+```
+
+The port is the one `md` wrote into the `Stack` profile, not whatever
+`launchSettings.json` had before — md allocates from the service's dev port
+upward (5517 for Hoa) and records it, so read it back from `md status`.
+
+The container becomes a socat stub pointing at `host.docker.internal`, so every
+other service keeps calling `http://hoa:8080` and reaches your process. The one
+hard requirement: the process binds `*:<port>`, because loopback kills every
+in-stack S2S call and the failure surfaces in an unrelated place. `md status`
+reports "listening" either way — only `ss -tln` distinguishes them. Symptoms, the
+`ASPNETCORE_URLS` fallback and the rest: `references/md-deep-reference.md`.
+
+### 3. VERIFY — host registration, then sign in
+
+```bash
+md add-website <company>   # <company>.with.hao-local-debug.md.test is not in /etc/hosts until this runs
+```
+
+Open `https://internal.hao-local-debug.md.test`. The page always shows "Sign In
+with Google" — that is normal. **The check is the click:** it must land on the
+stack's "Local stack sign-in" **email form** at
+`auth.hao-local-debug.md.test/internal/local-login`; a jump to real
+`accounts.google.com` means internal-portal is still containerized. Sign in as
+**`hao-ruan@magicdoor.com`** — that row exists in the stack DB, while any other
+address creates a brand-new full-permission employee and pollutes the stack. Then
+pick the company and **Shadow Login** the user row. Shadow tokens expire in **1
+minute**, so register the host first. Full role-session procedure:
+`magicdoor-e2e`.
+
+### 4. DOWN
+
+```bash
+md down --stack hao-local-debug
+```
 
 ## Data and schema — reuse, migrate, rarely rebuild
 
-The databases are the expensive part of a stack (a cross-border `pg_dump`
-per service), so the default is to keep them:
+- **Reuse is automatic.** Only databases that are new or empty are restored from
+  staging; a database with tables is never touched.
+- **Code ahead of the local schema → `md migrate --stack hao-local-debug`**, run
+  from the checkout that carries the migration (it applies that checkout's EF
+  projects). The normal path when master moves on, and the only one needed when
+  your branch adds a migration.
+- **Rebuild the data → `md reset --data --stack hao-local-debug`**: drops and
+  re-restores every database. For rotted test rows or after a destructive
+  migration.
+- **Never substitute mock data for the staging restore.** The dump carries the
+  `custom_domain` clearing that keeps generated URLs on this stack, the
+  `hogwarts` company, and the employee row Shadow Login needs.
+- **The one `md nuke` case:** a destructive migration (dropped or renamed
+  columns, NOT NULL without a default) runs on a scratch stack, never on
+  `hao-local-debug`.
 
-- **Reuse is automatic.** `md up` restores only databases it just created or
-  found empty; a database that already has tables is never touched, and `md up`
-  says so (`every database already has data`).
-- **Code ahead of the local schema → `md migrate --stack hao-local-debug`**,
-  run from the backend checkout that carries the migration (it applies that
-  checkout's EF projects). This is the normal path when master moves on, and
-  the only path needed when your branch adds a migration.
-- **Rebuild the data** with `md reset --data --stack hao-local-debug`: it drops
-  and re-restores the stack databases from staging — the one place the
-  cross-border cost is paid deliberately. Do this when data has rotted (stale
-  test rows, half-finished flows) or after a destructive migration.
-- **Never substitute mock data for the staging restore.** The dump's value is
-  not its volume: it carries the `custom_domain` clearing that keeps generated
-  URLs on this stack, plus the `hogwarts` company and the
-  `hao-ruan@magicdoor.com` employee row that Shadow Login needs. Hand-built
-  seed data breaks that chain and buys nothing.
-- **The one `md nuke` case:** a branch whose migration is destructive (drops
-  or renames columns, adds NOT NULL without a default) runs against a scratch
-  stack, never against `hao-local-debug` — those changes cannot be undone by
-  restoring later. Verify there, then `md nuke <scratch name>`.
+## Images — no branch code will ever be there
 
-## Images — don't re-pull what you already have
+Images are pinned by digest and re-checked at most once per 24 h, so a plain
+`md up` does not talk to the registry. It is contacted only on `-r/--refresh`,
+`--from <tag>` or `md reset --images`.
 
-- Images are pinned by digest and re-checked at most once per 24 h, so a plain
-  `md up` does not talk to the registry at all. Restarting the stack costs
-  nothing over the wire.
-- The cross-border pull happens only on `-r`/`--refresh`, `--from <tag>`, or
-  `md reset --images`. Use one of them when the backend code you are verifying
-  actually changed — and keep the **full** `--only` list while doing it,
-  because compose runs with `--remove-orphans` and any service you drop from
-  the list is torn down.
-- `md up --from <branch-tag>` takes the image built from that branch, which is
-  what you want over `:newest` when verifying your own backend work.
+The registry holds **published** builds: `master`, `dev`, `staging`, and shas
+that were deployed. A feature branch has none — `ci.yml` runs on `pull_request`
+only and publishes nothing, while `service-release.yml` / `service-stage.yml`
+push the `ci-<runid>-<attempt>` tag after merge. So `--from` is not how branch
+code reaches the stack; `md host` is.
 
 ## Common Mistakes (observed in real incidents)
 
-- **`md` without `--stack hao-local-debug` from a worktree or another checkout**
-  — a new branch-named stack appears, and the next `md up` pulls 23 images and
-  restores 14 databases from scratch. Always name the stack.
-- **Starting a "fresh" test by nuking** — use `md reset --data`; it refreshes
-  the data without dropping the hosts entries and the pooled OAuth port.
-- **Module page answers 502** — rare now: the 14-service baseline covers a
-  full E2E round. If it still happens, identify the service from the
-  frontend's route config, then
-  **grow** the list and re-run `md up --only` (additive and idempotent);
-  do not guess service names by trial, and never shrink the list in place
-  (`--remove-orphans` deletes anything outside it).
-- **Signing in through the containerized internal portal** — its static SPA
-  is built with deployed-env config, so the Google button jumps to
-  `accounts.google.com` (redirect URI = deployed auth) instead of the stack
-  email form. On a stack, `internal-portal` must be **linked**.
-- **Full `md up` with no `--only`** — starts all 23 services (including
-  `frauddetection`, 1.4 GB) instead of the 14 the work needs.
+- **Building an image and swapping it in via `compose.override.yml`** — md only
+  pulls registry images, and `md up` regenerates `compose.yml` without the
+  override, so the swap silently reverts. Use `md host`.
+- **`md up --only <just the service you need>`** — `--remove-orphans` tears the
+  rest of the stack down, and for a branch change that service is a master image
+  anyway. Always re-run with the full list plus the addition; with no `--only` at
+  all you get all 23 services, `frauddetection` (1.4 GB) included.
+- **`md` without `--stack hao-local-debug` from a worktree** — a branch-named
+  stack appears and the next `md up` re-pulls 23 images and restores 14
+  databases.
+- **Hosting a backend service on loopback** — the process must listen on
+  `*:<port>`; `127.0.0.1` kills every in-stack S2S call and disguises itself as
+  an unrelated 502, 422 or a login that drops back to `/login`. Check
+  `ss -tlnp | grep :<port>` first.
+- **Signing in through the containerized internal portal** — the Google button is
+  normal; link internal-portal instead of debugging the login.
 - **Dev server fails on a package export error** → stale `node_modules`
-  (`pnpm install --frozen-lockfile`); applies to linked frontends too.
-- **Reaching for `vite build` + preview + faked environments** (`VITE_MD_STACK_DOMAIN`,
-  `/etc/hosts` hacks) instead of the stack — wrong; a linked dev server
-  already targets the stack and its localhost port is whitelisted.
-- **Editing `~/.magicdoor/src`** (the managed CLI checkout — replaced on
-  update). Clone and point `MD_CLI_SOURCE` at the clone instead.
-- **Hosting a backend service on loopback** — after
-  `md host <service> --stack hao-local-debug`, the process you start must
-  listen on `*:<port>`, never `127.0.0.1:<port>`: every S2S call from another
-  container dies, and the symptom shows up somewhere unrelated (a login that
-  falls back to `/login`, a 422 from a third service). Check
-  `ss -tlnp | grep :<port>` before believing anything else; details and the
-  fix in `references/md-deep-reference.md`.
+  (`pnpm install --frozen-lockfile`), in the worktree.
+- **Reaching for `vite build` + preview + faked environments**
+  (`VITE_MD_STACK_DOMAIN`, hand-edited `/etc/hosts`) instead of the stack — a
+  linked dev server already targets the stack and its localhost port is
+  whitelisted.
+- **Editing `~/.magicdoor/src`** (the managed CLI checkout, replaced on update)
+  — clone and point `MD_CLI_SOURCE` at the clone.
 
 ## References
 
-- `references/module-workflow.md` — the detailed four-step workflow and the
-  module → backend services map.
-- `references/md-deep-reference.md` — one-time setup, IDE breakpoints on one
-  backend service (`md host`/`md unhost`), addressing rules, full
-  troubleshooting.
+- `references/module-workflow.md` — the frontend round in detail (link,
+  shadow-login walkthrough, module → backend services map).
+- `references/md-deep-reference.md` — one-time setup, address map, full
+  troubleshooting list, red flags.
 
 ## Related
 
