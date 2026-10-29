@@ -58,7 +58,8 @@ assigns / 上板 / creates issues.
   its registry. Backend-claim add+delete round-trip verified 2026-10-13.
 - Slack claim reply (C3): same channel, `thread_ts` = source message ts;
   report issue link + board status + likely root cause; @-mention the reporter
-  via `using-slack/references/identity.md` and its language/audience rules;
+  via the `magicdoor-people` skill (People table: Slack ID, DM channel, GitHub handle, audience
+  class, language);
   thread reply sends directly (no draft confirmation).
 - After claiming: create the topic (`topicbox init`) and write the spec per the
   `using-topicbox` skill; **ends at spec confirmation** —
