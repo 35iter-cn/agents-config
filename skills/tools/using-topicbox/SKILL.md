@@ -30,7 +30,7 @@ Write every topic document in Chinese — the `STATE.md` body and all artifacts.
 | Write or edit project code | `topicbox guard <topic>` returns `ok` in the topic worktree |
 | Create a numbered artifact | `topicbox artifact-create` — never `write` |
 | Edit the STATE.md body — any change | read `references/state-md-writing-guide.md` first |
-| End a turn of topic work — milestone, decision, PR push, blocker, or any break | STATE.md body updated **and committed in the same turn** |
+| End a turn of topic work — milestone, decision, PR push, blocker, or any break | STATE.md body updated, committed **and pushed** in the same turn |
 | Continue an existing topic | `topicbox verify <topic>` passes |
 | Quote a spec as current behaviour | read the code first; on drift, report it and ask the user to freeze |
 | Create a plan | Determinism Gate passed + user accepted the spec |

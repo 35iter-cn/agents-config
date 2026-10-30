@@ -1126,6 +1126,13 @@ function collectVerifyWarnings(topic, state, specFiles, planFiles) {
     warns.push(`topicbox 仓库有未提交的修订(git status 非空)——实质修订必须同 turn git commit`);
   }
 
+  if (runGit(sessionsRoot(), 'remote')) {
+    const unpushed = runGit(sessionsRoot(), 'rev-list --count HEAD --not --remotes');
+    if (unpushed && Number(unpushed) > 0) {
+      warns.push(`topicbox 有 ${unpushed} 个提交未 push 到远端——同 turn 必须 git push`);
+    }
+  }
+
   return warns;
 }
 

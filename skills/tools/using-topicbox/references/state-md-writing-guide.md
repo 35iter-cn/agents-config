@@ -6,7 +6,7 @@
 - **The body is LLM-owned and actively maintained.** Keep a `# Session State` summary (spec progress, worktree status, artifacts) plus durable conclusions — decisions, milestones, architecture notes worth carrying across sessions. The CLI preserves the body when it rewrites STATE.md.
 - `artifacts:` entries are `{ id, name, type, file }`, where `type` is `research | handoff | uat-case | notes` and `file` is the basename (e.g. `02-bar.research.md`).
 - **Update the body at every turn boundary, not at milestones.** A milestone, a settled decision, a PR push, a blocker, or simply stopping to break — each of these ends a turn, and the turn's last action is: update the body, commit it. Assume the session can die at any moment; the next reader resumes from STATE.md alone, so what is not written there does not exist.
-- **Body revisions are committed in the same turn.** Material changes to the body land in the topicbox git repo with a one-line commit message; the diff carries the detail. The topicbox root is a git repo; worktrees are gitignored.
+- **Body revisions are committed and pushed in the same turn.** Material changes to the body land in the topicbox git repo with a one-line commit message; the diff carries the detail. The topicbox root is a git repo; worktrees are gitignored. When the repo has a remote, push in that same turn — a commit that exists only on this machine is not recovery, it dies with the disk (`verify` warns on unpushed commits).
 
 ## Body writing rules (dashboard + index)
 
