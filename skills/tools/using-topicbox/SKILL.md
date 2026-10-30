@@ -1,6 +1,6 @@
 ---
 name: using-topicbox
-description: Locating, resuming, or reporting on past work by PR, branch, repo, date, or keyword — read-only lookups included, anything the user calls a "topic" counts — always starts with `topicbox find`, never manual grep/ls. Also required before editing files for any task (any size) and for recoverable output (spec, plan, report, handoff). Load before the first tool call.
+description: Locating, resuming, or reporting on past work by PR, branch, repo, date, or keyword — read-only lookups included, anything the user calls a "topic" counts — always starts with `topicbox find`, never manual grep/ls. Also required before editing files for any task (any size) and for recoverable output (spec, plan, report, handoff, review document). Load before the first tool call.
 ---
 
 # Using Topic Box
@@ -34,6 +34,7 @@ Write every topic document in Chinese — the `STATE.md` body and all artifacts.
 | Continue an existing topic | `topicbox verify <topic>` passes |
 | Quote a spec as current behaviour | read the code first; on drift, report it and ask the user to freeze |
 | Create a plan | Determinism Gate passed + user accepted the spec |
+| Hand the user a review document for a spec | prototype sketch when the change is visible in a UI; conformance table complete and re-marked to the current design — `references/review-doc-guide.md` |
 | Handle review comments on a PR | classify them first — `references/review-feedback.md` |
 | Freeze a spec | explicit user instruction only — never run unprompted |
 | Create/replace a worktree | `topicbox worktree-check` passes |
@@ -99,4 +100,4 @@ Topic name: `YYYY-MM-DD-<semantic>-<adj>-<noun>`. Specs/plans: `NN-<name>.{spec,
 
 ## References
 
-`spec-writing-guide.md` / `plan-editing-guide.md` / `implementation-flow-guide.md` / `handoff-writing-guide.md` author specs, plans, execution, handoffs; `worktrees.md`, `locating-topics.md`, `state-md-writing-guide.md` cover the replace flow, `find`/`pr-add`, and the STATE.md body rules.
+`spec-writing-guide.md` / `plan-editing-guide.md` / `implementation-flow-guide.md` / `handoff-writing-guide.md` author specs, plans, execution, handoffs; `review-doc-guide.md` covers the document a spec is presented in for review; `worktrees.md`, `locating-topics.md`, `state-md-writing-guide.md` cover the replace flow, `find`/`pr-add`, and the STATE.md body rules.

@@ -116,6 +116,7 @@ Rules:
 6. **Record the change the rules forbid.** A convention sometimes requires leaving code alone — an `[Obsolete]` forwarding alias, a default existing clients depend on. Write that row as the tempting change you are *not* making and the clause that forbids it, so a later cleanup cannot read as an improvement.
 7. **Ids are stable.** `C-1 … C-n` are what plan tasks reference; never renumber them once tasks exist. Every clause walked keeps its id even when it reads `No violation` — delete the id and the plan's `Conformance:` field has nothing to point at. Drop a row only when the layer it governs is no longer touched, and say why.
 8. **No written convention is a finding, not a blank.** When the repo has none for a layer this diff touches, write one line — `No written convention found in this repo for <layer>; scope limited to AC-N` — so the absence is visible instead of looking forgotten.
+9. **A disposition describes the current design, not its history.** Every row is re-derived whenever the design moves, and a decision moves it in both directions: a decision that brings the code back inside the convention turns `Accepted here` or `Out of scope` into `No violation`, or into `Fixed here` when the change also has to repair the existing call sites; a decision that widens scope turns `No violation` into `Accepted here`. A row that still describes a superseded decision is wrong even though it was right when written — revising the spec means re-marking this table, and the review document built from it (`review-doc-guide.md`).
 
 A convention the reviewer enforces but the repo has not written down is either cited (the file exists and was missed) or fed back into the repo's own convention file; see `review-feedback.md`.
 
@@ -299,6 +300,7 @@ After writing the spec, verify:
 - [ ] `§3.5` opens with the scan — which convention files and clause ranges were walked?
 - [ ] Every `C-N` cites a `file:section` inside this repo, and every layer the diff touches has its clauses walked?
 - [ ] Every row that is not `No violation` carries `file:line` evidence and one of `Fixed here` / `Accepted here` / `Out of scope`?
+- [ ] Every non-`No violation` row still describes the design in this version — re-derived after the last decision, not carried over from an earlier one?
 - [ ] No row explains how the spec satisfies a clause — compliance is `No violation`, never a proof sentence?
 - [ ] Unverifiable behaviour is an Assumption check with both dispositions, not a "verify later" line?
 - [ ] Consistency pass run over the whole file after the final edit (numbers, cross-references, ids, names)?
