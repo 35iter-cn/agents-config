@@ -1,5 +1,8 @@
 # Gotchas (observed in this environment)
 
+- **`type` needs a selector**: `type @e975 "addr"`. Passing the text alone is parsed as a selector and fails silently (exit 0, nothing typed) — use `keyboard type` only for a focused contenteditable (Gmail body, editors).
+- **`screenshot` takes the path positionally**: `screenshot /tmp/x.png`, not `screenshot -o /tmp/x.png` (the `-o` is read as a selector: "Element not found: -o").
+- **`tab_gone` mid-task** usually means another session or the human closed the bound tab, not that the session died: `tab list` → `tab t<N>` rebinds, and `@eN` refs from the previous snapshot keep working.
 - **`screenshot` can hang** (`Page.captureScreenshot` timeout) on canvas/media-heavy pages and chrome:// pages. Retry on a simpler page, or use `--screenshot-format jpeg --screenshot-quality 80` into an existing directory.
 - **Avoid `wait --load networkidle`** on SSE/WebSocket-heavy pages (portals, dashboards); use `wait --text`, `--url`, or `--fn`.
 - **Headless hides scrollbars**; the shared Chrome over `connect` is headed and unaffected.

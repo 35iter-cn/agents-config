@@ -48,3 +48,10 @@ The linked card must already tell the truth.
 2. Take the month's PRs from the sheet's PR LINK column, then resolve PR → card with the evidence ladder above (batch GraphQL, 8–10 aliases per call).
 3. Build `day → [cards]`, one link per line, and `set "<E><row>" file` per day — serial, retry on 401 or SSL EOF.
 4. Verify with one batch `get` of the full range plus a local diff, then report coverage and every status change.
+
+## Gotchas hit doing 2026/10
+
+- Columns in `get '<B5:G35>'` rows are offset by the range start: B=0, C=1, D=2, E=3, F(PR LINK)=4, G=5. Reading index 5 silently yields zero PR links instead of an error.
+- GraphQL `-f query=` needs JSON double quotes around owner/repo; Python `%r` emits single quotes and gh answers `Expected VALUE, actual UNKNOWN_CHAR`.
+- Cross-references miss PRs whose body never mentions the issue (owner-portal#92 distributions, #114 HOA, #107 leases all needed a title match), so the ladder always ends with the title step.
+- `mdsheet` intermittently returns `TLS connect error: unexpected eof` — serial retry, 3 attempts, then move on.
