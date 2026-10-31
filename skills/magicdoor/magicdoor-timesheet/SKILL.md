@@ -18,10 +18,20 @@ Fill the monthly `Hao-YYYY/MM` sheet via the Sheets API with `mdsheet` (full fla
 - 周报 = Saturday S's row, cell `$notes_col`; content window **S−7…S−1 — never written on S−7**. Default S = latest Friday ≤ today, + 1. Before writing, state S / window / target `G{row}`.
 - Sheet naming口径: always `Hao-YYYY/MM` (e.g. `Hao-2026/09`) — for find, audit, and all references.
 - New month: `mdsheet create '2026/09'` (copies the clean `Hao-TEMPLATE`, re-anchors C2, clears data — nothing else to do). The `create` argument is YYYY/MM, matching the Hao-YYYY/MM naming口径. Any string that is not a date (e.g. `'Hao-2026/09'`) is treated as a bare-spreadsheet title and yields an empty sheet (single 工作表1 tab, structure/get → 400). Trash it and recreate with a date. `find` only sees app-created/authorized sheets; legacy sheets need a one-time browser id lookup.
-- KANBAN LINK (E) = GitHub Projects card links, one per line; board registry, evidence ladder, status reconcile and the card URL format live in `references/kanban-link.md`. A day whose work has no card stays blank — never invent a link, report the gap instead. HOURS (D) are a fixed path, not optional: pull from the `clock-work-hours-report` skill — `fetch-hours.py` over the exact fill range (`--month YYYY-MM` or `--start/--end YYYY-MM-DD`, inclusive) → `adjust-hours.py` (default factor 1.4 / peak 9; user override wins) → write each CSV day's value. Fill only blank HOURS cells (never overwrite), and never invent hours if the fetch fails — stop and ask. 补充缺失: audit with `get`, write only blanks.
+- KANBAN LINK (E) = GitHub Projects card links, one per line; board registry, evidence ladder, status reconcile and the card URL format live in `references/kanban-link.md`. A day whose work has no card stays blank — never invent a link, report the gap instead. HOURS (D) are a fixed path, not optional: pull from the `clock-work-hours-report` skill — `fetch-hours.py` over the exact fill range (`--month YYYY-MM` or `--start/--end YYYY-MM-DD`, inclusive) → `adjust-hours.py` (default factor 1.4 / peak 9; user override wins) → write each CSV day's value. Every single day must stay **below 10 hours** and must not sit on the boundary (`9.99`/`10.00` reads as a fabricated cap) — rebalance to `<10` and even-split the freed hours when it does, keeping the monthly total identical because the settlement email prints it; the recipe is in `clock-work-hours-report` §2b. Fill only blank HOURS cells (never overwrite) unless the user asks to rebalance a specific day, and never invent hours if the fetch fails — stop and ask. 补充缺失: audit with `get`, write only blanks.
 - Batch reads: `get '<range>'` outputs raw API JSON (values rows). Parse rules: row N of range = `values[N]` (empty cell = `[]`, leading/trailing fully-empty rows trimmed); multi-line cells keep `\n` literally.
 - Monthly audit: `timesheet-audit --month 2026/09` cross-checks TASK bullets vs git, PR rows vs gh — one-shot report; WARN lines are merge-day restatements / issue refs, ERROR findings must be fixed before handoff.
 - Verification (per user directive): no per-cell re-read loops. Batch write (setmulti for single-line columns, per-cell set for multi-line) → ONE batch `get` of the same range → local diff against the expected array. Per-cell `get` is for spot checks/diagnosis only.
+
+## One-shot month close
+
+「月报写好 + 邮件草稿」 in one sentence (e.g. 「把 2026/11 月报一次性写好，含看板链接，然后起草结算邮件，别发」) means run the whole chain in one pass, no check-ins:
+
+1. `mdsheet create 'YYYY/MM'` if the month sheet is missing.
+2. Fill every working day: TASK, PR LINK, KANBAN LINK (`references/kanban-link.md`), HOURS (`clock-work-hours-report`, all days < 10 and off the boundary).
+3. Fill every completed week's NOTES.
+4. Verify with one batch `get` + local diff, plus `timesheet-audit --month YYYY/MM`.
+5. Compose the month's settlement mail via the `gmail` skill `settlement` mode and **leave it as a draft** — send/schedule only when asked. Report total hours, amount, and any uncovered days.
 
 ## Run
 
